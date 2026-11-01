@@ -1,90 +1,104 @@
-# wcx-zygisk（移植自上游 WeKit 的 Zygisk 注入器）
+# wcx-zygisk（Zygisk 独立注入器）
 
-本目录是从 **Ujhhgtg/WeKit**（同为 GPL-3.0）移植过来的 Zygisk 独立注入器：
-纯 Rust + 少量 C++（LSPlant 桥），自带 ARM64 inline hook 与 ELF 符号解析，
-**不依赖 Xposed/LSPosed**，刷 zip（= APK 改后缀）即可注入微信。
+刷一个 zip 就能让 WCX 注入微信，**不需要 LSPosed**。注入器移植自上游 **Ujhhgtg/WeKit**
+（同为 GPL-3.0），并针对本仓库与 Android 16 做了修正。
 
-## 为什么不用自己从零写
+## 产物
 
-上一轮从零实现的注入器在真机上卡在 LSPlant：Android 16 的 libart 移除了
-`ClassLinker::SetEntryPointsToInterpreter` 等符号（LSPlant 6.4 直接 `Init` 失败），
-而 LSPlant master 又要求 C++23 `import std` 工具链（NDK 的 CMake 探测不过）。
-上游这套实现已经在你那台 Android 16 设备上跑通，直接移植风险最低。
-
-## 结构
+`./x build --release`（或 `./gradlew assembleRelease`）后额外产出：
 
 ```
-wcx-zygisk/
-├── native/                 Rust crate（cargo 编出 libwcx_zygisk.so）
-│   ├── build.rs            用 cmake crate 驱动 CMake：编 xz + LSPlant + lsplant_bridge
-│   ├── CMakeLists.txt      静态编 third_party/xz-embedded 与 third_party/lsplant
-│   ├── cpp/lsplant_bridge.cpp  C 导出：wekit_lsplant_init/hook/unhook/deoptimize
-│   └── src/
-│       ├── lib.rs          zygisk_module_entry / 生命周期回调
-│       ├── lifecycle.rs    pre/post specialize：读 module.apk、建 InMemoryDexClassLoader、
-│       │                   原生里 init LSPlant + trust class loader、调 Kotlin ZygiskEntry.init
-│       ├── art/            自研 ARM64 inline hook + libart ELF 符号解析（Android 16 可用）
-│       ├── apk.rs          module.apk 里取 dex / 解压原生库
-│       ├── payload.rs      InMemoryDexClassLoader 构造
-│       ├── natives.rs      RegisterNatives（ArtHookBridge / ZygiskEntry）
-│       └── so_hider.rs     抹掉自身在 /proc/self/maps 的痕迹
-├── module.prop             模块信息
-├── customize.sh            SKIPUNZIP=1：把整包自身复制成 module.apk + 只解出脚本与 zygisk/*.so
-├── uninstall.sh / sepolicy.rule
-└── README.md
+app/build/outputs/zygisk/wcx-<版本>-arm64-v8a.apk   # 可安装 APK + 可刷模块包（同一份字节）
+app/build/outputs/zygisk/wcx-<版本>-arm64-v8a.zip   # 上者副本，方便直接刷
 ```
 
-Kotlin 侧（`app/src/main/java/com/Johnny/wcx/loader/`）：
+刷入方式：把 `.apk` 改名成 `.zip`（或直接用产物里的 `.zip`）在 Magisk / KernelSU / APatch 刷入。
+`customize.sh` 用 `SKIPUNZIP=1`，只做三件事：
 
-- `entry/zygisk/ZygiskEntry.kt` — 原生调用入口 `init(processName, dataDir, apkPath)`，
-  hook `LoadedApk.createAppFactory` → `AppComponentFactory.instantiateClassLoader` 拿到**最终**宿主 ClassLoader，
-  然后 `ModuleLoader.init(...)`
-- `entry/zygisk/ArtHookBridge.kt` + `ArtHookBridgeRuntime.kt` — `IHookBridge` 的 LSPlant 实现（含 backup 等待）
-- `entry/zygisk/ZygiskLoaderService.kt` — `ILoaderService` 实现
-- `utils/ZygiskNativePayload.kt` / `loader/utils/NativeLoader.kt` — 从 `module.apk` 解出并 `System.load` 原生库
+1. 把**整包自身**复制成 `$MODPATH/module.apk`（注入器在目标进程里读它，dex + 资源都在里面）
+2. 把 APK 内的 `lib/arm64-v8a/libwcx_zygisk.so` 搬到 `$MODPATH/zygisk/arm64-v8a.so`
+3. 落地 `module.prop` / `uninstall.sh`
 
-## 依赖的固定版本（已验证能编过 Android 16）
+> 注意：`zygisk/` 目录里只能有 `<abi>.so` 一个文件。Zygisk(Next) 会把这个目录里的
+> `.so` 都当候选模块库，多放一个没有 `zygisk_module_entry` 的库会导致整个模块被静默跳过。
+
+## 运行时链路
+
+```
+preAppSpecialize（zygote 特权）
+  ├─ 目标判定：默认 com.tencent.mm（可用 <模块目录>/target.list 覆盖，一行一个包名）
+  ├─ get_module_dir() 拿到模块目录（不依赖 root companion）
+postAppSpecialize（sandbox）
+  ├─ openat(module.apk) → 读出 classes*.dex
+  ├─ InMemoryDexClassLoader（parent = 系统 ClassLoader）
+  ├─ 原生侧 lsplant::Init（Dobby 做 inline hook）+ MakeDexFileTrusted
+  ├─ RegisterNatives（ZygiskEntry / ArtHookBridge）
+  └─ ZygiskEntry.init(processName, dataDir, apkPath)
+        ├─ LoadedApk.createAppFactory → AppComponentFactory.instantiateClassLoader
+        ├─ 拿到**最终**宿主 ClassLoader
+        └─ ModuleLoader.init → UnifiedEntryPoint → Application.attachBaseContext →
+           Instrumentation.callApplicationOnCreate → StartupAgent → FeaturesLoader
+```
+
+## 与上游的两处关键差异（都已在真机验证）
+
+| 问题 | 现象 | 处理 |
+|---|---|---|
+| 上游自研 Rust inline hook | Android 16 上对 `Class::SetStatus`、`VisiblyInitializedCallback::MarkVisiblyInitialized` 等 ART 函数重定位出错，进程启动即 SIGILL | 换成 **Dobby**（`third_party/dobby` 静态链入）作为 LSPlant 的 `inline_hooker`；并让符号解析跳过 `VisiblyInitializedCallback` 的两个可选 hook |
+| 上游用 root companion + WebUI 授权 | 未配置时永远不注入，且需要 `config.sh`/`webroot` 一整套 | 改成读 `<模块目录>/target.list`，默认注入 `com.tencent.mm`（命中包名的所有进程，含子进程） |
+
+## 依赖的固定版本
 
 | 组件 | 版本 | 说明 |
 |---|---|---|
-| `third_party/lsplant` | `d8b5d1dbb664abc606644036822e4bb64547edf6` | 该提交的 CMake 只在 `LSPLANT_STANDALONE=ON` 时才 `find_package(cxx)`，且源码不用 `import std;` |
-| `third_party/xz-embedded` | `ae63ae3a36ed01724674e8f3d750dc47bf125410` | module.apk 解压（deflate/xz） |
-| LSPlant 内嵌 `dex_builder` | `ac7fb2230954ee311808bad469b0db501f31bfb8` | 需要 `--init` 其 `external/parallel_hashmap` |
-| Android NDK | `30.0.14904198` | `ANDROID_STL=c++_static`（产物自包含，不依赖 libc++_shared） |
+| `third_party/lsplant` | `d8b5d1dbb664abc606644036822e4bb64547edf6` | 该提交不用 `import std;`、`find_package(cxx)` 仅在 `LSPLANT_STANDALONE=ON` 时触发 |
+| LSPlant 内嵌 `dex_builder` | `ac7fb2230954ee311808bad469b0db501f31bfb8` | 需 `--init` 其 `external/parallel_hashmap` |
+| `third_party/dobby` | LSPosed/Dobby master | inline hook 引擎（Android 16 可用） |
+| `third_party/xz-embedded` | `ae63ae3a36ed01724674e8f3d750dc47bf125410` | module.apk 解压 |
+| Android NDK | `30.0.14904198` | `ANDROID_STL=c++_static`，产物自包含 |
 
 ## 构建
 
 ```bash
-git submodule update --init --recursive third_party/lsplant third_party/xz-embedded
-cd third_party/lsplant && git submodule update --init --recursive \
-  lsplant/src/main/jni/external/dex_builder \
-  lsplant/src/main/jni/external/dex_builder/external/parallel_hashmap
+git -c submodule.third_party/lsplant.update=checkout submodule update --init \
+    third_party/lsplant third_party/xz-embedded third_party/dobby
+git -C third_party/lsplant submodule update --init lsplant/src/main/jni/external/dex_builder
+git -C third_party/lsplant/lsplant/src/main/jni/external/dex_builder \
+    submodule update --init external/parallel_hashmap
 
 export WCX_ANDROID_NDK=/path/to/ndk/30.0.14904198
 export WCX_ANDROID_API=28
+export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=\
+"$WCX_ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android28-clang"
+
 cargo build -p wcx-zygisk --target aarch64-linux-android --release
-# 产物：target/aarch64-linux-android/release/libwcx_zygisk.so
+cp target/aarch64-linux-android/release/libwcx_zygisk.so \
+   app/src/main/jniLibs/arm64-v8a/libwcx_zygisk.so
+./gradlew packageZygiskApk        # 产物在 app/build/outputs/zygisk/
 ```
 
-产物校验（应当只有系统库依赖）：
+产物校验：`NEEDED` 只应有 `liblog/libz/libdl/libc`，`llvm-nm -D` 应导出 `zygisk_module_entry`。
+
+## 真机验证记录（Android 16 / WeChat 8.0.79 / KernelSU + Zygisk Next）
 
 ```
-NEEDED: liblog.so libz.so libdl.so libc.so
-$ llvm-nm -D --defined-only libwcx_zygisk.so | grep zygisk_module_entry   # T zygisk_module_entry
+Zygisk: com.tencent.mm 在注入名单内
+Zygisk: preAppSpecialize OK for com.tencent.mm
+Zygisk: LSPlant initialized
+Zygisk: trusted 1 DexFile(s) for class loader 0x...
+Zygisk: ZygiskEntry natives registered
+ZygiskEntry: ZygiskEntry.init: process=com.tencent.mm apk=/data/user/0/com.tencent.mm/files/mmkv/.wcx-bootstrap-<hash>.apk
+Zygisk: ArtHookBridge natives registered
+ZygiskEntry: hooked AppComponentFactory.instantiateClassLoader on android.app.AppComponentFactory
+ZygiskEntry: WCX module started with host ClassLoader=dalvik.system.PathClassLoader[...com.tencent.mm.../base.apk...]
+FeaturesLoader: enabling all hook items took ~85ms
+ProxyInstrumentation: callActivityOnCreate: com.tencent.mm.app.WeChatSplashActivity
+HomeSidePanel: 左边缘右滑触摸条已挂载
 ```
 
-## 运行时流程
+## 已知问题 / 待办
 
-1. 刷入后模块目录：`module.apk`（整包副本）+ `zygisk/arm64-v8a.so` + 脚本
-2. `preAppSpecialize`：只放行目标进程（默认 `com.tencent.mm`），拿 module dir fd、读 `module.apk`
-3. `postAppSpecialize`：从 `module.apk` 读 dex → `InMemoryDexClassLoader`；
-   **原生里** `lsplant::Init` + `MakeDexFileTrusted`（避开 Java 层 HiddenApiBypass 崩溃）；
-   `RegisterNatives` 后调 `ZygiskEntry.init(processName, dataDir, apkPath)`
-4. Kotlin：hook `createAppFactory`/`instantiateClassLoader` 拿最终 CL → `ModuleLoader.init(...)`
-
-## 待办
-
-- [ ] `app/src/main/java/.../features/**` 剩余 `.method` / `invokeOriginal` 迁移收尾（当前编译未通过）
-- [ ] 打包接线：让 `PackageZygiskApkTask` 用本目录模板、把 `libwcx_zygisk.so` 打进 APK 的 `lib/arm64-v8a/`
-- [ ] 移除旧的 `zygisk/`（CMake + LSPlant 6.4）模块
-- [ ] CI：`cargo xtask`/workflow 里准备 LSPlant 子模块并设置 `WCX_ANDROID_NDK` / `WCX_ANDROID_API`
+- 个别 feature 与 WeChat 8.0.79 类名不匹配（例如 `com.tencent.mm.plugin.multitalk.ui.MultiTalkMainUI`
+  已不存在），会持续刷 `NoClassDefFoundError`。属于 feature 维护问题，与注入链路无关。
+- 设置 UI 仍依赖已安装的 WCX APK（Zygisk 模式下没有 Activity 入口），后续按需做 WebUI。
+- 崩溃自愈（连续启动失败自动 `disable`）未实现。
