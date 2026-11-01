@@ -91,6 +91,10 @@ fun HookParam.captureOriginalMethod(): OriginalMethodInvoker {
     return OriginalMethodInvoker(currentHookBridge, method, thisObject, args.copyOf())
 }
 
+/** 老代码里的  写法 */
+fun HookParam.invokeOriginal(thisObject: Any? = null, args: Array<Any?>? = null): Any? =
+    invokeOriginalMethod(thisObject, args)
+
 fun HookParam.invokeOriginalMethod(thisObject: Any? = null, args: Array<Any?>? = null): Any? {
     val method = member as? Method
         ?: throw IllegalStateException("invokeOriginalMethod is only supported for methods: $member")

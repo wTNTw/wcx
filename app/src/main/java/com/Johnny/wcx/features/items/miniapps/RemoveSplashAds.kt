@@ -34,8 +34,8 @@ object RemoveSplashAds : SwitchFeature(), IResolveDex {
         methodIsAdContact.hookBefore {
             try {
                 // 仅当原方法返回 boolean 时才设置 result = false，避免对非 boolean 方法（如 getInstance）造成 ClassCastException
-                if (method is java.lang.reflect.Method) {
-                    val returnType = (method as java.lang.reflect.Method).returnType
+                if (member is java.lang.reflect.Method) {
+                    val returnType = (member as java.lang.reflect.Method).returnType
                     if (returnType == Boolean::class.javaPrimitiveType || returnType == java.lang.Boolean::class.java) {
                         result = false
                     }
@@ -48,8 +48,8 @@ object RemoveSplashAds : SwitchFeature(), IResolveDex {
         methodAdDataCallback.hookBefore {
             try {
                 // 仅当原方法返回 void 时才设置 result = null，避免对非 void 方法（如 getInstance）造成 ClassCastException
-                if (method is java.lang.reflect.Method) {
-                    val returnType = (method as java.lang.reflect.Method).returnType
+                if (member is java.lang.reflect.Method) {
+                    val returnType = (member as java.lang.reflect.Method).returnType
                     if (returnType == Void.TYPE) {
                         result = null
                     }
@@ -62,8 +62,8 @@ object RemoveSplashAds : SwitchFeature(), IResolveDex {
         methodCheckCanShowAd.hookBefore {
             try {
                 // 仅当原方法返回 boolean 时才设置 result = false，避免对非 boolean 方法（如 getInstance）造成 ClassCastException
-                if (method is java.lang.reflect.Method) {
-                    val returnType = (method as java.lang.reflect.Method).returnType
+                if (member is java.lang.reflect.Method) {
+                    val returnType = (member as java.lang.reflect.Method).returnType
                     if (returnType == Boolean::class.javaPrimitiveType || returnType == java.lang.Boolean::class.java) {
                         result = false
                     }
@@ -78,8 +78,8 @@ object RemoveSplashAds : SwitchFeature(), IResolveDex {
                 val activity = thisObject as Activity
                 activity.finish()
                 // onCreate 方法返回 void，仅当返回类型匹配时才设置 result
-                if (method is java.lang.reflect.Method) {
-                    val returnType = (method as java.lang.reflect.Method).returnType
+                if (member is java.lang.reflect.Method) {
+                    val returnType = (member as java.lang.reflect.Method).returnType
                     if (returnType == Void.TYPE) {
                         result = null
                     }

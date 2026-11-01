@@ -14,6 +14,7 @@ import com.Johnny.wcx.dexkit.dsl.BaseDexDelegate
 import com.Johnny.wcx.dexkit.dsl.DexConstructorDelegate
 import com.Johnny.wcx.dexkit.dsl.DexMethodDelegate
 import com.Johnny.wcx.utils.HookAction
+import com.Johnny.wcx.utils.hookDirectly
 import com.Johnny.wcx.utils.WeLogger
 import org.luckypray.dexkit.DexKitBridge
 import java.lang.reflect.Executable
@@ -95,7 +96,7 @@ abstract class BaseFeature {
         dexDelegates.forEach { it.findInline(dexKit) }
     }
 
-    internal val unhooks = mutableListOf<HookCallback.Unhook>()
+    internal val unhooks = mutableListOf<com.Johnny.wcx.utils.HookHandle>()
     internal fun registerUnhook(u: com.Johnny.wcx.utils.HookHandle) {
         unhooks += u
     }
@@ -111,8 +112,7 @@ abstract class BaseFeature {
         priority: Int = 50,
         action: HookAction
     ) = registerUnhook(
-        XposedBridge.hookMethod(
-            this,
+        this.hookDirectly(
             object :
                 HookCallback(priority) {
                 override fun beforeHookedMethod(param: HookParam) {
@@ -157,8 +157,7 @@ abstract class BaseFeature {
         priority: Int = 50,
         action: HookAction
     ) = registerUnhook(
-        XposedBridge.hookMethod(
-            this,
+        this.hookDirectly(
             object :
                 HookCallback(priority) {
                 override fun afterHookedMethod(param: HookParam) {

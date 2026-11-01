@@ -145,7 +145,7 @@ object ZygiskEntry {
     private fun startModule(hostClassLoader: ClassLoader) {
         if (!moduleStarted.compareAndSet(false, true)) return
 
-        val started = try {
+        val started: Boolean = try {
             val service = loaderService ?: error("Zygisk loader service not initialized")
             val bridge = hookBridge ?: error("Zygisk hook bridge not initialized")
             ModuleLoader.init(

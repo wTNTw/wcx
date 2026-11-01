@@ -80,9 +80,9 @@ object ReadReceipts : ClickableFeature(), WeChatMessageViewApi.ICreateViewListen
             }.forEach { method ->
                 method.hookAfter {
                     val msgInfo = thisObject
-                    val msgId = msgInfo.reflekt().firstField { name = "msgId" }.get() as Long
-                    val talker = msgInfo.reflekt().firstField { name = "talker" }.get() as String
-                    val isSend = msgInfo.reflekt().firstField { name = "isSend" }.get() as Int
+                    val msgId = msgInfo!!.reflekt().firstField { name = "msgId" }.get() as Long
+                    val talker = msgInfo!!.reflekt().firstField { name = "talker" }.get() as String
+                    val isSend = msgInfo!!.reflekt().firstField { name = "isSend" }.get() as Int
 
                     if (isSend != 1) return@hookAfter
                     if (!talker.isGroupChatWxId) return@hookAfter

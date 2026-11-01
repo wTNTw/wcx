@@ -1,7 +1,6 @@
 #!/system/bin/sh
-
-# Keep upgrades persistent, but a real module uninstall must not leave an
-# allow-list that silently re-enables injection on a later fresh installation.
-STATE_DIR=/data/adb/wcx-zygisk
-rm -f "$STATE_DIR/injection-targets.tsv"
-rmdir "$STATE_DIR" 2>/dev/null || true
+# WCX Zygisk 模块卸载：本模块不安装 APK，也没有持久状态目录，清理即可
+MODDIR=/bin
+rm -f "/module.apk" 2>/dev/null
+rm -rf "/zygisk" 2>/dev/null
+exit 0

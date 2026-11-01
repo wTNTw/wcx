@@ -85,7 +85,7 @@ object AntiMomentCommentsDelete : SwitchFeature(), IResolveDex {
      * w1 (SnsCommentStorage) holds it as the sole non-builtin final instance field.
      */
     private fun getSnsSqliteDb(param: HookParam): Any {
-        return param.thisObject.reflekt().firstField {
+        return param.thisObject!!.reflekt().firstField {
             type { !it.isBuiltin }
             modifiers(Modifiers.FINAL)
         }.get()!!
@@ -137,8 +137,8 @@ object AntiMomentCommentsDelete : SwitchFeature(), IResolveDex {
                 if (table == SNS_COMMENT && sql.lowercase().contains("delete from")) {
                     try {
                         // 仅当原方法返回 boolean 时才设置 result = false，避免对非 boolean 方法（如 getInstance）造成 ClassCastException
-                        if (method is java.lang.reflect.Method) {
-                            val returnType = (method as java.lang.reflect.Method).returnType
+                        if (member is java.lang.reflect.Method) {
+                            val returnType = (member as java.lang.reflect.Method).returnType
                             if (returnType == Boolean::class.javaPrimitiveType || returnType == java.lang.Boolean::class.java) {
                                 result = false
                             }
@@ -154,8 +154,8 @@ object AntiMomentCommentsDelete : SwitchFeature(), IResolveDex {
         methodSnsCommentSetCommentDelFlag.hookBefore {
             try {
                 // 仅当原方法返回 void 时才设置 result = null，避免对非 void 方法（如 getInstance）造成 ClassCastException
-                if (method is java.lang.reflect.Method) {
-                    val returnType = (method as java.lang.reflect.Method).returnType
+                if (member is java.lang.reflect.Method) {
+                    val returnType = (member as java.lang.reflect.Method).returnType
                     if (returnType == Void.TYPE) {
                         result = null
                     }
@@ -169,7 +169,7 @@ object AntiMomentCommentsDelete : SwitchFeature(), IResolveDex {
         // These rows are still in the DB but carry WeChat's delete bit (bit 0) in commentflag.
         // hookAfter ensures all fields are populated from the cursor before we inspect them.
         methodSnsCommentConvertFromCursor.hookAfter {
-            val flagField = thisObject.reflekt().firstField {
+            val flagField = thisObject!!.reflekt().firstField {
                 name = "field_commentflag"
                 superclass()
             }
@@ -184,7 +184,7 @@ object AntiMomentCommentsDelete : SwitchFeature(), IResolveDex {
             flagField.set(flag and 1.inv() or INTERCEPTED_FLAG)
 
             // Inject the visual marker into the comment text in memory.
-            val bufField = thisObject.reflekt().firstField {
+            val bufField = thisObject!!.reflekt().firstField {
                 name = "field_curActionBuf"
                 superclass()
             }

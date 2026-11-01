@@ -241,18 +241,18 @@ object AddMainScreenFab : ClickableFeature() {
     override fun onEnable() {
         WeMainActivityBeautifyApi.methodDoOnCreate.hookAfter {
             try {
-            val activity = thisObject.reflekt()
+            val activity = thisObject!!.reflekt()
                 .firstField {
                     type = "com.tencent.mm.ui.MMFragmentActivity"
                 }
                 .get()!! as Activity
 
-            val viewPager = thisObject.reflekt()
+            val viewPager = thisObject!!.reflekt()
                 .firstField {
                     name = "mViewPager"
                 }
                 .get()!! as android.view.ViewGroup
-            val tabsAdapter = thisObject.reflekt()
+            val tabsAdapter = thisObject!!.reflekt()
                 .firstField {
                     name = "mTabsAdapter"
                 }

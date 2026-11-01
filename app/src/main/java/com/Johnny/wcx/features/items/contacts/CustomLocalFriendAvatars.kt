@@ -282,8 +282,8 @@ object CustomLocalFriendAvatars : ClickableFeature(), IContactInfoProvider, IRes
                         if (applyCustomAvatar(imageView, wxId, roundAvatarRadiusFactor)) {
                             try {
                                 // 仅当原方法返回 void 时才设置 result = null
-                                if (method is java.lang.reflect.Method) {
-                                    val returnType = (method as java.lang.reflect.Method).returnType
+                                if (member is java.lang.reflect.Method) {
+                                    val returnType = (member as java.lang.reflect.Method).returnType
                                     if (returnType == Void.TYPE) {
                                         result = null
                                     }
@@ -308,8 +308,8 @@ object CustomLocalFriendAvatars : ClickableFeature(), IContactInfoProvider, IRes
                     if (applyCustomHdAvatar(gallery, username)) {
                         try {
                             // 仅当原方法返回 void 时才设置 result = null
-                            if (method is java.lang.reflect.Method) {
-                                val returnType = (method as java.lang.reflect.Method).returnType
+                            if (member is java.lang.reflect.Method) {
+                                val returnType = (member as java.lang.reflect.Method).returnType
                                 if (returnType == Void.TYPE) {
                                     result = null
                                 }

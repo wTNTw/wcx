@@ -1,6 +1,0 @@
-id=wcx-zygisk
-name=WCX (Zygisk 独立注入)
-version=${VERSION_NAME}
-versionCode=${VERSION_CODE}
-author=${AUTHOR}
-description=${DESCRIPTION}

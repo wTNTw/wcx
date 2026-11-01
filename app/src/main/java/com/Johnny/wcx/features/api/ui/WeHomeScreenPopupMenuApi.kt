@@ -99,19 +99,19 @@ object WeHomeScreenPopupMenuApi : ApiFeature(), IResolveDex {
         methodAddItem.hookAfter {
             var thisObj = thisObject
 
-            if (thisObj.javaClass.simpleName == "HomeUI") {
-                thisObj = thisObj.reflekt()
+            if (thisObj!!.javaClass.simpleName == "HomeUI") {
+                thisObj = thisObj!!.reflekt()
                     .firstField { type = methodHandleItemClick.method.declaringClass }
                     .get()!!
             }
 
             @Suppress("UNCHECKED_CAST")
-            val items = thisObj.reflekt()
+            val items = thisObj!!.reflekt()
                 .firstField {
                     type = SparseArray::class
                 }
                 .get()!! as SparseArray<Any>
-            val baseAdapter = thisObj.reflekt()
+            val baseAdapter = thisObj!!.reflekt()
                 .firstField {
                     type { it isSubclassOf BaseAdapter::class }
                 }
@@ -131,8 +131,8 @@ object WeHomeScreenPopupMenuApi : ApiFeature(), IResolveDex {
                             val imageView = thisObject as? ImageView ?: return@hookBeforeDirectly
                             imageView.setImageDrawable(fakeResIdToResMap[fakeResId] ?: return@hookBeforeDirectly)
                             // setImageResource 返回 void，设置 result = null 阻断原方法
-                            if (method is java.lang.reflect.Method) {
-                                val returnType = (method as java.lang.reflect.Method).returnType
+                            if (member is java.lang.reflect.Method) {
+                                val returnType = (member as java.lang.reflect.Method).returnType
                                 if (returnType == Void.TYPE) {
                                     result = null
                                 }
@@ -186,7 +186,7 @@ object WeHomeScreenPopupMenuApi : ApiFeature(), IResolveDex {
             val thisObj = thisObject
 
             @Suppress("UNCHECKED_CAST")
-            val items = thisObj.reflekt()
+            val items = thisObj!!.reflekt()
                 .firstField {
                     type = SparseArray::class
                 }

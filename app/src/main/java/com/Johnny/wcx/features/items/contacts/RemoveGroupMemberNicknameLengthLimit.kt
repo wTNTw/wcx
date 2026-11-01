@@ -25,7 +25,7 @@ object RemoveGroupMemberNicknameLengthLimit : SwitchFeature(),
         WeChatMessageViewApi.removeListener(this)
     }
 
-    override fun onCreateView(param: de.robv.android.xposed.HookParam, view: View) {
+    override fun onCreateView(param: com.Johnny.wcx.utils.HookParam, view: View) {
         val msgInfo = WeChatMessageViewApi.getMsgInfoFromParam(param)
         if (!msgInfo.isInGroupChat) return
         if (msgInfo.isSend != 0) return

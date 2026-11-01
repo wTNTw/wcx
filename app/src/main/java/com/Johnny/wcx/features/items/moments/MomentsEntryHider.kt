@@ -1,6 +1,7 @@
 package com.Johnny.wcx.features.items.moments
 
 import com.Johnny.wcx.utils.HookCallback
+import com.Johnny.wcx.utils.hookDirectly
 
 import android.app.Activity
 import android.view.View
@@ -88,7 +89,7 @@ private fun hookListFilter(
         return
     }
     runCatching {
-        XposedBridge.hookMethod(onResume, object : HookCallback() {
+        onResume.hookDirectly(object : HookCallback() {
             override fun afterHookedMethod(param: HookParam) {
                 if (!feature.isEnabled) return
                 val activity = param.thisObject as? Activity ?: return

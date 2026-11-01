@@ -26,8 +26,8 @@ object RemoveMenuLimits : SwitchFeature(), IResolveDex {
                         showAndClickableEnumValue = enumValueOfClass(returnType, "SHOW_CLICKABLE")
                     }
                     // 仅当返回值类型匹配时才设置 result，避免类型不匹配造成 ClassCastException
-                    if (method is java.lang.reflect.Method) {
-                        val returnType = (method as java.lang.reflect.Method).returnType
+                    if (member is java.lang.reflect.Method) {
+                        val returnType = (member as java.lang.reflect.Method).returnType
                         if (returnType.isInstance(showAndClickableEnumValue)) {
                             result = showAndClickableEnumValue
                         }

@@ -27,6 +27,7 @@ local.properties
 /app/nul
 /.idea/deploymentTargetSelector.xml
 /app/src/main/jniLibs/*/libwekit_native.so
+/app/src/main/jniLibs/*/libwcx_zygisk.so
 /zygisk/build/
 /zygisk/.cxx/
 # just for testing my code in Experiments.kt

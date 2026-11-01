@@ -68,7 +68,7 @@ object MergeMessagesIntoGroups : SwitchFeature(), WeChatMessageViewApi.ICreateVi
         val currentSender = msgInfo.sender
         val position = param.args[2] as Int
 
-        val adapter = param.thisObject.reflekt()
+        val adapter = param.thisObject!!.reflekt()
             .firstField { type = WeMessageApi.classChattingDataAdapter.clazz }
             .get() ?: return
 

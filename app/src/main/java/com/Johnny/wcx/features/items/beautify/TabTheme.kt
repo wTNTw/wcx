@@ -223,13 +223,13 @@ object TabTheme : ClickableFeature() {
         WeLogger.i(TAG, "applyTheme: installing LauncherUI doOnCreate hook")
         WeMainActivityBeautifyApi.methodDoOnCreate.hookAfter {
             try {
-                val activity = thisObject.reflekt()
+                val activity = thisObject!!.reflekt()
                     .firstField { type = "com.tencent.mm.ui.MMFragmentActivity" }
                     .get()!! as Activity
-                val viewPager = thisObject.reflekt()
+                val viewPager = thisObject!!.reflekt()
                     .firstField { name = "mViewPager" }
                     .get()!! as ViewGroup
-                val tabsAdapter = thisObject.reflekt()
+                val tabsAdapter = thisObject!!.reflekt()
                     .firstField { name = "mTabsAdapter" }
                     .get()!!
                 WeLogger.i(TAG, "doOnCreate fired: " + activity.javaClass.name)

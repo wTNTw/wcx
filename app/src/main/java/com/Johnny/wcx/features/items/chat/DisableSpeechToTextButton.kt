@@ -1,6 +1,7 @@
 package com.Johnny.wcx.features.items.chat
 
 import com.Johnny.wcx.utils.HookCallback
+import com.Johnny.wcx.utils.hookDirectly
 
 import android.view.View
 import android.view.ViewGroup
@@ -39,13 +40,15 @@ object DisableSpeechToTextButton : SwitchFeature() {
     override fun onEnable() {
         runCatching {
             val clazz = XposedHelpers.findClass(CHAT_FOOTER, ClassLoaders.HOST)
-            XposedBridge.hookAllConstructors(clazz, object : HookCallback() {
-                override fun afterHookedMethod(param: HookParam) {
-                    val footer = param.thisObject as? ViewGroup ?: return
-                    // 构造期还没 addView 完，post 到下一帧再找
-                    footer.post { runCatching { hideSpeechButton(footer) } }
-                }
-            })
+            clazz.declaredConstructors.forEach { ctor ->
+                ctor.hookDirectly(object : HookCallback() {
+                    override fun afterHookedMethod(param: HookParam) {
+                        val footer = param.thisObject as? ViewGroup ?: return
+                        // 构造期还没 addView 完，post 到下一帧再找
+                        footer.post { runCatching { hideSpeechButton(footer) } }
+                    }
+                })
+            }
             WeLogger.i(TAG, "已安装（$CHAT_FOOTER）")
         }.onFailure {
             WeLogger.w(TAG, "安装失败：${it.message}")

@@ -269,23 +269,17 @@ val generateMethodHashes = tasks.register<GenerateMethodHashesTask>("generateMet
 }
 
 // ─── Zygisk 一体包（APK 兼作可刷入模块）────────────────────────────────────
-// 流程：AGP 出 APK → 注入模块条目 → zipalign 重排对齐 → 用仓库固定密钥重签。
-// 产物 wcx-<ver>-arm64-v8a.apk 改名成 .zip 即可在 Magisk / KernelSU / APatch 刷入；
-// Magisk 安装器只解压除 META-INF/* 之外的内容，APK 里的 classes*.dex 与 lib/<abi>/*.so
-// 会原样落到模块目录，正好是注入器需要的 payload。
+// 注入模块条目（module.prop / customize.sh / uninstall.sh / META-INF 安装器）后重签。
+// 注入器本体作为 lib/arm64-v8a/libwcx_zygisk.so 随 APK 打包（由 cargo 构建后放进 jniLibs），
+// 安装时 customize.sh 把它搬到 /zygisk/arm64-v8a.so，并把整包复制成 module.apk。
 val packageZygiskApk = tasks.register<PackageZygiskApkTask>("packageZygiskApk") {
     description = "把 release APK 变成「可安装 APK + 可刷模块包」一体包 (arm64-v8a)"
     group = "wekit"
 
     dependsOn("assembleStandardRelease")
-    dependsOn(project(":zygisk").tasks.named("exportZygiskSo"))
-    dependsOn(project(":zygisk").tasks.named("extractLsplantSo"))
 
-    val zygiskProject = project(":zygisk")
     apkDir.set(layout.buildDirectory.dir("outputs/apk/standard/release"))
-    zygiskSo.set(zygiskProject.layout.buildDirectory.file("zygisk-runtime/libwcxzygisk.so"))
-    lsplantSo.set(zygiskProject.layout.buildDirectory.file("lsplant-runtime/liblsplant.so"))
-    templateDir.set(rootProject.layout.projectDirectory.dir("zygisk/magisk"))
+    templateDir.set(rootProject.layout.projectDirectory.dir("wcx-zygisk"))
     outputDir.set(layout.buildDirectory.dir("outputs/zygisk"))
     rootProjectDir.set(rootProject.projectDir.absolutePath)
     versionName.set(android.defaultConfig.versionName ?: "v0")
@@ -295,7 +289,6 @@ val packageZygiskApk = tasks.register<PackageZygiskApkTask>("packageZygiskApk") 
 }
 
 // assembleRelease 跑完后再串一步：finalizedBy 不会造成任务循环
-// （packageZygiskApk 需要 assembleStandardRelease 的产物，但不被它 depend）
 tasks.matching { it.name == "assembleRelease" }.configureEach {
     finalizedBy(packageZygiskApk)
 }

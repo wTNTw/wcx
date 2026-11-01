@@ -1,6 +1,7 @@
 package com.Johnny.wcx.features.items.chat
 
 import com.Johnny.wcx.utils.HookCallback
+import com.Johnny.wcx.utils.hookDirectly
 
 import android.app.Activity
 import android.content.ContentValues
@@ -844,8 +845,11 @@ object ConversationAggregation : ClickableFeature(),
                     disableMemberTransition(param.thisObject as? Activity ?: return)
                 }
             }
-            de.robv.android.xposed.XposedBridge.hookAllMethods(Activity::class.java, "onPause", guard)
-            de.robv.android.xposed.XposedBridge.hookAllMethods(Activity::class.java, "finish", guard)
+            for (name in listOf("onPause", "finish")) {
+                Activity::class.java.declaredMethods
+                    .filter { it.name == name }
+                    .forEach { it.hookDirectly(guard) }
+            }
             WeLogger.i(TAG, "activity transition guard installed")
         }.onFailure { WeLogger.w(TAG, "activity transition guard failed", it) }
 

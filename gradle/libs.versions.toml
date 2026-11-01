@@ -22,9 +22,6 @@ ksp = "2.3.10"
 okhttp = "5.4.0"
 hidden-api-bypass = "6.1"
 # Zygisk 注入器依赖（prefab 原生库）
-lsplant = "6.4"
-dobby = "1.2"
-lsposed-libcxx = "27.0.12077973"
 runtime = "1.11.4"
 # noinspection GradleDependency
 compose-material3 = "1.5.0-alpha19" # DO NOT UPDATE. RIPPLE EFFECT BROKE AGAIN. TOUCH EFFECT BROKE TOO. FUCK. YOU. GOOGLE.
@@ -116,9 +113,6 @@ dexmaker = { module = "com.linkedin.dexmaker:dexmaker", version.ref = "dexmaker"
 #bouncycastle-prov = { module = "org.bouncycastle:bcprov-jdk18on", version.ref = "bouncycastle" }
 #bouncycastle-pkix = { module = "org.bouncycastle:bcpkix-jdk18on", version.ref = "bouncycastle" }
 hiddenapibypass = { module = "org.lsposed.hiddenapibypass:hiddenapibypass", version.ref = "hidden-api-bypass" }
-lsplant-standalone = { module = "org.lsposed.lsplant:lsplant-standalone", version.ref = "lsplant" }
-ndk-dobby = { module = "io.github.vvb2060.ndk:dobby", version.ref = "dobby" }
-lsposed-libcxx = { module = "org.lsposed.libcxx:libcxx", version.ref = "lsposed-libcxx" }
 libsu-core = { module = "com.github.topjohnwu.libsu:core", version.ref = "libsu" }
 libxposed-api = { module = "io.github.libxposed:api", version.ref = "libxposed" }
 libxposed-service = { module = "io.github.libxposed:service", version.ref = "libxposed" }
@@ -148,7 +142,6 @@ androidx-profileinstaller = { module = "androidx.profileinstaller:profileinstall
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
-android-library = { id = "com.android.library", version.ref = "agp" }
 google-devtools-ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }

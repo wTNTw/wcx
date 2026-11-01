@@ -90,12 +90,12 @@ object WeShortVideosShareMenuApi : ApiFeature(), IResolveDex {
 
         methodOnSelectMenuItem1.hookBefore {
             val menuItem = args[0] as android.view.MenuItem
-            val baseFinderFeed = thisObject.reflekt()
+            val baseFinderFeed = thisObject!!.reflekt()
                 .firstField {
                     type = "com.tencent.mm.plugin.finder.model.BaseFinderFeed"
                 }
                 .get()!!
-            handleOnSelectMenuItem(this, menuItem, baseFinderFeed)
+            handleOnSelectMenuItem(this, menuItem, baseFinderFeed!!)
         }
 
         methodCreateMenu2.hookBefore {
@@ -106,7 +106,7 @@ object WeShortVideosShareMenuApi : ApiFeature(), IResolveDex {
         methodOnSelectMenuItem2.hookBefore {
             val menuItem = args[1] as android.view.MenuItem
             val baseFinderFeed = args[0]
-            handleOnSelectMenuItem(this, menuItem, baseFinderFeed)
+            handleOnSelectMenuItem(this, menuItem, baseFinderFeed!!)
         }
 
         methodCreateMenu3.hookBefore {
@@ -116,12 +116,12 @@ object WeShortVideosShareMenuApi : ApiFeature(), IResolveDex {
 
         methodOnSelectMenuItem3.hookBefore {
             val menuItem = args[0] as android.view.MenuItem
-            val baseFinderFeed = thisObject.reflekt()
+            val baseFinderFeed = thisObject!!.reflekt()
                 .firstField {
                     type = "com.tencent.mm.plugin.finder.model.BaseFinderFeed"
                 }
                 .get()!!
-            handleOnSelectMenuItem(this, menuItem, baseFinderFeed)
+            handleOnSelectMenuItem(this, menuItem, baseFinderFeed!!)
         }
     }
 

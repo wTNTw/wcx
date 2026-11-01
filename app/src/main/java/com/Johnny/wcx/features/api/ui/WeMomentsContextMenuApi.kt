@@ -162,7 +162,7 @@ object WeMomentsContextMenuApi : ApiFeature(), IResolveDex {
 
     private fun handleCreateMenu(param: HookParam) {
         val menu = param.args.getOrNull(0) as? ContextMenu? ?: return
-        val context = resolveContext(param.thisObject)
+        val context = resolveContext(param.thisObject!!)
 
         for (item in menuItems.values.flatten()) {
             try {
@@ -183,9 +183,10 @@ object WeMomentsContextMenuApi : ApiFeature(), IResolveDex {
         val clickedId = menuItem.itemId
         if (menuItems.values.flatten().none { it.id == clickedId }) return
 
-        val context = resolveContext(param.thisObject)
+        val self = param.thisObject!!
+        val context = resolveContext(self)
         if (context == null) {
-            WeLogger.w(TAG, "failed to resolve Moments context, listener=${param.thisObject.javaClass.name}, item=$clickedId")
+            WeLogger.w(TAG, "failed to resolve Moments context, listener=${self.javaClass.name}, item=$clickedId")
             return
         }
 

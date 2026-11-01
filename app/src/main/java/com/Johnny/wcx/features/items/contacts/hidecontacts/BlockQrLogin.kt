@@ -1,6 +1,7 @@
 package com.Johnny.wcx.features.items.contacts.hidecontacts
 
 import com.Johnny.wcx.utils.HookCallback
+import com.Johnny.wcx.utils.hookDirectly
 
 import android.app.Activity
 import android.os.Bundle
@@ -50,7 +51,7 @@ object BlockQrLogin : SwitchFeature() {
                 } ?: return@forEach
 
             runCatching {
-                XposedBridge.hookMethod(onCreate, object : HookCallback() {
+                onCreate.hookDirectly(object : HookCallback() {
                     override fun afterHookedMethod(param: HookParam) {
                         // 必须在 after 里 finish：before 阶段跳过 onCreate 会触发
                         // SuperNotCalledException，整个进程崩掉。

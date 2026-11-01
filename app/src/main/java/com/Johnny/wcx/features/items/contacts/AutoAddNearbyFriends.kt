@@ -53,7 +53,7 @@ object AutoAddNearbyFriends : ClickableFeature(), IResolveDex {
         }
 
         methodCreateMenu.hookBefore {
-            args[0].reflekt().firstMethod {
+            args[0]!!.reflekt().firstMethod {
                 parameters(int, CharSequence::class)
             }.invoke(6, "自动加好友")
         }
@@ -63,7 +63,7 @@ object AutoAddNearbyFriends : ClickableFeature(), IResolveDex {
             val itemId = menuItem.itemId
             if (itemId != 6) return@hookBefore
 
-            val controller = thisObject.reflekt().firstField().get()!!
+            val controller = thisObject!!.reflekt().firstField().get()!!
             val friends = controller.reflekt().firstField {
                 type = List::class
             }.get()!! as LinkedList<*>
@@ -76,8 +76,8 @@ object AutoAddNearbyFriends : ClickableFeature(), IResolveDex {
 
             try {
                 // 仅当原方法返回 void 时才设置 result = null
-                if (method is java.lang.reflect.Method) {
-                    val returnType = (method as java.lang.reflect.Method).returnType
+                if (member is java.lang.reflect.Method) {
+                    val returnType = (member as java.lang.reflect.Method).returnType
                     if (returnType == Void.TYPE) {
                         result = null
                     }

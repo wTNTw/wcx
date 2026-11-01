@@ -550,13 +550,13 @@ object PipVoip : SwitchFeature(), IResolveDex {
 
         if (!methodFlutterVoipAttachedToActivity.isPlaceholder) {
             methodFlutterVoipAttachedToActivity.hookAfter {
-                registerSingleSession(thisObject)
+                registerSingleSession(thisObject!!)
             }
         }
 
         if (!methodFlutterVoipReattachedToActivity.isPlaceholder) {
             methodFlutterVoipReattachedToActivity.hookAfter {
-                registerSingleSession(thisObject)
+                registerSingleSession(thisObject!!)
             }
         }
 
@@ -572,8 +572,8 @@ object PipVoip : SwitchFeature(), IResolveDex {
                 }.onFailure { WeLogger.e(TAG, "flutter minimize callback invoke failed", it) }
                 try {
                     // 仅当原方法返回 void 时才设置 result = null
-                    if (method is java.lang.reflect.Method) {
-                        val returnType = (method as java.lang.reflect.Method).returnType
+                    if (member is java.lang.reflect.Method) {
+                        val returnType = (member as java.lang.reflect.Method).returnType
                         if (returnType == Void.TYPE) {
                             result = null
                         }
@@ -592,8 +592,8 @@ object PipVoip : SwitchFeature(), IResolveDex {
                 session.enterPip()
                 try {
                     // 仅当原方法返回 boolean 时才设置 result = true
-                    if (method is java.lang.reflect.Method) {
-                        val returnType = (method as java.lang.reflect.Method).returnType
+                    if (member is java.lang.reflect.Method) {
+                        val returnType = (member as java.lang.reflect.Method).returnType
                         if (returnType == Boolean::class.javaPrimitiveType || returnType == java.lang.Boolean::class.java) {
                             result = true
                         }
@@ -611,8 +611,8 @@ object PipVoip : SwitchFeature(), IResolveDex {
                 sessions[activity]?.enterPip() ?: WeLogger.w(TAG, "no session for $activity, leaving wechat alone")
                 try {
                     // 仅当原方法返回 void 时才设置 result = null
-                    if (method is java.lang.reflect.Method) {
-                        val returnType = (method as java.lang.reflect.Method).returnType
+                    if (member is java.lang.reflect.Method) {
+                        val returnType = (member as java.lang.reflect.Method).returnType
                         if (returnType == Void.TYPE) {
                             result = null
                         }

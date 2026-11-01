@@ -100,11 +100,31 @@ jobs:
           SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
           echo "SDK=$SDK"
           yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null 2>&1 || true
-          # :zygisk 的 externalNativeBuild 需要与 libs.versions.toml 完全一致的 NDK；
-          # zipalign/apksigner 需要 build-tools。runner 镜像不保证有这些版本，显式装。
+          # Zygisk 注入器（cargo + cmake + NDK r30）和 zipalign/apksigner 需要这些
           "$SDK/cmdline-tools/latest/bin/sdkmanager" --install \
-            "ndk;30.0.14904198" "cmake;3.22.1" "build-tools;36.0.0" >/dev/null 2>&1
+            "ndk;30.0.14904198" "build-tools;36.0.0" >/dev/null 2>&1
+          sudo apt-get install -y ninja-build >/dev/null 2>&1
           ls "$SDK/ndk" "$SDK/build-tools"
+
+      - name: Prepare LSPlant submodules
+        run: |
+          # checkout 用 submodules: recursive，但 LSPlant 的 test/ 子模块走 SSH，
+          # .gitmodules 里对 third_party/lsplant 设了 update=none，这里手动初始化需要的那两层
+          git submodule update --init third_party/xz-embedded
+          git -C third_party/lsplant submodule update --init --depth 1 \
+            lsplant/src/main/jni/external/dex_builder
+          git -C third_party/lsplant/lsplant/src/main/jni/external/dex_builder \
+            submodule update --init --depth 1 external/parallel_hashmap
+
+      - name: Build Zygisk injector
+        run: |
+          SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          export WCX_ANDROID_NDK="$SDK/ndk/30.0.14904198"
+          export WCX_ANDROID_API=28
+          cargo build -p wcx-zygisk --target aarch64-linux-android --release
+          mkdir -p app/src/main/jniLibs/arm64-v8a
+          cp -v target/aarch64-linux-android/release/libwcx_zygisk.so \
+            app/src/main/jniLibs/arm64-v8a/libwcx_zygisk.so
 
       - name: Build native library
         run: |

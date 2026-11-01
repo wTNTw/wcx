@@ -15,8 +15,8 @@ object DisableCommentSizeLimit : SwitchFeature() {
                     .hookBefore {
                         try {
                             // 仅当原方法返回 int 时才设置 result = 9999，避免对非 int 方法（如 getInstance）造成 ClassCastException
-                            if (method is java.lang.reflect.Method) {
-                                val returnType = (method as java.lang.reflect.Method).returnType
+                            if (member is java.lang.reflect.Method) {
+                                val returnType = (member as java.lang.reflect.Method).returnType
                                 if (returnType == Int::class.javaPrimitiveType || returnType == Integer::class.java) {
                                     result = 9999
                                 }
@@ -31,8 +31,8 @@ object DisableCommentSizeLimit : SwitchFeature() {
                         .hookBefore {
                             try {
                                 // 仅当原方法返回 int 时才设置 result = 9999，避免对非 int 方法（如 getInstance）造成 ClassCastException
-                                if (method is java.lang.reflect.Method) {
-                                    val returnType = (method as java.lang.reflect.Method).returnType
+                                if (member is java.lang.reflect.Method) {
+                                    val returnType = (member as java.lang.reflect.Method).returnType
                                     if (returnType == Int::class.javaPrimitiveType || returnType == Integer::class.java) {
                                         result = 9999
                                     }
@@ -47,8 +47,8 @@ object DisableCommentSizeLimit : SwitchFeature() {
                     .hookBefore {
                         try {
                             // 仅当原方法返回 int 时才设置 result = 9999，避免对非 int 方法（如 getInstance）造成 ClassCastException
-                            if (method is java.lang.reflect.Method) {
-                                val returnType = (method as java.lang.reflect.Method).returnType
+                            if (member is java.lang.reflect.Method) {
+                                val returnType = (member as java.lang.reflect.Method).returnType
                                 if (returnType == Int::class.javaPrimitiveType || returnType == Integer::class.java) {
                                     result = 9999
                                 }

@@ -21,8 +21,8 @@ object DisableMessageCollapsing : SwitchFeature(), IResolveDex {
         methodFoldMsg.hookBefore {
             try {
                 // 仅当原方法返回 void 时才设置 result = null，避免对非 void 方法造成 ClassCastException
-                if (method is java.lang.reflect.Method) {
-                    val returnType = (method as java.lang.reflect.Method).returnType
+                if (member is java.lang.reflect.Method) {
+                    val returnType = (member as java.lang.reflect.Method).returnType
                     if (returnType == Void.TYPE) {
                         result = null
                     }

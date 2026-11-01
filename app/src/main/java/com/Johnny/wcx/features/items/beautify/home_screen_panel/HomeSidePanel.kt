@@ -66,6 +66,7 @@ import kotlin.math.abs
 import kotlin.math.pow
 import kotlin.math.roundToInt
 import android.graphics.Color as AndroidColor
+import com.Johnny.wcx.utils.HookCallback
 
 private data class HomeSidePanelVisualTransform(
     val easedProgress: Float,
@@ -733,7 +734,7 @@ object HomeSidePanel : SwitchFeature() {
             observedToolbarProfileHosts.clear()
             animator?.cancel()
             animator = null
-            tabsAdapterHookHandles.forEach { (it as? de.robv.android.xposed.HookCallback.Unhook)?.unhook() }
+            tabsAdapterHookHandles.forEach { (it as? com.Johnny.wcx.utils.HookHandle)?.unhook() }
             tabsAdapterHookHandles.clear()
             panelState.close()
             pendingSyncFlags = 0

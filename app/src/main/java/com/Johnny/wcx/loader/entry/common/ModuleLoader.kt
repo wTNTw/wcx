@@ -9,6 +9,9 @@ import com.Johnny.wcx.utils.WeLogger
 object ModuleLoader {
 
     private const val TAG = "ModuleLoader"
+    private val initLock = Any()
+
+    @Volatile
     private var isInitialized = false
 
     private lateinit var savedHostClassLoader: ClassLoader
@@ -34,9 +37,8 @@ object ModuleLoader {
         hookBridge: IHookBridge?,
         modulePath: String,
         allowDynamicLoad: Boolean
-    ) {
-        if (isInitialized) return
-        isInitialized = true
+    ): Boolean = synchronized(initLock) {
+        if (isInitialized) return@synchronized true
 
         // Save parameters for potential hot-reload
         savedHostClassLoader = initialClassLoader
@@ -46,9 +48,15 @@ object ModuleLoader {
         savedHostDataDir = hostDataDir
 
         WeLogger.i(TAG, "loading in entry point ${loaderService.entryPointName}")
-        runCatching {
+        try {
             UnifiedEntryPoint.entry(loaderService, hookBridge, initialClassLoader, modulePath)
-        }.onFailure { WeLogger.e(TAG, "UnifiedEntryPoint failed", it) }
+            isInitialized = true
+            true
+        } catch (t: Throwable) {
+            // 不把失败的初始化结果钉死：后续生命周期回调可能拿到可用的宿主 ClassLoader
+            WeLogger.e(TAG, "UnifiedEntryPoint failed", t)
+            false
+        }
     }
 
     /**

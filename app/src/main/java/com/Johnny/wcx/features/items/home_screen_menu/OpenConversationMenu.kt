@@ -25,7 +25,7 @@ object OpenConversationMenu : SwitchFeature(), WeHomeScreenPopupMenuApi.IMenuIte
         WeHomeScreenPopupMenuApi.removeProvider(this)
     }
 
-    override fun getMenuItems(param: de.robv.android.xposed.HookParam): List<WeHomeScreenPopupMenuApi.MenuItem> {
+    override fun getMenuItems(param: com.Johnny.wcx.utils.HookParam): List<WeHomeScreenPopupMenuApi.MenuItem> {
         return listOf(
             WeHomeScreenPopupMenuApi.MenuItem(
                 777025, ("跳转对话"), ChatInfoIcon

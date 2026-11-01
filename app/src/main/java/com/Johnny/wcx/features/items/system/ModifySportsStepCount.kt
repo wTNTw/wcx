@@ -59,8 +59,8 @@ object ModifySportsStepCount : ClickableFeature(), IResolveDex {
                 val value = passiveValue
                 if (value < 0) return@hookAfter
                 // 仅当原方法返回 Long 时才设置 result，避免对非 Long 方法（如 getInstance）造成 ClassCastException
-                if (method is java.lang.reflect.Method) {
-                    val returnType = (method as java.lang.reflect.Method).returnType
+                if (member is java.lang.reflect.Method) {
+                    val returnType = (member as java.lang.reflect.Method).returnType
                     if (returnType == Long::class.javaPrimitiveType || returnType == java.lang.Long::class.java) {
                         result = when (passiveMode) {
                             PassiveMode.FIXED -> value

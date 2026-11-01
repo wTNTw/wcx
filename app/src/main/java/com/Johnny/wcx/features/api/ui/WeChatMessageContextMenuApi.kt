@@ -227,7 +227,7 @@ object WeChatMessageContextMenuApi : ApiFeature(), IResolveDex {
             val msgInfoWrapper = MessageInfo(msgInfo)
 
             try {
-                val addMenuItem = menu.reflekt()
+                val addMenuItem = menu!!.reflekt()
                     .firstMethod {
                         parameters(Int::class, CharSequence::class, Drawable::class)
                         returnType = android.view.MenuItem::class
@@ -267,15 +267,15 @@ object WeChatMessageContextMenuApi : ApiFeature(), IResolveDex {
 
             val menuItem = args[0] as android.view.MenuItem
             val msgInfoWrapper = MessageInfo(msgInfo)
-            val context = getChattingContextFromOnSelectHandler(thisObject)
+            val context = getChattingContextFromOnSelectHandler(thisObject!!)
             try {
                 if (menuItem.itemId == MERGED_MENU_ITEM_ID) {
                     val applicableItems = menuItems.values.flatten()
                         .filter { it.isSupported(msgInfoWrapper) }
                     showMergedMenuDialog(curView, context, msgInfoWrapper, applicableItems)
                     // 仅当原方法返回 void 时才设置 result = null
-                    if (method is java.lang.reflect.Method) {
-                        val returnType = (method as java.lang.reflect.Method).returnType
+                    if (member is java.lang.reflect.Method) {
+                        val returnType = (member as java.lang.reflect.Method).returnType
                         if (returnType == Void.TYPE) {
                             result = null
                         }
@@ -287,8 +287,8 @@ object WeChatMessageContextMenuApi : ApiFeature(), IResolveDex {
                     if (item.id == menuItem.itemId) {
                         item.onClick(curView, context, msgInfoWrapper)
                         // 仅当原方法返回 void 时才设置 result = null
-                        if (method is java.lang.reflect.Method) {
-                            val returnType = (method as java.lang.reflect.Method).returnType
+                        if (member is java.lang.reflect.Method) {
+                            val returnType = (member as java.lang.reflect.Method).returnType
                             if (returnType == Void.TYPE) {
                                 result = null
                             }
@@ -314,7 +314,7 @@ object WeChatMessageContextMenuApi : ApiFeature(), IResolveDex {
                     .any { it.multiSelect !is MultiSelectSupport.Unsupported }
                 if (!hasMultiSelectItem) return@hookBefore
 
-                val addMenuItem = menu.reflekt()
+                val addMenuItem = menu!!.reflekt()
                     .firstMethod {
                         parameters(Int::class, CharSequence::class, Drawable::class)
                         returnType = android.view.MenuItem::class
@@ -337,14 +337,14 @@ object WeChatMessageContextMenuApi : ApiFeature(), IResolveDex {
             if (menuItem.itemId != MERGED_MENU_ITEM_ID) return@hookBefore
 
             try {
-                val msgInfos = getSelectedMsgInfos(thisObject)
-                val chattingContext = resolveChattingContextByWalk(thisObject)
-                val view = getViewFromMultiSelectHandler(thisObject)
+                val msgInfos = getSelectedMsgInfos(thisObject!!)
+                val chattingContext = resolveChattingContextByWalk(thisObject!!)
+                val view = getViewFromMultiSelectHandler(thisObject!!)
 
                 showMultiSelectMenuDialog(view, chattingContext, msgInfos)
                 // 仅当原方法返回 void 时才设置 result = null
-                if (method is java.lang.reflect.Method) {
-                    val returnType = (method as java.lang.reflect.Method).returnType
+                if (member is java.lang.reflect.Method) {
+                    val returnType = (member as java.lang.reflect.Method).returnType
                     if (returnType == Void.TYPE) {
                         result = null
                     }

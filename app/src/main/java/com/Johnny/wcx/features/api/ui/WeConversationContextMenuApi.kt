@@ -93,7 +93,7 @@ object WeConversationContextMenuApi : ApiFeature(), IResolveDex {
         val info = param.args.getOrNull(2) as? AdapterView.AdapterContextMenuInfo
         val groupId = info?.position ?: 0
 
-        val context = resolveContext(param.thisObject) ?: return
+        val context = resolveContext(param.thisObject!!) ?: return
 
         for (item in menuItems.values.flatten()) {
             try {
@@ -111,7 +111,7 @@ object WeConversationContextMenuApi : ApiFeature(), IResolveDex {
 
         // thisObject is ConversationLongClickListener$1, which holds the outer
         // ConversationLongClickListener instance in its only field of that type.
-        val listener = param.thisObject.reflekt()
+        val listener = param.thisObject!!.reflekt()
             .firstFieldOrNull { type = methodOnCreateMenu.method.declaringClass }
             ?.get() ?: return
 

@@ -40,8 +40,8 @@ object DisableVideosAutoPlay : SwitchFeature(), IResolveDex {
         try {
             methodCheckAutoPlay.hookBefore {
                 try {
-                    if (method is java.lang.reflect.Method) {
-                        val returnType = (method as java.lang.reflect.Method).returnType
+                    if (member is java.lang.reflect.Method) {
+                        val returnType = (member as java.lang.reflect.Method).returnType
                         if (returnType == Boolean::class.javaPrimitiveType || returnType == java.lang.Boolean::class.java) {
                             result = false
                         }
@@ -58,8 +58,8 @@ object DisableVideosAutoPlay : SwitchFeature(), IResolveDex {
         try {
             methodImproveAutoPlayInvoke.hookBefore {
                 try {
-                    if (method is java.lang.reflect.Method) {
-                        val returnType = (method as java.lang.reflect.Method).returnType
+                    if (member is java.lang.reflect.Method) {
+                        val returnType = (member as java.lang.reflect.Method).returnType
                         if (returnType == Boolean::class.javaPrimitiveType || returnType == java.lang.Boolean::class.java) {
                             result = false
                         }

@@ -14,6 +14,7 @@ import com.Johnny.wcx.ui.content.SingleContactSelector
 import com.Johnny.wcx.ui.utils.showComposeDialog
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.HookParam
+import com.Johnny.wcx.utils.hookDirectly
 
 @Feature(name = "分裂群组", categories = ["娱乐"], description = "让群聊一分为二; 在假群聊中发送的红包即为假红包")
 object SplitGroupChats : ClickableFeature() {
@@ -46,7 +47,7 @@ object SplitGroupChats : ClickableFeature() {
 
     private fun hookBeforeOnDestroy(method: java.lang.reflect.Method, callback: () -> Unit) {
         try {
-            de.robv.android.xposed.XposedBridge.hookMethod(method, object : de.robv.android.xposed.HookCallback() {
+            method.hookDirectly(object : com.Johnny.wcx.utils.HookCallback() {
                 override fun beforeHookedMethod(param: HookParam) {
                     callback()
                 }

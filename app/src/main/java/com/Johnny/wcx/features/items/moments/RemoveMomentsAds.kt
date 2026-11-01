@@ -39,8 +39,8 @@ object RemoveMomentsAds : SwitchFeature(), WeDatabaseListenerApi.IInsertListener
                 .hookBefore {
                     try {
                         WeLogger.i(TAG, "数据源层拦截: 阻断 ADInfo 构造")
-                        if (method is java.lang.reflect.Method) {
-                            val returnType = (method as java.lang.reflect.Method).returnType
+                        if (member is java.lang.reflect.Method) {
+                            val returnType = (member as java.lang.reflect.Method).returnType
                             if (returnType == Void.TYPE) {
                                 result = null
                             }

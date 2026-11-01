@@ -273,7 +273,7 @@ object CustomDetails : ClickableFeature(), WeMomentsContextMenuApi.IMenuItemsPro
                             if (!preciseTimeEnabled) return@hookAfter
                             val holder = args[0]
                             runCatching {
-                                val itemView = holder.reflekt()
+                                val itemView = holder!!.reflekt()
                                     .firstField { name = "itemView" }
                                     .get(holder) as? View ?: return@runCatching
                                 processNotifyItemView(itemView)

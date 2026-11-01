@@ -44,6 +44,7 @@ import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.hookBeforeDirectly
 import com.Johnny.wcx.utils.reflection.bool
 import com.Johnny.wcx.utils.reflection.int
+import com.Johnny.wcx.utils.HookCallback
 
 @Feature(
     name = "半屏相册选择器",
@@ -137,7 +138,7 @@ object HalfScreenAlbumPicker : ClickableFeature() {
     private var slideInTransition: Pair<Int, Int>? = null
 
     /** Live only while the picker is inside onCreate; see [installTransitionCapture]. */
-    private var transitionCaptureUnhook: de.robv.android.xposed.HookCallback.Unhook? = null
+    private var transitionCaptureUnhook: com.Johnny.wcx.utils.HookHandle? = null
 
     /**
      * The close animation pair the picker gives itself, read straight out of its intent.

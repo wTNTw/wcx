@@ -183,7 +183,7 @@ class WeChatSettingsManager(
         classBaseSettingPrefUI.reflekt()
             .firstMethod { name = "superImportUIComponents" }
             .hookAfterDirectly {
-                val currentUiName = thisObject.javaClass.name
+                val currentUiName = thisObject!!.javaClass.name
                 if (!currentUiName.endsWith("MainSettingsUI") && !currentUiName.endsWith("CommonSettingsUI")) return@hookAfterDirectly
 
                 @Suppress("UNCHECKED_CAST")
@@ -207,7 +207,7 @@ class WeChatSettingsManager(
         classBaseSettingUI.reflekt()
             .firstMethod { name = "onDestroy" }
             .hookAfterDirectly {
-                val currentUiName = thisObject.javaClass.name
+                val currentUiName = thisObject!!.javaClass.name
                 if (!currentUiName.endsWith("MainSettingsUI") && !currentUiName.endsWith("CommonSettingsUI")) return@hookAfterDirectly
 
                 contextGetStringUnhook?.unhook(); contextGetStringUnhook = null

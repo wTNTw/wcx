@@ -31,7 +31,7 @@ object NoCloseVideoPlayerOnClick : SwitchFeature(), IResolveDex {
                 val event = args[1] as MotionEvent
                 if ((event.action and 0xFF) == MotionEvent.ACTION_UP) {
                     if (!::activityField.isInitialized) {
-                        activityField = thisObject.reflekt()
+                        activityField = thisObject!!.reflekt()
                             .firstField { type { it isSubclassOf Activity::class } }
                             .self
                     }
@@ -64,8 +64,8 @@ object NoCloseVideoPlayerOnClick : SwitchFeature(), IResolveDex {
 
                 // always consume
                 // 仅当原方法返回 boolean 时才设置 result = false，避免对非 boolean 方法（如 getInstance）造成 ClassCastException
-                if (method is java.lang.reflect.Method) {
-                    val returnType = (method as java.lang.reflect.Method).returnType
+                if (member is java.lang.reflect.Method) {
+                    val returnType = (member as java.lang.reflect.Method).returnType
                     if (returnType == Boolean::class.javaPrimitiveType || returnType == java.lang.Boolean::class.java) {
                         result = false
                     }

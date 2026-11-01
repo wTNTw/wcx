@@ -37,6 +37,7 @@ import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.android.isDarkMode
 import java.util.WeakHashMap
 import java.util.concurrent.ConcurrentHashMap
+import com.Johnny.wcx.utils.HookParam
 
 private enum class ConversationListPreset(
     val rowRadiusDp: Int,

@@ -4,12 +4,11 @@
 [submodule "libs/common/reflekt"]
 	path = libs/common/reflekt
 	url = https://github.com/Ujhhgtg/reflekt
-[submodule "zygisk/third_party/lsplant"]
-	path = zygisk/third_party/lsplant
-	url = https://github.com/LSPosed/LSPlant.git
 [submodule "third_party/lsplant"]
 	path = third_party/lsplant
 	url = https://github.com/LSPosed/LSPlant.git
+	# 只手动初始化 dex_builder 及其依赖；上游 test/ 下的子模块用 SSH，递归会失败
+	update = none
 [submodule "third_party/xz-embedded"]
 	path = third_party/xz-embedded
 	url = https://github.com/tukaani-project/xz-embedded.git

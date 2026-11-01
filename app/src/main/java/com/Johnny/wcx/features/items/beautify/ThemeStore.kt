@@ -80,6 +80,7 @@ import kotlin.io.path.div
 import kotlin.io.path.exists
 import kotlin.io.path.listDirectoryEntries
 import kotlin.io.path.name
+import com.Johnny.wcx.utils.HookParam
 
 /**
  * 主题商店（v245 全新编写）：
@@ -567,7 +568,7 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
     // ══════════════════════════════════════════════════════════
     // 气泡直接应用：聊天消息视图创建时按主题气泡替换背景（9-patch）
     // ══════════════════════════════════════════════════════════
-    override fun onCreateView(param: de.robv.android.xposed.HookParam, view: View) {
+    override fun onCreateView(param: com.Johnny.wcx.utils.HookParam, view: View) {
         if (activeThemeId.isEmpty()) return
         try {
             val msgInfo = WeChatMessageViewApi.getMsgInfoFromParam(param)

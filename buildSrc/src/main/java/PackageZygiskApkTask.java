@@ -61,16 +61,6 @@ public abstract class PackageZygiskApkTask extends DefaultTask {
     @PathSensitive(PathSensitivity.RELATIVE)
     public abstract DirectoryProperty getApkDir();
 
-    /** 构建出的注入器 .so（libwcxzygisk.so）。 */
-    @InputFile
-    @PathSensitive(PathSensitivity.RELATIVE)
-    public abstract RegularFileProperty getZygiskSo();
-
-    /** 从 lsplant-standalone AAR 里取出的 liblsplant.so。 */
-    @InputFile
-    @PathSensitive(PathSensitivity.RELATIVE)
-    public abstract RegularFileProperty getLsplantSo();
-
     /** Magisk 模块模板目录（zygisk/magisk）。 */
     @InputDirectory
     @PathSensitive(PathSensitivity.RELATIVE)
@@ -116,7 +106,7 @@ public abstract class PackageZygiskApkTask extends DefaultTask {
         Files.createDirectories(stage);
 
         Path injected = stage.resolve("injected.apk");
-        injectModuleEntries(apk, injected, abi);
+        injectModuleEntries(apk, injected);
 
         Path aligned = stage.resolve("aligned.apk");
         File zipalign = findBuildTool("zipalign");
@@ -170,14 +160,10 @@ public abstract class PackageZygiskApkTask extends DefaultTask {
 
     // ── APK 注入 ────────────────────────────────────────────────────────────
 
-    private void injectModuleEntries(File apk, Path target, String abi) throws IOException {
-        Map<String, byte[]> extra = new LinkedHashMap<>();
-        extra.putAll(renderTemplates(abi));
-        extra.put("zygisk/" + abi + ".so", Files.readAllBytes(getZygiskSo().get().getAsFile().toPath()));
-        // 注意：Zygisk Next 会把 zygisk/ 目录里的 .so 当成候选模块库加载，
-        // 放第二个 .so 会导致它拿到没有 zygisk_module_entry 的库而静默跳过模块。
-        // 所以 liblsplant.so 放在模块根目录，由注入器自己 dlopen。
-        extra.put("liblsplant.so", Files.readAllBytes(getLsplantSo().get().getAsFile().toPath()));
+    private void injectModuleEntries(File apk, Path target) throws IOException {
+        // 注入模块元数据与安装脚本；注入器本体作为 lib/<abi>/libwcx_zygisk.so 随 APK 打包，
+        // 由 customize.sh 在安装时搬到 $MODPATH/zygisk/<abi>.so。
+        Map<String, byte[]> extra = new LinkedHashMap<>(renderTemplates(getAbi().getOrElse("arm64-v8a")));
 
         try (ZipFile src = new ZipFile(apk);
              ZipOutputStream out = new ZipOutputStream(new BufferedOutputStream(
@@ -236,26 +222,26 @@ public abstract class PackageZygiskApkTask extends DefaultTask {
                         + "需要开启 Zygisk，无需 LSPosed。"));
         tokens.put("ABI", abi);
 
+        // 只注入这些固定条目（模板目录里还有 Rust 源码与文档，不能整目录打进去）
+        String[] entries = {
+                "module.prop",
+                "customize.sh",
+                "uninstall.sh",
+                "sepolicy.rule",
+                "META-INF/com/google/android/update-binary",
+                "META-INF/com/google/android/updater-script",
+        };
+
+        File templateDir = getTemplateDir().get().getAsFile();
         Map<String, byte[]> result = new LinkedHashMap<>();
-        File template = getTemplateDir().get().getAsFile();
-        List<Path> files;
-        try (var stream = Files.walk(template.toPath())) {
-            files = stream.filter(Files::isRegularFile)
-                    .filter(p -> !p.getFileName().toString().endsWith(".in"))
-                    .toList();
-        }
-        for (Path file : files) {
-            String relative = template.toPath().relativize(file).toString().replace('\\', '/');
-            result.put(relative, render(Files.readString(file), tokens)
+        for (String entry : entries) {
+            File file = new File(templateDir, entry);
+            if (!file.isFile()) {
+                throw new GradleException("模板目录缺少 " + entry + ": " + templateDir);
+            }
+            result.put(entry, render(Files.readString(file.toPath()), tokens)
                     .getBytes(StandardCharsets.UTF_8));
         }
-
-        Path propTemplate = template.toPath().resolve("module.prop.in");
-        if (!Files.exists(propTemplate)) {
-            throw new GradleException("模板目录缺少 module.prop.in: " + template);
-        }
-        result.put("module.prop", render(Files.readString(propTemplate), tokens)
-                .getBytes(StandardCharsets.UTF_8));
         return result;
     }
 

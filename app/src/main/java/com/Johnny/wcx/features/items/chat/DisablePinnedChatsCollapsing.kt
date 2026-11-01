@@ -28,8 +28,8 @@ object DisablePinnedChatsCollapsing : SwitchFeature(), IResolveDex {
             try {
                 WeDatabaseApi.execStatement("DELETE FROM rconversation WHERE username = 'message_fold'")
                 // 仅当原方法返回 void 时才设置 result = null，避免对非 void 方法（如 getInstance）造成 ClassCastException
-                if (method is java.lang.reflect.Method) {
-                    val returnType = (method as java.lang.reflect.Method).returnType
+                if (member is java.lang.reflect.Method) {
+                    val returnType = (member as java.lang.reflect.Method).returnType
                     if (returnType == Void.TYPE) {
                         result = null
                     }
@@ -42,8 +42,8 @@ object DisablePinnedChatsCollapsing : SwitchFeature(), IResolveDex {
             try {
                 WeDatabaseApi.execStatement("DELETE FROM rconversation WHERE username = 'message_fold'")
                 // 仅当原方法返回 boolean 时才设置 result = false，避免对非 boolean 方法（如 getInstance）造成 ClassCastException
-                if (method is java.lang.reflect.Method) {
-                    val returnType = (method as java.lang.reflect.Method).returnType
+                if (member is java.lang.reflect.Method) {
+                    val returnType = (member as java.lang.reflect.Method).returnType
                     if (returnType == Boolean::class.javaPrimitiveType || returnType == java.lang.Boolean::class.java) {
                         result = false
                     }

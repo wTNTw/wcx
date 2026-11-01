@@ -48,7 +48,7 @@ object RemoveEmbeddedAds : SwitchFeature(), IResolveDex {
         methodBaseTransferRequestOnLoad.hookBefore {
             val transferResultInfo = args[0]
             if (!::protoField.isInitialized) {
-                protoField = transferResultInfo.reflekt()
+                protoField = transferResultInfo!!.reflekt()
                     .firstField {
                         type { !it.isBuiltin }
                     }.self

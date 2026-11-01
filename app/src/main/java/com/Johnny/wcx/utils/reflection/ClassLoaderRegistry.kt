@@ -3,6 +3,7 @@
 package com.Johnny.wcx.utils.reflection
 
 import com.Johnny.wcx.utils.HookCallback
+import com.Johnny.wcx.utils.hookDirectly
 
 import android.annotation.SuppressLint
 
@@ -51,8 +52,8 @@ object ClassLoaderRegistry {
         // Thread context CL (often the app's PathClassLoader)
         walkChain(Thread.currentThread().contextClassLoader)
 
-        // LSPosed's own injector ClassLoader
-        walkChain(XposedBridge::class.java.classLoader)
+        // 当前加载器（LSPosed 的模块 ClassLoader / Zygisk 的 InMemoryDexClassLoader）
+        walkChain(ClassLoaders.MODULE)
 
         // This module's ClassLoader
         walkChain(ClassLoaderRegistry::class.java.classLoader)
@@ -145,14 +146,13 @@ object ClassLoaderRegistry {
         // Hooking ClassLoader itself is sufficient: every concrete CL
         // (PathClassLoader, DexClassLoader, InMemoryDexClassLoader,
         //  LSPosed's ModuleClassLoader, etc.) calls super().
-        XposedBridge.hookAllConstructors(
-            ClassLoader::class.java,
-            object : HookCallback() {
+        ClassLoader::class.java.declaredConstructors.forEach { ctor ->
+            ctor.hookDirectly(object : HookCallback() {
                 override fun afterHookedMethod(param: HookParam) {
                     (param.thisObject as? ClassLoader)?.let { walkChain(it) }
                 }
-            }
-        )
+            })
+        }
     }
 
     // ────────────────────────────────────────────────────────────────

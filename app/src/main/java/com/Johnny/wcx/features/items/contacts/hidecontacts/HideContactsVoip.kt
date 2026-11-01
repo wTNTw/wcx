@@ -8,6 +8,7 @@ import com.Johnny.wcx.features.items.contacts.HideContacts
 import com.Johnny.wcx.utils.RuntimeConfig
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.reflection.BString
+import com.Johnny.wcx.utils.HookParam
 
 private const val TAG = "HideContacts.Voip"
 
@@ -321,5 +322,5 @@ private fun HideContacts.installLegacyVoipHooks() {
  * Reads the caller wxid out of an `a65.b57` RoomInfo, which declares exactly one String field
  * (`f3634i` = callerUserName).
  */
-private fun de.robv.android.xposed.HookParam.legacyCallerWxId(): String? =
+private fun com.Johnny.wcx.utils.HookParam.legacyCallerWxId(): String? =
     runCatching { args[0]!!.reflekt().firstField { type = BString }.get() as? String }.getOrNull()

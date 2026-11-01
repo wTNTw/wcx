@@ -63,7 +63,7 @@ object QuotedMessageDirectJump : SwitchFeature(), IResolveDex {
             val stringValue = args[4]
             val msgQuoteItem = args[5]
             val chattingItemHolder = args[7]
-            val chattingItem = chattingItemHolder.reflekt()
+            val chattingItem = chattingItemHolder!!.reflekt()
                 .firstField { type { it != String::class.java } }.get()!!
             val mGetQuoteMessageInfo = methodGetQuoteMessageInfo.method
             var msgInfo: Any
@@ -114,8 +114,8 @@ object QuotedMessageDirectJump : SwitchFeature(), IResolveDex {
             }
             try {
                 // 仅当原方法返回 void 时才设置 result = null
-                if (method is java.lang.reflect.Method) {
-                    val returnType = (method as java.lang.reflect.Method).returnType
+                if (member is java.lang.reflect.Method) {
+                    val returnType = (member as java.lang.reflect.Method).returnType
                     if (returnType == Void.TYPE) {
                         result = null
                     }

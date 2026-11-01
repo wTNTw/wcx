@@ -2909,7 +2909,7 @@ object Themes : ClickableFeature(), IResolveDex {
             }.hookBefore {
                 result = null
                 val decor = (thisObject as? Activity)?.window?.decorView
-                val member = method as Method
+                val member = member as Method
                 val thisObject = thisObject
                 val args = args
                 decor?.postDelayed(1000L) {

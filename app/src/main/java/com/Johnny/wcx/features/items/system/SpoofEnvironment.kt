@@ -20,8 +20,8 @@ object SpoofEnvironment : SwitchFeature(), IResolveDex {
                     val name = args[1] as? String? ?: return@hookBefore
                     if (name == "adb_enabled") {
                         // 仅当原方法返回 int 时才设置 result = 0，避免对非 int 方法（如 getInstance）造成 ClassCastException
-                        if (method is java.lang.reflect.Method) {
-                            val returnType = (method as java.lang.reflect.Method).returnType
+                        if (member is java.lang.reflect.Method) {
+                            val returnType = (member as java.lang.reflect.Method).returnType
                             if (returnType == Int::class.javaPrimitiveType || returnType == Integer::class.java) {
                                 result = 0
                             }
@@ -41,8 +41,8 @@ object SpoofEnvironment : SwitchFeature(), IResolveDex {
                     val name = args[1] as? String? ?: return@hookBefore
                     if (name == "development_settings_enabled") {
                         // 仅当原方法返回 int 时才设置 result = 0，避免对非 int 方法（如 getInstance）造成 ClassCastException
-                        if (method is java.lang.reflect.Method) {
-                            val returnType = (method as java.lang.reflect.Method).returnType
+                        if (member is java.lang.reflect.Method) {
+                            val returnType = (member as java.lang.reflect.Method).returnType
                             if (returnType == Int::class.javaPrimitiveType || returnType == Integer::class.java) {
                                 result = 0
                             }
@@ -56,8 +56,8 @@ object SpoofEnvironment : SwitchFeature(), IResolveDex {
         methodIsVpnEnabled.hookBefore {
             try {
                 // 仅当原方法返回 boolean 时才设置 result = false
-                if (method is java.lang.reflect.Method) {
-                    val returnType = (method as java.lang.reflect.Method).returnType
+                if (member is java.lang.reflect.Method) {
+                    val returnType = (member as java.lang.reflect.Method).returnType
                     if (returnType == Boolean::class.javaPrimitiveType || returnType == java.lang.Boolean::class.java) {
                         result = false
                     }
