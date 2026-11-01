@@ -490,6 +490,37 @@ fn task_build_native(abi_args: &[String]) -> Result<()> {
         );
     }
 
+    // Zygisk 注入器（libwcx_zygisk.so）也要随 APK 打包（packageZygiskApk 会把它搬到模块的
+    // zygisk/<abi>.so）。只支持 arm64-v8a，且需要 WCX_ANDROID_NDK / WCX_ANDROID_API。
+    if abis.iter().any(|s| s.android_name == "arm64-v8a") {
+        println!("build(native): zygisk injector (arm64-v8a)");
+        run_cargo(
+            &[
+                "build",
+                "-p",
+                "wcx-zygisk",
+                "--release",
+                "--target",
+                "aarch64-linux-android",
+            ],
+            &root,
+        )?;
+        let so_src = root
+            .join("target/aarch64-linux-android/release/libwcx_zygisk.so");
+        let so_dst_dir = jni_libs_dir(&root).join("arm64-v8a");
+        let so_dst = so_dst_dir.join("libwcx_zygisk.so");
+        fs::create_dir_all(&so_dst_dir)
+            .with_context(|| format!("could not create {}", so_dst_dir.display()))?;
+        fs::copy(&so_src, &so_dst).with_context(|| {
+            format!("could not copy {} → {}", so_src.display(), so_dst.display())
+        })?;
+        println!(
+            "build(native):  {} → {}",
+            so_src.display(),
+            so_dst.display()
+        );
+    }
+
     Ok(())
 }
 
