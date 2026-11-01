@@ -27,10 +27,10 @@
 4. 安装修补后的微信。由于未知原因, 即使修补的包名与已安装应用的包名不一致, NPatch 也会请求卸载已安装应用, 请注意不要误操作导致丢失微信数据。
 5. 若使用「本地模式」, 需在修补的微信作用域中启用 WCX。
 
-### Zygisk 一体包（APK 兼作模块包, 不需要 LSPosed, 实验性）
+### Zygisk 模块（Zygisk - WCX, APK 兼作模块包, 不需要 LSPosed）
 
-> arm64 的 release APK 是**一体包**: 同一个文件既能当 APK 安装, 也能改名成 `.zip` 当 Magisk 模块刷。
-> 该形态仍在开发中（见仓库 `zygisk/README.md` 的里程碑）。
+> arm64 的 release APK 是**一体包**: 同一个文件既能当 APK 安装, 也能改名成 `.zip`
+> 当 Magisk / KernelSU / APatch 模块刷入。模块 id 为 `zygisk-wcx`, 显示名 `Zygisk - WCX`。
 
 方式一（推荐）: 直接安装 `wcx-*-arm64-v8a.apk`, 走原来的 LSPosed/libxposed 流程。
 
@@ -40,10 +40,15 @@
 2. 把 `wcx-*-arm64-v8a.apk` 的后缀改成 `.zip`（发布产物里也会直接提供同字节的 `.zip`）
 3. 在 Magisk / KernelSU / APatch 里刷入该 zip
 4. 重启手机, 强制停止微信后重新打开
-5. 抓日志确认: `adb logcat -s WCXZygisk`（应看到 `LSPlant 初始化完成` 与 `注入流程结束`）
-6. 卸载: 在管理器里移除模块后重启
+5. 抓日志确认: `adb logcat -s WCX`（应看到 `Zygisk: LSPlant initialized` 与
+   `ZygiskEntry: WCX module started with host ClassLoader=...`）
+6. 卸载: 在管理器里移除模块（`zygisk-wcx`）后重启
 
-注意: 方式二**不安装 APK**, 因此不会覆盖你已安装的 WCX; 两种方式建议二选一, 避免重复 hook。
+说明:
+- 默认只注入 `com.tencent.mm` 及其子进程; 需要别的目标时在模块目录放 `target.list`
+  （一行一个包名, `#` 开头为注释）
+- 方式二**不安装 APK**, 因此不会覆盖你已安装的 WCX; 两种方式建议二选一, 避免重复 hook
+- 更详细的架构/构建/排错见 `wcx-zygisk/README.md`
 
 ## 修复微信热更新导致的模块不加载
 

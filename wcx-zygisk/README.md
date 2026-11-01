@@ -1,7 +1,9 @@
-# wcx-zygisk（Zygisk 独立注入器）
+# Zygisk - WCX（独立注入器）
 
 刷一个 zip 就能让 WCX 注入微信，**不需要 LSPosed**。注入器移植自上游 **Ujhhgtg/WeKit**
 （同为 GPL-3.0），并针对本仓库与 Android 16 做了修正。
+
+模块 id `zygisk-wcx`，显示名 `Zygisk - WCX`；安装后位于 `/data/adb/modules/zygisk-wcx`。
 
 ## 产物
 

@@ -1,6 +1,6 @@
-id=wcx-zygisk
-name=WCX (Zygisk)
+id=zygisk-wcx
+name=Zygisk - WCX
 version=${VERSION_NAME}
 versionCode=${VERSION_CODE}
 author=${AUTHOR}
-description=${DESCRIPTION}
+description=一个集成了微信 Xposed 模块与去混淆分析工具的综合项目

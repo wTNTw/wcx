@@ -13,7 +13,7 @@ use crate::{loge, logi, logw};
 use libc::{AF_UNIX, SOCK_STREAM, c_int, sockaddr_un};
 use std::{ffi::CString, fs};
 
-const TARGETS_PATH: &str = "/data/adb/wcx_zygisk/injection-targets.tsv";
+const TARGETS_PATH: &str = "/data/adb/zygisk-wcx/injection-targets.tsv";
 const APP_USER_RANGE: i32 = 100_000;
 
 // ── Allow-list ────────────────────────────────────────────────────────────────
