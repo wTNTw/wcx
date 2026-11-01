@@ -123,6 +123,9 @@ jobs:
           SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
           export WCX_ANDROID_NDK="$SDK/ndk/30.0.14904198"
           export WCX_ANDROID_API=28
+          # 指定 NDK 的 clang 作为链接器；否则 cargo 用宿主 cc，-ldobby 等直接找不到
+          CC_BIN="$WCX_ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$CC_BIN/aarch64-linux-android28-clang"
           cargo build -p wcx-zygisk --target aarch64-linux-android --release
           mkdir -p app/src/main/jniLibs/arm64-v8a
           cp -v target/aarch64-linux-android/release/libwcx_zygisk.so \
