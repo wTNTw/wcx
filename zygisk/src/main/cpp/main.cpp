@@ -471,7 +471,7 @@ public:
         LoadPayloadDex(module_fd);
 
         // 先加载 LSPlant（hook 桥的运行时依赖），再加载 payload 自己的库
-        if (wcx::PreloadLibraryFromDir(module_fd, "zygisk/liblsplant.so") == 0) {
+        if (wcx::PreloadLibraryFromDir(module_fd, "liblsplant.so") == 0) {
             LOGE("liblsplant.so 加载失败，无法 hook");
         }
         PreloadPayloadLibs(module_fd);

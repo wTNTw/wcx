@@ -27,8 +27,8 @@ if [ ! -f "$MODPATH/zygisk/arm64-v8a.so" ]; then
   abort "! 包内缺少 zygisk/arm64-v8a.so，zip 可能损坏"
 fi
 
-if [ ! -f "$MODPATH/zygisk/liblsplant.so" ]; then
-  abort "! 包内缺少 zygisk/liblsplant.so，zip 可能损坏"
+if [ ! -f "$MODPATH/liblsplant.so" ]; then
+  abort "! 包内缺少 liblsplant.so，zip 可能损坏"
 fi
 
 # dex：一体包里在模块根目录；独立 payload 布局里在 payload/
@@ -47,7 +47,7 @@ ui_print "- payload 原生库: $LIB_COUNT 个"
 # 权限：模块目录里现在还有 APK 的 res/assets 等文件，统一给只读即可
 set_perm_recursive "$MODPATH" 0 0 0755 0644
 set_perm "$MODPATH/zygisk/arm64-v8a.so" 0 0 0644
-set_perm "$MODPATH/zygisk/liblsplant.so" 0 0 0644
+set_perm "$MODPATH/liblsplant.so" 0 0 0644
 
 ui_print "- 安装完成"
 ui_print "- 请确认已开启 Zygisk（Magisk / KernelSU 设置内）"

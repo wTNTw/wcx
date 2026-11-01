@@ -174,7 +174,10 @@ public abstract class PackageZygiskApkTask extends DefaultTask {
         Map<String, byte[]> extra = new LinkedHashMap<>();
         extra.putAll(renderTemplates(abi));
         extra.put("zygisk/" + abi + ".so", Files.readAllBytes(getZygiskSo().get().getAsFile().toPath()));
-        extra.put("zygisk/liblsplant.so", Files.readAllBytes(getLsplantSo().get().getAsFile().toPath()));
+        // 注意：Zygisk Next 会把 zygisk/ 目录里的 .so 当成候选模块库加载，
+        // 放第二个 .so 会导致它拿到没有 zygisk_module_entry 的库而静默跳过模块。
+        // 所以 liblsplant.so 放在模块根目录，由注入器自己 dlopen。
+        extra.put("liblsplant.so", Files.readAllBytes(getLsplantSo().get().getAsFile().toPath()));
 
         try (ZipFile src = new ZipFile(apk);
              ZipOutputStream out = new ZipOutputStream(new BufferedOutputStream(
