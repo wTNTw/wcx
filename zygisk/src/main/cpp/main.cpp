@@ -122,22 +122,17 @@ void ResolveModuleDir(int dir_fd) {
     g_module_dir = buf;
 }
 
-void LoadPayloadDex(int module_fd) {
-    int payload_fd = openat(module_fd, "payload", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-    if (payload_fd < 0) {
-        LOGE("模块目录内没有 payload/（%s）", strerror(errno));
-        return;
-    }
-
+/// 从 dir_fd 里收集 classes*.dex 并按序号读取到内存
+void LoadDexFromDir(int dir_fd) {
     std::vector<std::pair<int, std::string>> entries;
-    int scan_fd = dup(payload_fd);
+    int scan_fd = dup(dir_fd);
     if (scan_fd >= 0) {
         DIR *dir = fdopendir(scan_fd);
         if (dir != nullptr) {
             struct dirent *entry;
             while ((entry = readdir(dir)) != nullptr) {
                 struct stat st {};
-                if (fstatat(payload_fd, entry->d_name, &st, AT_SYMLINK_NOFOLLOW) != 0) continue;
+                if (fstatat(dir_fd, entry->d_name, &st, AT_SYMLINK_NOFOLLOW) != 0) continue;
                 if (!S_ISREG(st.st_mode)) continue;
                 int idx = DexIndex(entry->d_name);
                 if (idx < 0) continue;
@@ -153,12 +148,26 @@ void LoadPayloadDex(int module_fd) {
               [](const auto &a, const auto &b) { return a.first < b.first; });
 
     for (const auto &[idx, name] : entries) {
-        DexBlob blob = ReadDexAt(payload_fd, name.c_str());
+        DexBlob blob = ReadDexAt(dir_fd, name.c_str());
         if (blob.data == nullptr) continue;
         LOGI("payload dex 就绪: %s (%zu bytes)", name.c_str(), blob.len);
         g_dex_blobs.push_back(blob);
     }
-    close(payload_fd);
+}
+
+/// payload 的两种布局都支持：
+///   1) 独立模块 zip：<模块目录>/payload/classes*.dex
+///   2) APK 即模块包：<模块目录>/classes*.dex（APK 自身的 dex 直接落到模块根目录）
+void LoadPayloadDex(int module_fd) {
+    int payload_fd = openat(module_fd, "payload", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (payload_fd >= 0) {
+        LoadDexFromDir(payload_fd);
+        close(payload_fd);
+    }
+    if (!g_dex_blobs.empty()) return;
+
+    LOGI("模块目录内没有 payload/，改从模块根目录读取 classes*.dex（APK 一体包布局）");
+    LoadDexFromDir(module_fd);
 }
 
 void PreloadPayloadLibs(int module_fd) {

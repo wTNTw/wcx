@@ -24,7 +24,8 @@
 - `libs/common/stubs/` — compileOnly stubs for WeChat and Android hidden classes
 - `zygisk/` — standalone Zygisk injector (no APK install): `src/main/cpp` native injector +
   LSPlant hook bridge, `magisk/` flashable-zip templates; packaged by
-  `buildSrc/src/main/java/PackageZygiskZipTask.java` into `app/build/outputs/zygisk/*.zip`
+  `buildSrc/src/main/java/PackageZygiskApkTask.java` into a dual-purpose APK at
+  `app/build/outputs/zygisk/*.apk` (rename it to `.zip` to flash as a Magisk/KernelSU module)
 - `buildSrc/` — custom Gradle tasks: `GenerateMethodHashesTask` (`IResolveDex` `resolveDex` method MD5 cache), `ConfigureCargoTask` (Rust NDK linker config)
 
 ## Entry Points & Architecture

@@ -95,6 +95,17 @@ jobs:
           sudo apt update -qq
           sudo apt install -y gcc-multilib || true
 
+      - name: Install Android NDK & CMake
+        run: |
+          SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          echo "SDK=$SDK"
+          yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null 2>&1 || true
+          # :zygisk 的 externalNativeBuild 需要与 libs.versions.toml 完全一致的 NDK；
+          # zipalign/apksigner 需要 build-tools。runner 镜像不保证有这些版本，显式装。
+          "$SDK/cmdline-tools/latest/bin/sdkmanager" --install \
+            "ndk;30.0.14904198" "cmake;3.22.1" "build-tools;36.0.0" >/dev/null 2>&1
+          ls "$SDK/ndk" "$SDK/build-tools"
+
       - name: Build native library
         run: |
           cargo xtask configure
@@ -193,14 +204,24 @@ jobs:
           echo "Collected APKs:"
           ls -1 dist/apk
 
-      - name: Collect Zygisk module zip
+      - name: Collect Zygisk unified package
         if: github.event_name != 'pull_request'
         run: |
           mkdir -p dist/zygisk
-          find app/build/outputs/zygisk -type f -name '*.zip' -exec cp -v {} dist/zygisk/ \; || true
-          echo "Collected Zygisk zips:"
-          ls -1 dist/zygisk
-          test -n "$(ls -A dist/zygisk 2>/dev/null)" || { echo "::error::没有产出 Zygisk 模块 zip"; exit 1; }
+          find app/build/outputs/zygisk -type f \( -name '*.apk' -o -name '*.zip' \) -exec cp -v {} dist/zygisk/ \; || true
+          # 用一体包覆盖 dist/apk 里同 ABI 的普通 APK：发布的 APK 直接就是双用途包
+          for f in dist/zygisk/*.apk; do
+            [ -f "$f" ] || continue
+            case "$(basename "$f")" in
+              *arm64-v8a*)
+                rm -f dist/apk/*arm64-v8a*
+                cp -v "$f" "dist/apk/app-standard-arm64-v8a-release.apk"
+                ;;
+            esac
+          done
+          echo "Collected:"
+          ls -1 dist/zygisk dist/apk
+          test -n "$(ls -A dist/zygisk 2>/dev/null)" || { echo "::error::没有产出一体包"; exit 1; }
 
       - name: Verify APK signatures (fixed keystore)
         if: github.event_name != 'pull_request' && !(github.event_name == 'workflow_dispatch' && inputs.skip_signing)
@@ -252,12 +273,14 @@ jobs:
           name: wcx-apk
           path: dist/apk/*.apk
 
-      - name: Upload Zygisk module zip
+      - name: Upload Zygisk unified package
         if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v7
         with:
           name: wcx-zygisk
-          path: dist/zygisk/*.zip
+          path: |
+            dist/zygisk/*.apk
+            dist/zygisk/*.zip
 
       - name: Upload Release Obfuscation Mapping
         uses: actions/upload-artifact@v7
@@ -285,11 +308,11 @@ jobs:
           name: wcx-apk
           path: artifacts
 
-      - name: Download Zygisk module artifact
+      - name: Download Zygisk unified artifact
         uses: actions/download-artifact@v8
         with:
           name: wcx-zygisk
-          path: artifacts
+          path: artifacts/zygisk
 
       - name: Generate version info
         id: version
@@ -397,11 +420,12 @@ jobs:
 
             ### 📦 下载
             - 下方 Assets 中下载对应架构的 APK
-            - Zygisk 版（不装 APK，需开启 Zygisk、无需 LSPosed）：`wcx-*-zygisk-arm64-v8a.zip`，刷入后重启
+            - arm64 的 APK 是**一体包**：安装即走 LSPosed；把后缀改成 `.zip` 即是在 Magisk / KernelSU / APatch 刷的 Zygisk 模块（无需 LSPosed）
+            - `wcx-*-arm64-v8a.zip`（与 APK 完全相同的字节）供直接刷入
             - update.json 供模块内置更新器使用
           files: |
             artifacts/*.apk
-            artifacts/*.zip
+            artifacts/zygisk/*.zip
             artifacts/update.json
             artifacts/CHANGELOG.md
           prerelease: false

@@ -268,11 +268,13 @@ val generateMethodHashes = tasks.register<GenerateMethodHashesTask>("generateMet
     namespace.set(libs.versions.namespace.get())
 }
 
-// ─── Zygisk 模块 zip（不装 APK 的独立注入形态）──────────────────────────────
-// 依赖 :zygisk 构建出的注入器 .so 与从 lsplant-standalone AAR 取出的 liblsplant.so，
-// 再从刚打出来的 arm64 release APK 里抽 payload（classes*.dex + lib/arm64-v8a/*.so）。
-val packageZygiskZip = tasks.register<PackageZygiskZipTask>("packageZygiskZip") {
-    description = "Package flashable Zygisk module zip (arm64-v8a, standard flavor)"
+// ─── Zygisk 一体包（APK 兼作可刷入模块）────────────────────────────────────
+// 流程：AGP 出 APK → 注入模块条目 → zipalign 重排对齐 → 用仓库固定密钥重签。
+// 产物 wcx-<ver>-arm64-v8a.apk 改名成 .zip 即可在 Magisk / KernelSU / APatch 刷入；
+// Magisk 安装器只解压除 META-INF/* 之外的内容，APK 里的 classes*.dex 与 lib/<abi>/*.so
+// 会原样落到模块目录，正好是注入器需要的 payload。
+val packageZygiskApk = tasks.register<PackageZygiskApkTask>("packageZygiskApk") {
+    description = "把 release APK 变成「可安装 APK + 可刷模块包」一体包 (arm64-v8a)"
     group = "wekit"
 
     dependsOn("assembleStandardRelease")
@@ -285,6 +287,7 @@ val packageZygiskZip = tasks.register<PackageZygiskZipTask>("packageZygiskZip") 
     lsplantSo.set(zygiskProject.layout.buildDirectory.file("lsplant-runtime/liblsplant.so"))
     templateDir.set(rootProject.layout.projectDirectory.dir("zygisk/magisk"))
     outputDir.set(layout.buildDirectory.dir("outputs/zygisk"))
+    rootProjectDir.set(rootProject.projectDir.absolutePath)
     versionName.set(android.defaultConfig.versionName ?: "v0")
     versionCode.set(android.defaultConfig.versionCode ?: 0)
     moduleAuthor.set("wcx-dev")
@@ -292,9 +295,9 @@ val packageZygiskZip = tasks.register<PackageZygiskZipTask>("packageZygiskZip") 
 }
 
 // assembleRelease 跑完后再串一步：finalizedBy 不会造成任务循环
-// （packageZygiskZip 需要 assembleStandardRelease 的产物，但不被它 depend）
+// （packageZygiskApk 需要 assembleStandardRelease 的产物，但不被它 depend）
 tasks.matching { it.name == "assembleRelease" }.configureEach {
-    finalizedBy(packageZygiskZip)
+    finalizedBy(packageZygiskApk)
 }
 
 // --- end tasks ---
