@@ -2,6 +2,9 @@
 members = ["app/src/main/rust/wekit-native/", "wcx-zygisk/native", "xtask"]
 resolver = "3"
 
+[profile.release.package.wcx-zygisk]
+strip = "none"
+
 [profile.release]
 opt-level = "z"
 lto = true

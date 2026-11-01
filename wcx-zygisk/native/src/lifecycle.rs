@@ -21,6 +21,8 @@ use std::{
     },
 };
 
+const WCX_RUN_JAVA_ENTRY: bool = true;
+
 pub struct WcxZygiskModule {
     pub api: *mut ApiTable,
     pub env: *mut RawJNIEnv,
@@ -71,6 +73,50 @@ unsafe fn read_jstring(env: *mut RawJNIEnv, field_ptr: *mut jstring) -> Option<S
         .into_owned();
     ((*fns).v1_6.ReleaseStringUTFChars)(env, jstr, chars);
     Some(s)
+}
+
+
+/// 目标包名（进程名去掉 `:xxx` 后缀）
+fn target_package(process_name: &str) -> &str {
+    process_name.split(':').next().unwrap_or(process_name)
+}
+
+/// 是否应当注入：读 `<模块目录>/target.list`（一行一个包名，# 开头为注释）。
+/// 文件不存在时默认只注入 com.tencent.mm。命中包名的所有进程（含子进程）都会注入。
+fn should_inject(module_dir_fd: i32, process_name: &str) -> bool {
+    let package = target_package(process_name);
+
+    let fd = unsafe {
+        libc::openat(
+            module_dir_fd,
+            c"target.list".as_ptr(),
+            libc::O_RDONLY | libc::O_CLOEXEC,
+        )
+    };
+    if fd < 0 {
+        return package == "com.tencent.mm";
+    }
+
+    let mut buf = [0u8; 4096];
+    let read = unsafe { libc::read(fd, buf.as_mut_ptr().cast(), buf.len()) };
+    unsafe { libc::close(fd) };
+    if read <= 0 {
+        return package == "com.tencent.mm";
+    }
+    let text = String::from_utf8_lossy(&buf[..read as usize]);
+    let mut matched = false;
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        matched = true;
+        if line == package {
+            return true;
+        }
+    }
+    // 有配置文件但没有命中：不注入
+    matched && false
 }
 
 fn send_check_request(api: *mut ApiTable, uid: i32, process_name: &str) -> u8 {
@@ -130,17 +176,19 @@ pub unsafe fn do_pre_app_specialize(module: &mut WcxZygiskModule, args: *mut App
     };
     let uid = *(*args).uid;
 
-    let status = send_check_request(module.api, uid, &nice_name);
-    if status != COMPANION_ENABLED {
-        (*module.api).set_option(DLCLOSE_MODULE_LIBRARY);
-        return;
-    }
-
     let mod_fd = (*module.api).get_module_dir();
     if mod_fd < 0 {
         (*module.api).set_option(DLCLOSE_MODULE_LIBRARY);
         return;
     }
+
+    // 目标判定：本地 target.list（默认 com.tencent.mm），不再依赖 root companion
+    if !should_inject(mod_fd, &nice_name) {
+        unsafe { libc::close(mod_fd) };
+        (*module.api).set_option(DLCLOSE_MODULE_LIBRARY);
+        return;
+    }
+    logi!("Zygisk: {nice_name} 在注入名单内");
     // Preserve the pre-dual-format lifecycle: keep the module directory, then
     // open and copy the payload in postAppSpecialize. No exemptFd dependency.
     module.module_dir_fd = Some(OwnedFd::from_raw_fd(mod_fd));
@@ -282,7 +330,11 @@ pub unsafe fn do_post_app_specialize(module: &mut WcxZygiskModule, _args: *const
         ((*fns).v1_6.DeleteGlobalRef)(module.env, cl);
         return;
     }
-    ((*fns).v1_6.CallStaticVoidMethod)(module.env, entry_cls, init_mid, j_process, j_data, j_apk);
+    // 临时诊断开关：只做原生 LSPlant 初始化，不进入 Kotlin 入口
+    // 诊断模式：跳过 Kotlin 入口（验证仅原生 LSPlant 是否会崩）
+    if WCX_RUN_JAVA_ENTRY {
+        ((*fns).v1_6.CallStaticVoidMethod)(module.env, entry_cls, init_mid, j_process, j_data, j_apk);
+    }
     let failed = ((*fns).v1_6.ExceptionCheck)(module.env) != jni::sys::JNI_FALSE;
     if failed {
         ((*fns).v1_6.ExceptionDescribe)(module.env);
