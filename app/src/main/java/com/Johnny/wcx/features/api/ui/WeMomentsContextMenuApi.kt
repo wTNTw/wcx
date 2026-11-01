@@ -1,10 +1,12 @@
 package com.Johnny.wcx.features.api.ui
 
+import com.Johnny.wcx.utils.HookCallback
+
 import android.app.Activity
 import android.content.Context
 import android.graphics.drawable.Drawable
 import android.view.ContextMenu
-import de.robv.android.xposed.XC_MethodHook
+
 import dev.ujhhgtg.reflekt.reflekt
 import dev.ujhhgtg.reflekt.utils.Modifiers
 import com.Johnny.wcx.dexkit.abc.IResolveDex
@@ -16,6 +18,7 @@ import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.reflection.BString
 import java.lang.reflect.Modifier
 import java.math.BigInteger
+import com.Johnny.wcx.utils.HookParam
 
 @Feature(name = "朋友圈菜单增强扩展", categories = ["API"], description = "为朋友圈消息长按菜单提供添加菜单项功能")
 object WeMomentsContextMenuApi : ApiFeature(), IResolveDex {
@@ -157,7 +160,7 @@ object WeMomentsContextMenuApi : ApiFeature(), IResolveDex {
         }
     }
 
-    private fun handleCreateMenu(param: XC_MethodHook.MethodHookParam) {
+    private fun handleCreateMenu(param: HookParam) {
         val menu = param.args.getOrNull(0) as? ContextMenu? ?: return
         val context = resolveContext(param.thisObject)
 
@@ -175,7 +178,7 @@ object WeMomentsContextMenuApi : ApiFeature(), IResolveDex {
         }
     }
 
-    private fun handleSelectMenu(param: XC_MethodHook.MethodHookParam) {
+    private fun handleSelectMenu(param: HookParam) {
         val menuItem = param.args.getOrNull(0) as? android.view.MenuItem ?: return
         val clickedId = menuItem.itemId
         if (menuItems.values.flatten().none { it.id == clickedId }) return
@@ -191,8 +194,8 @@ object WeMomentsContextMenuApi : ApiFeature(), IResolveDex {
                 if (item.id == clickedId) {
                     item.onClick(context)
                     // 仅当原方法返回 void 时才设置 result = null
-                    if (param.method is java.lang.reflect.Method) {
-                        val returnType = (param.method as java.lang.reflect.Method).returnType
+                    if (param.member is java.lang.reflect.Method) {
+                        val returnType = (param.member as java.lang.reflect.Method).returnType
                         if (returnType == Void.TYPE) {
                             param.result = null
                         }

@@ -1,5 +1,7 @@
 package com.Johnny.wcx.features.items.chat
 
+import com.Johnny.wcx.utils.HookCallback
+
 import android.app.Activity
 import android.hardware.Sensor
 import android.hardware.SensorEvent
@@ -35,7 +37,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.tencent.mm.api.IEmojiInfo
 import com.tencent.mm.pluginsdk.ui.chat.ChatFooter
-import de.robv.android.xposed.XC_MethodHook
+
 import dev.ujhhgtg.reflekt.reflekt
 import dev.ujhhgtg.reflekt.utils.Modifiers
 import com.Johnny.wcx.dexkit.abc.IResolveDex
@@ -66,6 +68,7 @@ import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.sqrt
 import kotlin.random.Random
+import com.Johnny.wcx.utils.HookParam
 
 @Feature(name = "表情游戏控制", categories = ["聊天"], description = "自定义猜拳和骰子的结果")
 object EmojiGameControl : ClickableFeature(), IResolveDex {
@@ -309,11 +312,11 @@ object EmojiGameControl : ClickableFeature(), IResolveDex {
         }
     }
 
-    private fun showSelectDialog(param: XC_MethodHook.MethodHookParam, isDice: Boolean, activity: Activity) {
+    private fun showSelectDialog(param: HookParam, isDice: Boolean, activity: Activity) {
         try {
             // 仅当原方法返回 void 时才设置 result = null
-            if (param.method is java.lang.reflect.Method) {
-                val returnType = (param.method as java.lang.reflect.Method).returnType
+            if (param.member is java.lang.reflect.Method) {
+                val returnType = (param.member as java.lang.reflect.Method).returnType
                 if (returnType == Void.TYPE) {
                     param.result = null
                 }
@@ -480,7 +483,7 @@ object EmojiGameControl : ClickableFeature(), IResolveDex {
     }
 
     private fun sendMultiple(
-        param: XC_MethodHook.MethodHookParam,
+        param: HookParam,
         values: List<Int>,
         isDice: Boolean,
         activity: Activity

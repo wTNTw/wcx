@@ -1,13 +1,16 @@
 package com.Johnny.wcx.dynamic
 
+import com.Johnny.wcx.utils.HookCallback
+
 import android.app.Activity
 import android.content.Intent
 import com.Johnny.wcx.loader.utils.ActivityLauncher
 import com.Johnny.wcx.utils.WeLogger
-import de.robv.android.xposed.XC_MethodHook
-import de.robv.android.xposed.XposedBridge
+
+
 import de.robv.android.xposed.XposedHelpers
 import java.lang.ref.WeakReference
+import com.Johnny.wcx.utils.HookParam
 
 /**
  * 页面生命周期动态兼容层。
@@ -82,8 +85,8 @@ object PageLifecycleCompat {
                 Activity::class.java,
                 "startActivity",
                 Intent::class.java,
-                object : XC_MethodHook() {
-                    override fun beforeHookedMethod(param: MethodHookParam) {
+                object : HookCallback() {
+                    override fun beforeHookedMethod(param: HookParam) {
                         val intent = param.args[0] as? Intent ?: return
                         val component = intent.component ?: return
 
@@ -103,8 +106,8 @@ object PageLifecycleCompat {
                 "startActivity",
                 Intent::class.java,
                 android.os.Bundle::class.java,
-                object : XC_MethodHook() {
-                    override fun beforeHookedMethod(param: MethodHookParam) {
+                object : HookCallback() {
+                    override fun beforeHookedMethod(param: HookParam) {
                         val intent = param.args[0] as? Intent ?: return
                         val component = intent.component ?: return
 
@@ -141,8 +144,8 @@ object PageLifecycleCompat {
                 getHostClassLoader(),
                 "onCreate",
                 android.os.Bundle::class.java,
-                object : XC_MethodHook() {
-                    override fun afterHookedMethod(param: MethodHookParam) {
+                object : HookCallback() {
+                    override fun afterHookedMethod(param: HookParam) {
                         val activity = param.thisObject as? Activity ?: return
                         onLauncherUICreated(activity)
                     }
@@ -154,8 +157,8 @@ object PageLifecycleCompat {
                 className,
                 getHostClassLoader(),
                 "onResume",
-                object : XC_MethodHook() {
-                    override fun afterHookedMethod(param: MethodHookParam) {
+                object : HookCallback() {
+                    override fun afterHookedMethod(param: HookParam) {
                         val activity = param.thisObject as? Activity ?: return
                         onLauncherUIResumed(activity)
                     }
@@ -167,8 +170,8 @@ object PageLifecycleCompat {
                 className,
                 getHostClassLoader(),
                 "onDestroy",
-                object : XC_MethodHook() {
-                    override fun beforeHookedMethod(param: MethodHookParam) {
+                object : HookCallback() {
+                    override fun beforeHookedMethod(param: HookParam) {
                         val activity = param.thisObject as? Activity ?: return
                         onLauncherUIDestroyed(activity)
                     }

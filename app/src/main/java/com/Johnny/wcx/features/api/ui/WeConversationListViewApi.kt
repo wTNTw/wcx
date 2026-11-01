@@ -39,7 +39,7 @@ object WeConversationListViewApi : ApiFeature(), IResolveDex {
     )
 
     fun interface IBindViewListener {
-        fun onBind(param: de.robv.android.xposed.XC_MethodHook.MethodHookParam, row: View, conversation: Any, context: BindContext)
+        fun onBind(param: de.robv.android.xposed.HookParam, row: View, conversation: Any, context: BindContext)
     }
 
     private const val TAG = "WeConversationListViewApi"

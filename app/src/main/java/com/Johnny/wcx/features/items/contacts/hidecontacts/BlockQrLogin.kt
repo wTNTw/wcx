@@ -1,14 +1,17 @@
 package com.Johnny.wcx.features.items.contacts.hidecontacts
 
+import com.Johnny.wcx.utils.HookCallback
+
 import android.app.Activity
 import android.os.Bundle
 import com.Johnny.wcx.features.core.Feature
 import com.Johnny.wcx.features.core.SwitchFeature
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.android.showToast
-import de.robv.android.xposed.XC_MethodHook
-import de.robv.android.xposed.XposedBridge
+
+
 import dev.ujhhgtg.reflekt.utils.toClass
+import com.Johnny.wcx.utils.HookParam
 
 /**
  * 拦截扫码登录。
@@ -47,8 +50,8 @@ object BlockQrLogin : SwitchFeature() {
                 } ?: return@forEach
 
             runCatching {
-                XposedBridge.hookMethod(onCreate, object : XC_MethodHook() {
-                    override fun afterHookedMethod(param: MethodHookParam) {
+                XposedBridge.hookMethod(onCreate, object : HookCallback() {
+                    override fun afterHookedMethod(param: HookParam) {
                         // 必须在 after 里 finish：before 阶段跳过 onCreate 会触发
                         // SuperNotCalledException，整个进程崩掉。
                         val activity = param.thisObject as? Activity ?: return

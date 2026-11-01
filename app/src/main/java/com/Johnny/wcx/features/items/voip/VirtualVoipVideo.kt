@@ -2,6 +2,8 @@
 
 package com.Johnny.wcx.features.items.voip
 
+import com.Johnny.wcx.utils.HookCallback
+
 import android.graphics.ColorSpace
 import android.graphics.SurfaceTexture
 import android.hardware.Camera
@@ -32,7 +34,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import de.robv.android.xposed.XC_MethodHook
+
 import dev.ujhhgtg.reflekt.firstMethod
 import dev.ujhhgtg.reflekt.reflekt
 import dev.ujhhgtg.reflekt.utils.toClass
@@ -51,6 +53,7 @@ import com.Johnny.wcx.utils.android.showToast
 import com.Johnny.wcx.utils.fs.KnownPaths
 import com.Johnny.wcx.utils.reflection.BInt
 import kotlin.io.path.div
+import com.Johnny.wcx.utils.HookParam
 
 @Feature(
     name = "虚拟视频通话", categories = ["聊天", "音视频通话"],
@@ -418,7 +421,7 @@ object VirtualVoipVideo : ClickableFeature(), IResolveDex {
         }
     }
 
-    private fun hijackCamera2Session(param: XC_MethodHook.MethodHookParam) {
+    private fun hijackCamera2Session(param: HookParam) {
         param.args.forEachIndexed { index, arg ->
             if (arg == null) return@forEachIndexed
             val hijackedArg = when (arg) {
@@ -431,7 +434,7 @@ object VirtualVoipVideo : ClickableFeature(), IResolveDex {
                 surface = hijackedArg.playbackSurface,
                 ownsSurface = false
             )
-            WeLogger.d(TAG, "Camera2 session argument replaced: ${param.method.name}")
+            WeLogger.d(TAG, "Camera2 session argument replaced: ${param.member.name}")
             return
         }
     }

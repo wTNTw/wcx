@@ -1,5 +1,7 @@
 package com.Johnny.wcx.features.items.chat
 
+import com.Johnny.wcx.utils.HookCallback
+
 import android.app.Activity
 import android.content.ContentValues
 import android.content.Context
@@ -47,7 +49,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import de.robv.android.xposed.XC_MethodHook
+
 import com.tencent.mm.ui.LauncherUI
 import com.tencent.mm.ui.conversation.BaseConversationUI
 import com.tencent.mm.ui.conversation.ConvBoxServiceConversationUI
@@ -784,7 +786,7 @@ object ConversationAggregation : ClickableFeature(),
         return rewriteContainerSql(sql, folderId).takeIf { it != sql }
     }
 
-    override fun onStartActivity(param: XC_MethodHook.MethodHookParam, intent: Intent) {
+    override fun onStartActivity(param: HookParam, intent: Intent) {
         val folderId = readFolderIdFromIntent(intent) ?: return
         val componentName = intent.component?.className
         if (componentName != CONTAINER_UI_NAME) {
@@ -837,8 +839,8 @@ object ConversationAggregation : ClickableFeature(),
         // 按类名 hook ChattingUI.onPause 在 8.0.78 上打不中（onPause 不在该类里），
         // 所以直接在 Activity 层兜底，容器页自身除外。
         runCatching {
-            val guard = object : XC_MethodHook() {
-                override fun afterHookedMethod(param: XC_MethodHook.MethodHookParam) {
+            val guard = object : HookCallback() {
+                override fun afterHookedMethod(param: HookParam) {
                     disableMemberTransition(param.thisObject as? Activity ?: return)
                 }
             }
@@ -977,7 +979,7 @@ object ConversationAggregation : ClickableFeature(),
         }
     }
 
-    private fun handleMvvmFolderTap(param: XC_MethodHook.MethodHookParam) {
+    private fun handleMvvmFolderTap(param: HookParam) {
         val itemView = param.args[0] as View
         val data = param.args[1]!!
 
@@ -1641,7 +1643,7 @@ object ConversationAggregation : ClickableFeature(),
 
 
 
-    private fun XC_MethodHook.MethodHookParam.tintHolder() {
+    private fun HookParam.tintHolder() {
         val holder = args?.getOrNull(0) ?: return
         val itemView = runCatching {
             holder.javaClass.getMethod("getItemView").invoke(holder) as? View

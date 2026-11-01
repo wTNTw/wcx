@@ -1,14 +1,17 @@
 package com.Johnny.wcx.features.items.chat
 
+import com.Johnny.wcx.utils.HookCallback
+
 import android.view.View
 import android.view.ViewGroup
 import com.Johnny.wcx.features.core.Feature
 import com.Johnny.wcx.features.core.SwitchFeature
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.reflection.ClassLoaders
-import de.robv.android.xposed.XC_MethodHook
-import de.robv.android.xposed.XposedBridge
+
+
 import de.robv.android.xposed.XposedHelpers
+import com.Johnny.wcx.utils.HookParam
 
 /**
  * 隐藏输入框右侧的「语音转文字」按钮。
@@ -36,8 +39,8 @@ object DisableSpeechToTextButton : SwitchFeature() {
     override fun onEnable() {
         runCatching {
             val clazz = XposedHelpers.findClass(CHAT_FOOTER, ClassLoaders.HOST)
-            XposedBridge.hookAllConstructors(clazz, object : XC_MethodHook() {
-                override fun afterHookedMethod(param: MethodHookParam) {
+            XposedBridge.hookAllConstructors(clazz, object : HookCallback() {
+                override fun afterHookedMethod(param: HookParam) {
                     val footer = param.thisObject as? ViewGroup ?: return
                     // 构造期还没 addView 完，post 到下一帧再找
                     footer.post { runCatching { hideSpeechButton(footer) } }

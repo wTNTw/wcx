@@ -1,0 +1,7 @@
+id=wcx_zygisk
+name=WCX
+version=@VERSION_NAME@
+versionCode=@VERSION_CODE@
+author=ujhhgtg
+description=WCX (@VARIANT@) — Zygisk mode. Manage per-Android-user injection targets from the KernelSU WebUI.
+#updateJson=

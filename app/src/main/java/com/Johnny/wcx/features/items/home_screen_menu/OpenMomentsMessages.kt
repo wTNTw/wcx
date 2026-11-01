@@ -1,13 +1,16 @@
 package com.Johnny.wcx.features.items.home_screen_menu
 
+import com.Johnny.wcx.utils.HookCallback
+
 import android.content.Intent
-import de.robv.android.xposed.XC_MethodHook
+
 import com.Johnny.wcx.features.api.ui.WeHomeScreenPopupMenuApi
 import com.Johnny.wcx.features.core.Feature
 import com.Johnny.wcx.features.core.SwitchFeature
 import com.Johnny.wcx.ui.utils.CheckCircleIcon
 import com.Johnny.wcx.utils.HostInfo
 import com.Johnny.wcx.utils.android.showToast
+import com.Johnny.wcx.utils.HookParam
 
 /**
  * 首页右上角菜单 → 朋友圈消息。
@@ -33,7 +36,7 @@ object OpenMomentsMessages : SwitchFeature(), WeHomeScreenPopupMenuApi.IMenuItem
         WeHomeScreenPopupMenuApi.removeProvider(this)
     }
 
-    override fun getMenuItems(param: XC_MethodHook.MethodHookParam): List<WeHomeScreenPopupMenuApi.MenuItem> {
+    override fun getMenuItems(param: HookParam): List<WeHomeScreenPopupMenuApi.MenuItem> {
         return listOf(
             WeHomeScreenPopupMenuApi.MenuItem(777013, "朋友圈消息", CheckCircleIcon) {
                 openMomentsMessages()

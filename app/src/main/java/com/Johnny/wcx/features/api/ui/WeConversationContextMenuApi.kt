@@ -1,10 +1,12 @@
 package com.Johnny.wcx.features.api.ui
 
+import com.Johnny.wcx.utils.HookCallback
+
 import android.app.Activity
 import android.graphics.drawable.Drawable
 import android.view.ContextMenu
 import android.widget.AdapterView
-import de.robv.android.xposed.XC_MethodHook
+
 import dev.ujhhgtg.reflekt.reflekt
 import dev.ujhhgtg.reflekt.utils.Modifiers
 import com.Johnny.wcx.dexkit.abc.IResolveDex
@@ -13,6 +15,7 @@ import com.Johnny.wcx.features.core.ApiFeature
 import com.Johnny.wcx.features.core.Feature
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.reflection.BString
+import com.Johnny.wcx.utils.HookParam
 
 @Feature(
     name = "对话菜单增强扩展",
@@ -85,7 +88,7 @@ object WeConversationContextMenuApi : ApiFeature(), IResolveDex {
         }
     }
 
-    private fun handleCreateMenu(param: XC_MethodHook.MethodHookParam) {
+    private fun handleCreateMenu(param: HookParam) {
         val menu = param.args.getOrNull(0) as? ContextMenu ?: return
         val info = param.args.getOrNull(2) as? AdapterView.AdapterContextMenuInfo
         val groupId = info?.position ?: 0
@@ -102,7 +105,7 @@ object WeConversationContextMenuApi : ApiFeature(), IResolveDex {
         }
     }
 
-    private fun handleSelectMenu(param: XC_MethodHook.MethodHookParam) {
+    private fun handleSelectMenu(param: HookParam) {
         val menuItem = param.args.getOrNull(0) as? android.view.MenuItem ?: return
         val clickedId = menuItem.itemId
 

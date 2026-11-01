@@ -1,5 +1,7 @@
 package com.Johnny.wcx.features.items.voip
 
+import com.Johnny.wcx.utils.HookCallback
+
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.clickable
@@ -22,8 +24,9 @@ import com.Johnny.wcx.ui.content.DefaultColumn
 import com.Johnny.wcx.ui.content.TextButton
 import com.Johnny.wcx.ui.utils.showComposeDialog
 import com.Johnny.wcx.utils.WeLogger
-import de.robv.android.xposed.XC_MethodHook
+
 import org.luckypray.dexkit.query.enums.StringMatchType
+import com.Johnny.wcx.utils.HookParam
 
 @Feature(name = "屏蔽铃声", categories = ["聊天", "音视频通话"], description = "屏蔽音视频通话铃声")
 object BlockVoipRingtone : ClickableFeature(), IResolveDex {
@@ -132,19 +135,19 @@ object BlockVoipRingtone : ClickableFeature(), IResolveDex {
     }
 
     /** 只有原方法返回 void 时才能用 setResult 跳过，否则会破坏调用方拿到的返回值。 */
-    private fun canSkip(param: XC_MethodHook.MethodHookParam): Boolean {
-        val m = param.method as? java.lang.reflect.Method ?: return false
+    private fun canSkip(param: HookParam): Boolean {
+        val m = param.member as? java.lang.reflect.Method ?: return false
         return m.returnType == Void.TYPE
     }
 
-    private fun tryBlockRingtone(param: XC_MethodHook.MethodHookParam) {
+    private fun tryBlockRingtone(param: HookParam) {
         try {
             val bundle = (param.args.getOrNull(1) as? Bundle) ?: (param.args.getOrNull(0) as? Bundle) ?: return
             // 之前这里写成 val scene = "scene"（常量），判断永远不成立，等于这条路径从来没生效过。
             val scene = bundle.getString("scene") ?: return
             if (!scene.equals("start", ignoreCase = true)) return
             if (!canSkip(param)) {
-                WeLogger.w(TAG, "skip blocked: ${param.method.name} is not void, 不拦截以免破坏返回值")
+                WeLogger.w(TAG, "skip blocked: ${param.member.name} is not void, 不拦截以免破坏返回值")
                 return
             }
             val isOutCall = bundle.getBoolean("isOutCall")
@@ -154,14 +157,14 @@ object BlockVoipRingtone : ClickableFeature(), IResolveDex {
                 // 8.0.76 的 kj 返回 boolean；旧版 playSound 为 void。
                 // 无论哪种返回类型，置 result 都会跳过原方法体，从而不播放铃声。
                 param.result = null
-                WeLogger.d(TAG, "blocked scene=start, isOutCall=$isOutCall, method=${param.method.name}")
+                WeLogger.d(TAG, "blocked scene=start, isOutCall=$isOutCall, method=${param.member.name}")
             }
         } catch (e: Throwable) {
             WeLogger.w(TAG, "tryBlockRingtone error: ${e.message}")
         }
     }
 
-    private fun tryBlockStartRing(param: XC_MethodHook.MethodHookParam) {
+    private fun tryBlockStartRing(param: HookParam) {
         try {
             val isOutCall = param.args.getOrNull(2) as? Boolean ?: return
             val disOutCall = isOutCall && disableOutCall
@@ -177,10 +180,10 @@ object BlockVoipRingtone : ClickableFeature(), IResolveDex {
         }
     }
 
-    private fun tryBlockIncomingRing(param: XC_MethodHook.MethodHookParam) {
+    private fun tryBlockIncomingRing(param: HookParam) {
         if (disableInCall && canSkip(param)) {
             param.result = null // void 方法必须置 null，否则触发返回值类型校验异常
-            WeLogger.d(TAG, "blocked incoming ring, method=${param.method.name}")
+            WeLogger.d(TAG, "blocked incoming ring, method=${param.member.name}")
         }
     }
 

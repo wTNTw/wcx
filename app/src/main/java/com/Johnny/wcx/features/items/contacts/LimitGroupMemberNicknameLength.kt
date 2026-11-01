@@ -1,5 +1,7 @@
 package com.Johnny.wcx.features.items.contacts
 
+import com.Johnny.wcx.utils.HookCallback
+
 import android.text.SpannableStringBuilder
 import android.view.View
 import android.widget.TextView
@@ -14,7 +16,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
-import de.robv.android.xposed.XC_MethodHook
+
 import dev.ujhhgtg.reflekt.reflekt
 import com.Johnny.wcx.features.api.ui.WeChatMessageViewApi
 import com.Johnny.wcx.features.core.ClickableFeature
@@ -26,6 +28,7 @@ import com.Johnny.wcx.ui.content.DefaultColumn
 import com.Johnny.wcx.ui.content.TextButton
 import com.Johnny.wcx.ui.utils.showComposeDialog
 import com.Johnny.wcx.utils.android.showToast
+import com.Johnny.wcx.utils.HookParam
 
 @Feature(
     name = "限制群成员昵称长度",
@@ -79,7 +82,7 @@ object LimitGroupMemberNicknameLength : ClickableFeature(), WeChatMessageViewApi
         }
     }
 
-    override fun onCreateView(param: XC_MethodHook.MethodHookParam, view: View) {
+    override fun onCreateView(param: HookParam, view: View) {
         val msgInfo = WeChatMessageViewApi.getMsgInfoFromParam(param)
         if (!msgInfo.isInGroupChat) return
         if (msgInfo.isSend != 0) return

@@ -1,5 +1,7 @@
 package com.Johnny.wcx.features.items.home_screen_menu
 
+import com.Johnny.wcx.utils.HookCallback
+
 import android.app.Activity
 import android.graphics.drawable.Drawable
 import android.view.MotionEvent
@@ -8,7 +10,7 @@ import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.ImageView
 import com.tencent.mm.ui.LauncherUI
-import de.robv.android.xposed.XC_MethodHook
+
 import dev.ujhhgtg.reflekt.reflekt
 import com.Johnny.wcx.features.api.ui.WeHomeScreenPopupMenuApi
 import com.Johnny.wcx.features.core.Feature
@@ -32,6 +34,7 @@ import com.composables.icons.materialsymbols.MaterialSymbols
 import com.composables.icons.materialsymbols.outlined.Package_2
 import com.Johnny.wcx.ui.utils.LifecycleOwnerProvider
 import com.Johnny.wcx.ui.utils.setLifecycleOwner
+import com.Johnny.wcx.utils.HookParam
 
 private const val TAG = "DisableMainPagePullDown"
 
@@ -105,7 +108,7 @@ object DisableMainPagePullDown : SwitchFeature(), WeHomeScreenPopupMenuApi.IMenu
         }
     }
 
-    override fun getMenuItems(param: XC_MethodHook.MethodHookParam): List<WeHomeScreenPopupMenuApi.MenuItem> {
+    override fun getMenuItems(param: HookParam): List<WeHomeScreenPopupMenuApi.MenuItem> {
         if (!showInPlusMenu) return emptyList()
         return listOf(
             WeHomeScreenPopupMenuApi.MenuItem(

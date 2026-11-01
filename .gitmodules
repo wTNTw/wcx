@@ -4,3 +4,12 @@
 [submodule "libs/common/reflekt"]
 	path = libs/common/reflekt
 	url = https://github.com/Ujhhgtg/reflekt
+[submodule "zygisk/third_party/lsplant"]
+	path = zygisk/third_party/lsplant
+	url = https://github.com/LSPosed/LSPlant.git
+[submodule "third_party/lsplant"]
+	path = third_party/lsplant
+	url = https://github.com/LSPosed/LSPlant.git
+[submodule "third_party/xz-embedded"]
+	path = third_party/xz-embedded
+	url = https://github.com/tukaani-project/xz-embedded.git

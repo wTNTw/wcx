@@ -1,7 +1,9 @@
 package com.Johnny.wcx.features.api.ui
 
+import com.Johnny.wcx.utils.HookCallback
+
 import android.view.View
-import de.robv.android.xposed.XC_MethodHook
+
 import dev.ujhhgtg.reflekt.reflekt
 import com.Johnny.wcx.dexkit.abc.IResolveDex
 import com.Johnny.wcx.dexkit.dsl.dexMethod
@@ -13,13 +15,14 @@ import com.Johnny.wcx.utils.WeLogger
 import java.util.Collections
 import java.util.WeakHashMap
 import java.util.concurrent.CopyOnWriteArrayList
+import com.Johnny.wcx.utils.HookParam
 
 @Feature(name = "消息 View 创建监听服务", categories = ["API"], description = "提供消息 View 创建监听能力")
 object WeChatMessageViewApi : ApiFeature(), IResolveDex {
 
     fun interface ICreateViewListener {
         fun onCreateView(
-            param: XC_MethodHook.MethodHookParam, view: View
+            param: HookParam, view: View
         )
     }
 
@@ -141,7 +144,7 @@ object WeChatMessageViewApi : ApiFeature(), IResolveDex {
         }
     }
 
-    fun getChattingContextFromParam(param: XC_MethodHook.MethodHookParam): Any {
+    fun getChattingContextFromParam(param: HookParam): Any {
         return param.thisObject!!.reflekt()
             .firstField { type = WeMessageApi.classChattingContext.clazz }
             .get()!!
@@ -159,7 +162,7 @@ object WeChatMessageViewApi : ApiFeature(), IResolveDex {
     fun getBoundMessage(view: View): MessageInfo? =
         synchronized(currentBindings) { currentBindings[view] }
 
-    fun getMsgInfoFromParam(param: XC_MethodHook.MethodHookParam): MessageInfo {
+    fun getMsgInfoFromParam(param: HookParam): MessageInfo {
         val item = param.args[1]
         val current = item?.let { findMessageInfo(it) }
         if (current != null) return current

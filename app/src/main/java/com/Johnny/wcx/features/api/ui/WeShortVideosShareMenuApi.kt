@@ -1,8 +1,10 @@
 package com.Johnny.wcx.features.api.ui
 
+import com.Johnny.wcx.utils.HookCallback
+
 import android.graphics.drawable.Drawable
 import android.view.ContextMenu
-import de.robv.android.xposed.XC_MethodHook
+
 import dev.ujhhgtg.reflekt.reflekt
 import com.Johnny.wcx.dexkit.abc.IResolveDex
 import com.Johnny.wcx.dexkit.dsl.dexMethod
@@ -10,6 +12,7 @@ import com.Johnny.wcx.features.core.ApiFeature
 import com.Johnny.wcx.features.core.Feature
 import org.json.JSONObject
 import java.util.LinkedList
+import com.Johnny.wcx.utils.HookParam
 
 @Feature(name = "视频号分享菜单扩展", categories = ["API"], description = "为视频号分享菜单提供添加菜单项功能")
 object WeShortVideosShareMenuApi : ApiFeature(), IResolveDex {
@@ -21,7 +24,7 @@ object WeShortVideosShareMenuApi : ApiFeature(), IResolveDex {
     data class MenuItem(
         val id: Int,
         val text: String, val drawable: Drawable,
-        val onClick: (XC_MethodHook.MethodHookParam, Int, List<JSONObject>) -> Unit
+        val onClick: (HookParam, Int, List<JSONObject>) -> Unit
     )
 
     private val menuItems = mutableMapOf<String, List<MenuItem>>()
@@ -135,7 +138,7 @@ object WeShortVideosShareMenuApi : ApiFeature(), IResolveDex {
     }
 
     private fun handleOnSelectMenuItem(
-        param: XC_MethodHook.MethodHookParam,
+        param: HookParam,
         menuItem: android.view.MenuItem,
         baseFinderFeed: Any
     ) {
@@ -169,8 +172,8 @@ object WeShortVideosShareMenuApi : ApiFeature(), IResolveDex {
                 item.onClick(param, mediaType, mediaJsonList)
                 try {
                     // 仅当原方法返回 void 时才设置 result = null
-                    if (param.method is java.lang.reflect.Method) {
-                        val returnType = (param.method as java.lang.reflect.Method).returnType
+                    if (param.member is java.lang.reflect.Method) {
+                        val returnType = (param.member as java.lang.reflect.Method).returnType
                         if (returnType == Void.TYPE) {
                             param.result = null
                         }

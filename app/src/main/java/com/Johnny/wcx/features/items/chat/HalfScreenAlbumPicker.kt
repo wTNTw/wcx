@@ -1,5 +1,7 @@
 package com.Johnny.wcx.features.items.chat
 
+import com.Johnny.wcx.utils.HookParam
+
 import android.app.Activity
 import android.content.Intent
 import android.content.res.Configuration
@@ -135,7 +137,7 @@ object HalfScreenAlbumPicker : ClickableFeature() {
     private var slideInTransition: Pair<Int, Int>? = null
 
     /** Live only while the picker is inside onCreate; see [installTransitionCapture]. */
-    private var transitionCaptureUnhook: de.robv.android.xposed.XC_MethodHook.Unhook? = null
+    private var transitionCaptureUnhook: de.robv.android.xposed.HookCallback.Unhook? = null
 
     /**
      * The close animation pair the picker gives itself, read straight out of its intent.

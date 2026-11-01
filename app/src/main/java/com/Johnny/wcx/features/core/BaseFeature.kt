@@ -2,9 +2,11 @@
 
 package com.Johnny.wcx.features.core
 
+import com.Johnny.wcx.utils.HookCallback
+
 import androidx.compose.runtime.Composable
-import de.robv.android.xposed.XC_MethodHook
-import de.robv.android.xposed.XposedBridge
+
+
 import dev.ujhhgtg.reflekt.reflected.BaseReflectedMethod
 import dev.ujhhgtg.reflekt.reflected.ReflectedConstructor
 import dev.ujhhgtg.reflekt.reflekt
@@ -16,6 +18,7 @@ import com.Johnny.wcx.utils.WeLogger
 import org.luckypray.dexkit.DexKitBridge
 import java.lang.reflect.Executable
 import kotlin.reflect.KClass
+import com.Johnny.wcx.utils.HookParam
 
 abstract class BaseFeature {
 
@@ -92,8 +95,8 @@ abstract class BaseFeature {
         dexDelegates.forEach { it.findInline(dexKit) }
     }
 
-    internal val unhooks = mutableListOf<XC_MethodHook.Unhook>()
-    internal fun registerUnhook(u: XC_MethodHook.Unhook) {
+    internal val unhooks = mutableListOf<HookCallback.Unhook>()
+    internal fun registerUnhook(u: com.Johnny.wcx.utils.HookHandle) {
         unhooks += u
     }
 
@@ -111,8 +114,8 @@ abstract class BaseFeature {
         XposedBridge.hookMethod(
             this,
             object :
-                XC_MethodHook(priority) {
-                override fun beforeHookedMethod(param: MethodHookParam) {
+                HookCallback(priority) {
+                override fun beforeHookedMethod(param: HookParam) {
                     executeHookAction(param, action)
                 }
             }
@@ -157,8 +160,8 @@ abstract class BaseFeature {
         XposedBridge.hookMethod(
             this,
             object :
-                XC_MethodHook(priority) {
-                override fun afterHookedMethod(param: MethodHookParam) {
+                HookCallback(priority) {
+                override fun afterHookedMethod(param: HookParam) {
                     executeHookAction(param, action)
                 }
             }
@@ -202,7 +205,7 @@ abstract class BaseFeature {
 
     // --- end dex delegate ---
 
-    internal fun executeHookAction(param: XC_MethodHook.MethodHookParam, action: HookAction) {
+    internal fun executeHookAction(param: HookParam, action: HookAction) {
         runCatching {
             action(param)
         }.onFailure { e -> WeLogger.e("executeHookAction", "failed to execute hook of $name", e) }

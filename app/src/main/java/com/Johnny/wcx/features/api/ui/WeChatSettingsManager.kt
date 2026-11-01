@@ -1,10 +1,14 @@
 package com.Johnny.wcx.features.api.ui
 
+import com.Johnny.wcx.utils.HookParam
+
+import com.Johnny.wcx.utils.HookCallback
+
 import android.app.Activity
 import android.content.Context
 import androidx.annotation.Keep
 import com.android.dx.stock.ProxyBuilder
-import de.robv.android.xposed.XC_MethodHook
+
 import dev.ujhhgtg.reflekt.reflekt
 import dev.ujhhgtg.reflekt.utils.createInstance
 import dev.ujhhgtg.reflekt.utils.toClass
@@ -43,8 +47,8 @@ class WeChatSettingsManager(
     private var dynamicResIdCounter = -2000
     private var itemIndexCounter = 0
 
-    private var contextGetStringUnhook: XC_MethodHook.Unhook? = null
-    private var resourcesGetStringUnhook: XC_MethodHook.Unhook? = null
+    private var contextGetStringUnhook: com.Johnny.wcx.utils.HookHandle? = null
+    private var resourcesGetStringUnhook: com.Johnny.wcx.utils.HookHandle? = null
 
     // 依靠 Marker 接口隔离 Proxy 类缓存
     interface M0; interface M1; interface M2; interface M3; interface M4; interface M5; interface M6; interface M7; interface M8; interface M9; interface M10

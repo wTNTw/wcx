@@ -1,5 +1,7 @@
 package com.Johnny.wcx.features.items.beautify
 
+import com.Johnny.wcx.utils.HookCallback
+
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -51,7 +53,7 @@ import com.composables.icons.materialsymbols.outlined.Delete
 import com.composables.icons.materialsymbols.outlined.Upload_file
 import com.tencent.mm.ui.base.AnimImageView
 import com.tencent.mm.ui.widget.MMNeat7extView
-import de.robv.android.xposed.XC_MethodHook
+
 import com.Johnny.wcx.activity.TransparentActivity
 import com.Johnny.wcx.features.api.core.models.MessageType
 import com.Johnny.wcx.features.api.ui.WeChatMessageViewApi
@@ -78,6 +80,7 @@ import kotlin.io.path.deleteIfExists
 import kotlin.io.path.div
 import kotlin.io.path.exists
 import androidx.compose.ui.graphics.Color as ComposeColor
+import com.Johnny.wcx.utils.HookParam
 
 @Feature(name = "自定义消息气泡", categories = ["界面美化", "聊天"], description = "自定义聊天中的消息气泡图片和颜色")
 object CustomMessageBubbles : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener {
@@ -190,7 +193,7 @@ object CustomMessageBubbles : ClickableFeature(), WeChatMessageViewApi.ICreateVi
         view.javaClass == TextView::class.java
                 && view.tag?.javaClass?.name?.startsWith("com.tencent.mm.ui.chatting.viewitems") == true
 
-    override fun onCreateView(param: XC_MethodHook.MethodHookParam, view: View) {
+    override fun onCreateView(param: HookParam, view: View) {
         val msgInfo = WeChatMessageViewApi.getMsgInfoFromParam(param)
 
         @Suppress("DEPRECATION")

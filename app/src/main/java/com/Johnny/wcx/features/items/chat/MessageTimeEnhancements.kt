@@ -1,5 +1,7 @@
 package com.Johnny.wcx.features.items.chat
 
+import com.Johnny.wcx.utils.HookCallback
+
 import android.annotation.SuppressLint
 import android.graphics.Color
 import android.util.TypedValue
@@ -37,7 +39,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.toColorInt
 import androidx.core.view.isVisible
-import de.robv.android.xposed.XC_MethodHook
+
 import dev.ujhhgtg.reflekt.reflekt
 import com.Johnny.wcx.features.api.core.models.MessageInfo
 import com.Johnny.wcx.features.api.ui.WeChatMessageViewApi
@@ -52,6 +54,7 @@ import com.Johnny.wcx.ui.utils.showComposeDialog
 import com.Johnny.wcx.utils.android.isDarkMode
 import com.Johnny.wcx.utils.android.showToast
 import com.Johnny.wcx.utils.formatEpoch
+import com.Johnny.wcx.utils.HookParam
 
 
 @Feature(name = "消息时间增强", categories = ["聊天"], description = "显示精确消息发送时间并允许显示更多详情")
@@ -139,7 +142,7 @@ object MessageTimeEnhancements : ClickableFeature(),
 
     @SuppressLint("SetTextI18n")
     override fun onCreateView(
-        param: XC_MethodHook.MethodHookParam,
+        param: HookParam,
         view: View
     ) {
         val tag = view.tag ?: return

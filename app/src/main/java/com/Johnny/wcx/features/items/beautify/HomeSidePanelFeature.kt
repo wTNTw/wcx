@@ -1,5 +1,7 @@
 package com.Johnny.wcx.features.items.beautify
 
+import com.Johnny.wcx.utils.HookCallback
+
 import android.app.Activity
 import android.app.Application
 import android.content.Context
@@ -62,7 +64,7 @@ import com.Johnny.wcx.ui.content.Button
 import com.Johnny.wcx.ui.content.DefaultColumn
 import com.Johnny.wcx.ui.content.TextButton
 import com.Johnny.wcx.ui.utils.showComposeDialog
-import de.robv.android.xposed.XC_MethodHook
+
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.hookBeforeDirectly
 import kotlinx.serialization.builtins.ListSerializer
@@ -125,6 +127,7 @@ import com.composables.icons.materialsymbols.outlinedfilled.Qr_code_scanner
 import com.composables.icons.materialsymbols.outlinedfilled.Settings
 import com.composables.icons.materialsymbols.outlinedfilled.Update
 import com.composables.icons.materialsymbols.outlinedfilled.Wallet
+import com.Johnny.wcx.utils.HookParam
 
 /**
  * 微信主页侧滑侧边栏功能（XML+原生 View 实现）
@@ -1040,7 +1043,7 @@ private fun isHomeTabClass(className: String): Boolean {
         loadPanelData(act)
     }
 
-    private fun handleDispatchTouch(param: XC_MethodHook.MethodHookParam) {
+    private fun handleDispatchTouch(param: HookParam) {
         if (!masterEnabled) return
         val mode = migratedTriggerMode()
         if ((mode and MODE_FULL_SWIPE) == 0) return

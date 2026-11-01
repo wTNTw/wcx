@@ -1,5 +1,7 @@
 package com.Johnny.wcx.features.items.moments
 
+import com.Johnny.wcx.utils.HookCallback
+
 import android.app.Activity
 import android.view.View
 import android.view.ViewGroup
@@ -7,9 +9,10 @@ import android.widget.TextView
 import com.Johnny.wcx.features.core.Feature
 import com.Johnny.wcx.features.core.SwitchFeature
 import com.Johnny.wcx.utils.WeLogger
-import de.robv.android.xposed.XC_MethodHook
-import de.robv.android.xposed.XposedBridge
+
+
 import dev.ujhhgtg.reflekt.utils.toClass
+import com.Johnny.wcx.utils.HookParam
 
 /**
  * 朋友圈相关的「入口 / 分组」隐藏。
@@ -85,8 +88,8 @@ private fun hookListFilter(
         return
     }
     runCatching {
-        XposedBridge.hookMethod(onResume, object : XC_MethodHook() {
-            override fun afterHookedMethod(param: MethodHookParam) {
+        XposedBridge.hookMethod(onResume, object : HookCallback() {
+            override fun afterHookedMethod(param: HookParam) {
                 if (!feature.isEnabled) return
                 val activity = param.thisObject as? Activity ?: return
                 runCatching { hideListRows(activity, predicate) }

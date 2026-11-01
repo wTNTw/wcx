@@ -1,5 +1,7 @@
 package com.Johnny.wcx.features.items.beautify.home_screen_panel
 
+import com.Johnny.wcx.utils.HookParam
+
 import android.animation.Animator
 import android.animation.AnimatorListenerAdapter
 import android.animation.ValueAnimator
@@ -731,7 +733,7 @@ object HomeSidePanel : SwitchFeature() {
             observedToolbarProfileHosts.clear()
             animator?.cancel()
             animator = null
-            tabsAdapterHookHandles.forEach { (it as? de.robv.android.xposed.XC_MethodHook.Unhook)?.unhook() }
+            tabsAdapterHookHandles.forEach { (it as? de.robv.android.xposed.HookCallback.Unhook)?.unhook() }
             tabsAdapterHookHandles.clear()
             panelState.close()
             pendingSyncFlags = 0

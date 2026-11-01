@@ -1,5 +1,7 @@
 package com.Johnny.wcx.features.items.chat
 
+import com.Johnny.wcx.utils.HookCallback
+
 import dev.ujhhgtg.reflekt.utils.makeAccessible
 import com.Johnny.wcx.constants.PackageNames
 import com.Johnny.wcx.dexkit.abc.IResolveDex
@@ -10,12 +12,13 @@ import com.Johnny.wcx.features.core.Feature
 import com.Johnny.wcx.features.core.SwitchFeature
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.hookDirectly
-import de.robv.android.xposed.XC_MethodHook
+
 import com.Johnny.wcx.utils.reflection.bool
 import com.Johnny.wcx.utils.reflection.int
 import com.Johnny.wcx.utils.reflection.void
 import java.lang.reflect.Field
 import java.util.concurrent.CopyOnWriteArraySet
+import com.Johnny.wcx.utils.HookParam
 
 @Feature(
     name = "解除消息多选数量限制",
@@ -96,7 +99,7 @@ object RemoveMessageSelectionLimit : SwitchFeature(), IResolveDex {
 
     private val selectedMessageCountOverride = ThreadLocal<Int>()
 
-    // 本地 Xposed 桥的 MethodHookParam.extra 为 val+Bundle（非 fork 的 Any），
+    // 本地 Xposed 桥的 HookParam.extra 为 val+Bundle（非 fork 的 Any），
     // 临时状态改用 ThreadLocal 传递（与 selectedMessageCountOverride 同风格）
     private val tempRemovedSelections = ThreadLocal<TemporarilyRemovedSelections?>()
 
@@ -121,8 +124,8 @@ object RemoveMessageSelectionLimit : SwitchFeature(), IResolveDex {
             }
         }
 
-        val hook = object : XC_MethodHook() {
-            override fun beforeHookedMethod(param: XC_MethodHook.MethodHookParam) {
+        val hook = object : HookCallback() {
+            override fun beforeHookedMethod(param: HookParam) {
                 val adapter = param.thisObject ?: return
                 val message = param.args[0] ?: return
                 @Suppress("UNCHECKED_CAST")
@@ -136,7 +139,7 @@ object RemoveMessageSelectionLimit : SwitchFeature(), IResolveDex {
                 selectedMessageCountOverride.set(selectedMessages.size + removed.size + 1)
             }
 
-            override fun afterHookedMethod(param: XC_MethodHook.MethodHookParam) {
+            override fun afterHookedMethod(param: HookParam) {
                 val state = tempRemovedSelections.get() ?: return
                 val remainingAndNew = state.selectedMessages.toList()
                 state.selectedMessages.clear()

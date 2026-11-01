@@ -1,13 +1,16 @@
 package com.Johnny.wcx.loader.utils
 
+import com.Johnny.wcx.utils.HookCallback
+
 import android.content.Intent
 import android.os.Bundle
-import de.robv.android.xposed.XC_MethodHook
+
 import dev.ujhhgtg.reflekt.reflekt
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.hookDirectly
 import com.Johnny.wcx.utils.reflection.BString
 import com.Johnny.wcx.utils.reflection.ClassLoaders
+import com.Johnny.wcx.utils.HookParam
 
 object ParcelableFixer {
 
@@ -43,12 +46,12 @@ object ParcelableFixer {
     }
 
     private fun hookIntentMethods() {
-        val hook = object : XC_MethodHook() {
-            override fun beforeHookedMethod(param: MethodHookParam) {
+        val hook = object : HookCallback() {
+            override fun beforeHookedMethod(param: HookParam) {
                 (param.thisObject as? Intent)?.let { fixIntentExtrasClassLoader(it) }
             }
 
-            override fun afterHookedMethod(param: MethodHookParam) {
+            override fun afterHookedMethod(param: HookParam) {
                 val intent = param.thisObject as? Intent ?: return
                 if (!isTargetIntent(intent)) return
                 val cl = hybridClassLoader

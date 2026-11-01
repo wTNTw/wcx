@@ -1,5 +1,7 @@
 package com.Johnny.wcx.features.items.chat
 
+import com.Johnny.wcx.utils.HookCallback
+
 import android.annotation.SuppressLint
 import android.content.ContentValues
 import android.view.View
@@ -49,10 +51,11 @@ import com.Johnny.wcx.ui.utils.showComposeDialog
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.android.showToast
 import com.Johnny.wcx.utils.strings.isGroupChatWxId
-import de.robv.android.xposed.XC_MethodHook
+
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import com.Johnny.wcx.utils.HookParam
 
 @SuppressLint("SetTextI18n")
 @Feature(
@@ -227,7 +230,7 @@ object MessageFilterShield : ClickableFeature(),
 
     // ==================== 消息 View 创建监听（隐藏策略） ====================
 
-    override fun onCreateView(param: XC_MethodHook.MethodHookParam, view: View) {
+    override fun onCreateView(param: HookParam, view: View) {
         if (!masterEnabled) return
         if (strategy != FilterStrategy.HIDE.value) return
 

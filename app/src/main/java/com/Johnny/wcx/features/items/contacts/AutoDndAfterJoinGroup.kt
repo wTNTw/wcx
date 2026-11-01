@@ -38,7 +38,7 @@ object AutoDndAfterJoinGroup : SwitchFeature(), IResolveDex {
 
     private val methodSyncChatroomMembers by dexMethod()
     private val stateLock = Any()
-    private val snapshots = IdentityHashMap<de.robv.android.xposed.XC_MethodHook.MethodHookParam, SyncSnapshot>()
+    private val snapshots = IdentityHashMap<de.robv.android.xposed.HookParam, SyncSnapshot>()
     private val dedupKeys = LinkedHashMap<String, Unit>(MAX_DEDUP_KEYS, 0.75f, true)
     private var observedSelfWxId: String? = null
     private var scope = newScope()
@@ -81,8 +81,8 @@ object AutoDndAfterJoinGroup : SwitchFeature(), IResolveDex {
     override fun onEnable() {
         if (!scope.coroutineContext[Job]!!.isActive) scope = newScope()
 
-        registerUnhook(methodSyncChatroomMembers.method.hookDirectly(object : de.robv.android.xposed.XC_MethodHook() {
-            override fun beforeHookedMethod(param: de.robv.android.xposed.XC_MethodHook.MethodHookParam) {
+        registerUnhook(methodSyncChatroomMembers.method.hookDirectly(object : de.robv.android.xposed.HookCallback() {
+            override fun beforeHookedMethod(param: de.robv.android.xposed.HookParam) {
                 val roomId = param.args[0] as String
                 if (!roomId.isSupportedChatroomId()) return
 
@@ -100,7 +100,7 @@ object AutoDndAfterJoinGroup : SwitchFeature(), IResolveDex {
                 }
             }
 
-            override fun afterHookedMethod(param: de.robv.android.xposed.XC_MethodHook.MethodHookParam) {
+            override fun afterHookedMethod(param: de.robv.android.xposed.HookParam) {
                 val selfWxId = WeApi.selfWxId
                 val snapshot = synchronized(stateLock) {
                     val pendingSnapshot = snapshots.remove(param) ?: return

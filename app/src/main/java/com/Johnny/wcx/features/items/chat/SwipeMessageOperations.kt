@@ -1,5 +1,7 @@
 package com.Johnny.wcx.features.items.chat
 
+import com.Johnny.wcx.utils.HookCallback
+
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.PorterDuff
@@ -45,7 +47,7 @@ import com.Johnny.wcx.ui.utils.FormatQuoteIcon
 import com.Johnny.wcx.ui.utils.dpToPx
 import com.Johnny.wcx.ui.utils.showComposeDialog
 import com.Johnny.wcx.utils.android.isDarkMode
-import de.robv.android.xposed.XC_MethodHook
+
 import com.Johnny.wcx.utils.android.showToastSuspend
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -53,6 +55,7 @@ import kotlinx.coroutines.launch
 import java.util.Collections
 import java.util.WeakHashMap
 import kotlin.math.abs
+import com.Johnny.wcx.utils.HookParam
 
 @Feature(name = "滑动消息快捷操作", categories = ["聊天"], description = "在消息上滑动以引用, 并可选复读或编辑为次要操作")
 object SwipeMessageOperations : ClickableFeature(), IResolveDex,
@@ -151,7 +154,7 @@ object SwipeMessageOperations : ClickableFeature(), IResolveDex,
 
     // ── row binding: register state + attach the swipe listener, keep context fresh ─
 
-    override fun onCreateView(param: XC_MethodHook.MethodHookParam, view: View) {
+    override fun onCreateView(param: HookParam, view: View) {
         val chattingContext = WeChatMessageViewApi.getChattingContextFromParam(param)
 
         val state = states.getOrPut(view) {

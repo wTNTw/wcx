@@ -1,5 +1,7 @@
 package com.Johnny.wcx.features.items.chat
 
+import com.Johnny.wcx.utils.HookCallback
+
 import android.annotation.SuppressLint
 import android.os.Handler
 import android.os.Looper
@@ -18,7 +20,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import de.robv.android.xposed.XC_MethodHook
+
 import dev.ujhhgtg.reflekt.reflekt
 import com.Johnny.wcx.features.api.core.WeApi
 import com.Johnny.wcx.features.api.core.WeDatabaseApi
@@ -39,6 +41,7 @@ import com.Johnny.wcx.utils.strings.isGroupChatWxId
 import java.util.Collections
 import java.util.WeakHashMap
 import java.util.concurrent.ConcurrentHashMap
+import com.Johnny.wcx.utils.HookParam
 
 @Feature(name = "已读追踪(废弃)", categories = ["聊天"], description = "旧版服务端模式仅抓取消息送达记录，极易造成认知误解；当前本地模式更加无法查看他人消息已读状态。功能停止维护，不修复BUG、不新增功能，长期保留入口。")
 object ReadReceipts : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener {
@@ -161,7 +164,7 @@ object ReadReceipts : ClickableFeature(), WeChatMessageViewApi.ICreateViewListen
         }
     }
 
-    override fun onCreateView(param: XC_MethodHook.MethodHookParam, view: View) {
+    override fun onCreateView(param: HookParam, view: View) {
         val msgInfo = WeChatMessageViewApi.getMsgInfoFromParam(param)
         if (msgInfo.isSend == 0) return
 

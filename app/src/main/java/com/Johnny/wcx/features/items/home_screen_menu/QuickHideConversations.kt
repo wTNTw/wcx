@@ -1,5 +1,7 @@
 package com.Johnny.wcx.features.items.home_screen_menu
 
+import com.Johnny.wcx.utils.HookCallback
+
 import android.os.Handler
 import android.os.Looper
 import androidx.activity.ComponentActivity
@@ -35,12 +37,13 @@ import com.Johnny.wcx.utils.HostInfo
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.android.showToast
 import com.Johnny.wcx.utils.android.showToastSuspend
-import de.robv.android.xposed.XC_MethodHook
+
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Calendar
+import com.Johnny.wcx.utils.HookParam
 
 @Feature(
     name = "一键隐藏对话",
@@ -68,7 +71,7 @@ object QuickHideConversations : SwitchFeature(), WeHomeScreenPopupMenuApi.IMenuI
         }
     }
 
-    override fun getMenuItems(param: XC_MethodHook.MethodHookParam): List<WeHomeScreenPopupMenuApi.MenuItem> {
+    override fun getMenuItems(param: HookParam): List<WeHomeScreenPopupMenuApi.MenuItem> {
         return listOf(
             WeHomeScreenPopupMenuApi.MenuItem(
                 777020, "一键隐藏对话", VisibilityOffIcon

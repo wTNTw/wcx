@@ -2,14 +2,17 @@
 
 package com.Johnny.wcx.utils.reflection
 
+import com.Johnny.wcx.utils.HookCallback
+
 import android.annotation.SuppressLint
-import de.robv.android.xposed.XC_MethodHook
-import de.robv.android.xposed.XposedBridge
+
+
 import dev.ujhhgtg.reflekt.utils.makeAccessible
 import com.Johnny.wcx.utils.WeLogger
 import java.lang.ref.WeakReference
 import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
+import com.Johnny.wcx.utils.HookParam
 
 object ClassLoaderRegistry {
 
@@ -144,8 +147,8 @@ object ClassLoaderRegistry {
         //  LSPosed's ModuleClassLoader, etc.) calls super().
         XposedBridge.hookAllConstructors(
             ClassLoader::class.java,
-            object : XC_MethodHook() {
-                override fun afterHookedMethod(param: MethodHookParam) {
+            object : HookCallback() {
+                override fun afterHookedMethod(param: HookParam) {
                     (param.thisObject as? ClassLoader)?.let { walkChain(it) }
                 }
             }

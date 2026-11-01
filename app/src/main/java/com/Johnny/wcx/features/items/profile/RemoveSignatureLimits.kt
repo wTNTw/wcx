@@ -1,9 +1,13 @@
 package com.Johnny.wcx.features.items.profile
 
+import com.Johnny.wcx.utils.HookParam
+
+import com.Johnny.wcx.utils.HookCallback
+
 import android.view.View
 import android.widget.TextView
 import com.tencent.mm.plugin.setting.ui.setting.EditSignatureUI
-import de.robv.android.xposed.XC_MethodHook
+
 import dev.ujhhgtg.reflekt.reflekt
 import dev.ujhhgtg.reflekt.utils.toClass
 import com.Johnny.wcx.constants.PackageNames
@@ -19,9 +23,9 @@ object RemoveSignatureLimits : SwitchFeature(), IResolveDex {
 
     private const val TAG = "RemoveSignatureLimits"
 
-    private lateinit var stringMatchesMethodUnhook: XC_MethodHook.Unhook
+    private lateinit var stringMatchesMethodUnhook: com.Johnny.wcx.utils.HookHandle
 
-    private lateinit var setFiltersUnhook: XC_MethodHook.Unhook
+    private lateinit var setFiltersUnhook: com.Johnny.wcx.utils.HookHandle
 
     override fun onEnable() {
         EditSignatureUI::class.reflekt()

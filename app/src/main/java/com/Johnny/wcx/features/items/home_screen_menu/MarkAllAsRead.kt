@@ -1,12 +1,15 @@
 package com.Johnny.wcx.features.items.home_screen_menu
 
-import de.robv.android.xposed.XC_MethodHook
+import com.Johnny.wcx.utils.HookCallback
+
+
 import com.Johnny.wcx.features.api.core.WeConversationApi
 import com.Johnny.wcx.features.api.ui.WeHomeScreenPopupMenuApi
 import com.Johnny.wcx.features.core.Feature
 import com.Johnny.wcx.features.core.SwitchFeature
 import com.Johnny.wcx.ui.utils.CheckCircleIcon
 import com.Johnny.wcx.utils.android.showToast
+import com.Johnny.wcx.utils.HookParam
 
 @Feature(name = "清空未读", categories = ["首页右上角菜单"], description = "在首页右上角菜单添加「清空未读」选项")
 object MarkAllAsRead : SwitchFeature(), WeHomeScreenPopupMenuApi.IMenuItemsProvider {
@@ -19,7 +22,7 @@ object MarkAllAsRead : SwitchFeature(), WeHomeScreenPopupMenuApi.IMenuItemsProvi
         WeHomeScreenPopupMenuApi.removeProvider(this)
     }
 
-    override fun getMenuItems(param: XC_MethodHook.MethodHookParam): List<WeHomeScreenPopupMenuApi.MenuItem> {
+    override fun getMenuItems(param: HookParam): List<WeHomeScreenPopupMenuApi.MenuItem> {
         return listOf(
             WeHomeScreenPopupMenuApi.MenuItem(
                 777012, "清空未读", CheckCircleIcon

@@ -1,12 +1,14 @@
 package com.Johnny.wcx.features.api.ui
 
+import com.Johnny.wcx.utils.HookCallback
+
 import android.graphics.drawable.Drawable
 import android.util.SparseArray
 import android.widget.BaseAdapter
 import android.widget.ImageView
 import androidx.collection.mutableIntObjectMapOf
 import androidx.core.util.size
-import de.robv.android.xposed.XC_MethodHook
+
 import dev.ujhhgtg.reflekt.reflekt
 import dev.ujhhgtg.reflekt.utils.createInstance
 import dev.ujhhgtg.reflekt.utils.isSubclassOf
@@ -22,12 +24,13 @@ import com.Johnny.wcx.utils.reflection.BBool
 import com.Johnny.wcx.utils.reflection.BInt
 import com.Johnny.wcx.utils.reflection.BString
 import java.util.concurrent.CopyOnWriteArrayList
+import com.Johnny.wcx.utils.HookParam
 
 @Feature(name = "首页菜单服务", categories = ["API"], description = "提供向首页右上角菜单添加菜单项的能力")
 object WeHomeScreenPopupMenuApi : ApiFeature(), IResolveDex {
 
     interface IMenuItemsProvider {
-        fun getMenuItems(param: XC_MethodHook.MethodHookParam): List<MenuItem>
+        fun getMenuItems(param: HookParam): List<MenuItem>
     }
 
     data class MenuItem(
@@ -117,7 +120,7 @@ object WeHomeScreenPopupMenuApi : ApiFeature(), IResolveDex {
             baseAdapter.reflekt().firstMethod {
                 name = "getView"
             }.apply {
-                var unhook: XC_MethodHook.Unhook? = null
+                var unhook: com.Johnny.wcx.utils.HookHandle? = null
 
                 hookBefore {
                     unhook = ImageView::class.reflekt().firstMethod {

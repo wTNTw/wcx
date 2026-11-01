@@ -1,5 +1,7 @@
 package com.Johnny.wcx.features.items.chat
 
+import com.Johnny.wcx.utils.HookCallback
+
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.RectF
@@ -22,7 +24,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.core.graphics.toColorInt
-import de.robv.android.xposed.XC_MethodHook
+
 import dev.ujhhgtg.reflekt.reflekt
 import com.Johnny.wcx.dexkit.abc.IResolveDex
 import com.Johnny.wcx.dexkit.dsl.dexMethod
@@ -39,6 +41,7 @@ import com.Johnny.wcx.ui.utils.showComposeDialog
 import com.Johnny.wcx.utils.collections.LruCache
 import com.Johnny.wcx.utils.unreachable
 import kotlin.math.roundToInt
+import com.Johnny.wcx.utils.HookParam
 
 @Feature(name = "显示群成员身份", categories = ["聊天"], description = "在群聊中显示群成员的身份: 群主, 管理员, 成员")
 object DisplayGroupMemberRoles : ClickableFeature(), IResolveDex,
@@ -163,7 +166,7 @@ object DisplayGroupMemberRoles : ClickableFeature(), IResolveDex,
     }
 
     override fun onCreateView(
-        param: XC_MethodHook.MethodHookParam,
+        param: HookParam,
         view: View
     ) {
         val msgInfo = WeChatMessageViewApi.getMsgInfoFromParam(param)

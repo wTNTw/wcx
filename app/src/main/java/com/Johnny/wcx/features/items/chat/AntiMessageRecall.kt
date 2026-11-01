@@ -1,5 +1,7 @@
 package com.Johnny.wcx.features.items.chat
 
+import com.Johnny.wcx.utils.HookCallback
+
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.PorterDuff
@@ -44,7 +46,7 @@ import androidx.core.view.isVisible
 import android.content.ContentValues
 import android.os.Handler
 import android.os.Looper
-import de.robv.android.xposed.XC_MethodHook
+
 import dev.ujhhgtg.reflekt.reflekt
 import com.Johnny.wcx.dexkit.abc.IResolveDex
 import com.Johnny.wcx.dexkit.dsl.dexMethod
@@ -80,6 +82,7 @@ import kotlinx.coroutines.withContext
 import java.util.Collections
 import java.util.WeakHashMap
 import java.util.concurrent.ConcurrentHashMap
+import com.Johnny.wcx.utils.HookParam
 
 @Feature(name = "防撤回", categories = ["聊天"], description = "阻止撤回消息")
 object AntiMessageRecall : ClickableFeature(), WeXmlParserApi.IAfterParseListener,
@@ -533,7 +536,7 @@ object AntiMessageRecall : ClickableFeature(), WeXmlParserApi.IAfterParseListene
         }.onFailure { WeLogger.w(TAG, "cacheRawSnapshot failed: ${it.message}") }
     }
 
-    override fun onParse(param: XC_MethodHook.MethodHookParam, result: MutableMap<String, Any?>) {
+    override fun onParse(param: HookParam, result: MutableMap<String, Any?>) {
         val args = param.args
         val xmlContent = args[0] as? String ?: return
         if (!xmlContent.contains("revokemsg")) return
@@ -660,7 +663,7 @@ object AntiMessageRecall : ClickableFeature(), WeXmlParserApi.IAfterParseListene
         }
     }
 
-    override fun onCreateView(param: XC_MethodHook.MethodHookParam, view: View) {
+    override fun onCreateView(param: HookParam, view: View) {
         if (displayStyle == STYLE_LEGACY) {
             // 旧版样式不画徽标；顺手清掉切换样式前残留的徽标。
             clearRecallStyle(view)
