@@ -28,6 +28,11 @@ on:
       - '**/*.js'
       - 'docs/**'
   workflow_dispatch:
+    inputs:
+      skip_signing:
+        description: '仅测试用：无固定签名 keystore 时跳过签名（产物为 unsigned，不发版）'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -111,7 +116,7 @@ jobs:
           cargo xtask build --native-only
 
       - name: Prepare keystore
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && !(github.event_name == 'workflow_dispatch' && inputs.skip_signing)
         run: |
           KS_FILE="$RUNNER_TEMP/wekit-keystore.jks"
           CRED_FILE="$RUNNER_TEMP/keystore-creds.env"
@@ -164,7 +169,7 @@ jobs:
           exit 1
 
       - name: Build Release (Signed)
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && !(github.event_name == 'workflow_dispatch' && inputs.skip_signing)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           WEKIT_KEYSTORE_FILE: ${{ runner.temp }}/wekit-keystore.jks
@@ -176,7 +181,7 @@ jobs:
           ./gradlew assembleRelease --warning-mode all --stacktrace
 
       - name: Build Release (Unsigned)
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.skip_signing)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./gradlew assembleRelease --warning-mode all --stacktrace
@@ -188,8 +193,17 @@ jobs:
           echo "Collected APKs:"
           ls -1 dist/apk
 
-      - name: Verify APK signatures (fixed keystore)
+      - name: Collect Zygisk module zip
         if: github.event_name != 'pull_request'
+        run: |
+          mkdir -p dist/zygisk
+          find app/build/outputs/zygisk -type f -name '*.zip' -exec cp -v {} dist/zygisk/ \; || true
+          echo "Collected Zygisk zips:"
+          ls -1 dist/zygisk
+          test -n "$(ls -A dist/zygisk 2>/dev/null)" || { echo "::error::没有产出 Zygisk 模块 zip"; exit 1; }
+
+      - name: Verify APK signatures (fixed keystore)
+        if: github.event_name != 'pull_request' && !(github.event_name == 'workflow_dispatch' && inputs.skip_signing)
         run: |
           # 用户要求：发布的 APK 必须使用仓库固定签名。用固定 keystore 反查证书 SHA-256，
           # 与每个产物 APK 的签名逐一比对，不一致立即失败，杜绝临时/未知签名流出。
@@ -238,6 +252,13 @@ jobs:
           name: wcx-apk
           path: dist/apk/*.apk
 
+      - name: Upload Zygisk module zip
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v7
+        with:
+          name: wcx-zygisk
+          path: dist/zygisk/*.zip
+
       - name: Upload Release Obfuscation Mapping
         uses: actions/upload-artifact@v7
         with:
@@ -262,6 +283,12 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: wcx-apk
+          path: artifacts
+
+      - name: Download Zygisk module artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: wcx-zygisk
           path: artifacts
 
       - name: Generate version info
@@ -370,9 +397,11 @@ jobs:
 
             ### 📦 下载
             - 下方 Assets 中下载对应架构的 APK
+            - Zygisk 版（不装 APK，需开启 Zygisk、无需 LSPosed）：`wcx-*-zygisk-arm64-v8a.zip`，刷入后重启
             - update.json 供模块内置更新器使用
           files: |
             artifacts/*.apk
+            artifacts/*.zip
             artifacts/update.json
             artifacts/CHANGELOG.md
           prerelease: false

@@ -142,3 +142,17 @@
     java.lang.String m;
     java.lang.String d;
 }
+
+# ─── Zygisk 入口：注入器按【原始类名 + 方法签名】反射调用 ────────────────
+# zygisk/src/main/cpp/main.cpp 用 ClassLoader.loadClass("...NativeHookBridge") 注册 native、
+# 用 "ZygiskInjectEntry" + entry(...) 进入 payload，R8 看不到这些引用。
+-keep class com.Johnny.wcx.loader.entry.zygisk.NativeHookBridge { *; }
+-keep class com.Johnny.wcx.loader.entry.zygisk.NativeHooker { *; }
+-keep class com.Johnny.wcx.loader.entry.zygisk.ZygiskInjectEntry { *; }
+-keep class com.Johnny.wcx.loader.entry.zygisk.ZygiskStartupImpl { *; }
+-keep class com.Johnny.wcx.loader.entry.zygisk.ZygiskHookBridge { *; }
+# LSPlant 通过反射拿 hooker 的 callback(Object[]) 与构造器
+-keepclassmembers class com.Johnny.wcx.loader.entry.zygisk.NativeHooker {
+    <init>(java.lang.reflect.Executable);
+    public java.lang.Object callback(java.lang.Object[]);
+}

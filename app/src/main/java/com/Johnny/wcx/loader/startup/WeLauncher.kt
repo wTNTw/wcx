@@ -64,9 +64,13 @@ object WeLauncher {
 
             // fix up Jetpack Compose
             // fuck you google
-            Resources::class.java.getDeclaredMethod("getString", int).hookBeforeDirectly {
-                result = runCatching { invokeOriginal() }.getOrNull() ?: "null"
-            }
+            // 注意：这一句依赖 XposedBridge（de.robv），Zygisk 不装 APK 形态下没有它，
+            // 失败不能拖垮整个启动链路（feature 层各自有隔离）。
+            runCatching {
+                Resources::class.java.getDeclaredMethod("getString", int).hookBeforeDirectly {
+                    result = runCatching { invokeOriginal() }.getOrNull() ?: "null"
+                }
+            }.onFailure { WeLogger.w(TAG, "Compose Resources.getString 修正失败（可忽略）: $it") }
         }
 
         runCatching {

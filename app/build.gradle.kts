@@ -268,6 +268,35 @@ val generateMethodHashes = tasks.register<GenerateMethodHashesTask>("generateMet
     namespace.set(libs.versions.namespace.get())
 }
 
+// ─── Zygisk 模块 zip（不装 APK 的独立注入形态）──────────────────────────────
+// 依赖 :zygisk 构建出的注入器 .so 与从 lsplant-standalone AAR 取出的 liblsplant.so，
+// 再从刚打出来的 arm64 release APK 里抽 payload（classes*.dex + lib/arm64-v8a/*.so）。
+val packageZygiskZip = tasks.register<PackageZygiskZipTask>("packageZygiskZip") {
+    description = "Package flashable Zygisk module zip (arm64-v8a, standard flavor)"
+    group = "wekit"
+
+    dependsOn("assembleStandardRelease")
+    dependsOn(project(":zygisk").tasks.named("exportZygiskSo"))
+    dependsOn(project(":zygisk").tasks.named("extractLsplantSo"))
+
+    val zygiskProject = project(":zygisk")
+    apkDir.set(layout.buildDirectory.dir("outputs/apk/standard/release"))
+    zygiskSo.set(zygiskProject.layout.buildDirectory.file("zygisk-runtime/libwcxzygisk.so"))
+    lsplantSo.set(zygiskProject.layout.buildDirectory.file("lsplant-runtime/liblsplant.so"))
+    templateDir.set(rootProject.layout.projectDirectory.dir("zygisk/magisk"))
+    outputDir.set(layout.buildDirectory.dir("outputs/zygisk"))
+    versionName.set(android.defaultConfig.versionName ?: "v0")
+    versionCode.set(android.defaultConfig.versionCode ?: 0)
+    moduleAuthor.set("wcx-dev")
+    abi.set("arm64-v8a")
+}
+
+// assembleRelease 跑完后再串一步：finalizedBy 不会造成任务循环
+// （packageZygiskZip 需要 assembleStandardRelease 的产物，但不被它 depend）
+tasks.matching { it.name == "assembleRelease" }.configureEach {
+    finalizedBy(packageZygiskZip)
+}
+
 // --- end tasks ---
 
 ksp {

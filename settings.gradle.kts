@@ -37,6 +37,7 @@ rootProject.name = "wekit"
 
 include(
     ":app",
+    ":zygisk",
     ":libs:common:annotation-scanner",
     ":libs:common:stubs",
     ":libs:common:bsh",
