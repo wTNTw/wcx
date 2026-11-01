@@ -26,12 +26,14 @@ class ZygiskNativePayload(val apk: File, private val dataDir: File) {
         require(libraryDir.isDirectory) { "Zygisk native-library path is not a directory: $libraryDir" }
 
         val libraries = mutableMapOf<String, File>()
+        // 本仓库实际随 APK 打包的原生库（app/src/main/jniLibs/<abi>/）
         val names = listOf(
             "androidx.graphics.path",
             "dexkit",
             "mmkv",
-            "wcx_native",
-            "invoke_tool",
+            "silk_codec",
+            "termux",
+            "wekit_native",
         )
         for (name in names) {
             val fileName = "lib$name.so"
@@ -40,10 +42,10 @@ class ZygiskNativePayload(val apk: File, private val dataDir: File) {
             libraries[name] = extracted
             // MMKV loads through its callback; executable artifacts must never be dlopen-ed.
             when (name) {
-                "androidx.graphics.path", "dexkit", "wcx_native" -> System.load(extracted.absolutePath)
+                "androidx.graphics.path", "dexkit", "wekit_native", "silk_codec" -> System.load(extracted.absolutePath)
             }
         }
-        for (name in listOf("dexkit", "wcx_native")) {
+        for (name in listOf("dexkit", "wekit_native")) {
             require(name in libraries) { "Zygisk payload is missing lib$name.so for $abi" }
         }
         libraries
@@ -56,7 +58,7 @@ class ZygiskNativePayload(val apk: File, private val dataDir: File) {
             Build.SUPPORTED_32_BIT_ABIS.asList()
         }
         return candidates.firstOrNull { abi ->
-            archive.getEntry("lib/$abi/libwcx_native.so") != null
+            archive.getEntry("lib/$abi/libwekit_native.so") != null
         } ?: error("Zygisk payload has no native library for this process ABI")
     }
 
