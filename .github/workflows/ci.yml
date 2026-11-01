@@ -108,13 +108,15 @@ jobs:
 
       - name: Prepare LSPlant submodules
         run: |
-          # checkout 用 submodules: recursive，但 LSPlant 的 test/ 子模块走 SSH，
-          # .gitmodules 里对 third_party/lsplant 设了 update=none，这里手动初始化需要的那两层
-          git submodule update --init third_party/xz-embedded
-          git -C third_party/lsplant submodule update --init --depth 1 \
+          # LSPlant 的 test/ 子模块用 SSH，所以 .gitmodules 里对 third_party/lsplant 设了
+          # update=none（checkout 的 submodules: recursive 会跳过它）。这里用 -c 覆盖回 checkout，
+          # 并只初始化构建需要的那两层。
+          git -c submodule.third_party/lsplant.update=checkout submodule update --init \
+            third_party/lsplant third_party/xz-embedded
+          git -C third_party/lsplant submodule update --init \
             lsplant/src/main/jni/external/dex_builder
           git -C third_party/lsplant/lsplant/src/main/jni/external/dex_builder \
-            submodule update --init --depth 1 external/parallel_hashmap
+            submodule update --init external/parallel_hashmap
 
       - name: Build Zygisk injector
         run: |
