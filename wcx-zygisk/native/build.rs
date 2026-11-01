@@ -1,6 +1,38 @@
 use std::env;
 use std::path::PathBuf;
 
+/// 依次尝试 WCX_ANDROID_NDK / ANDROID_NDK_HOME / ANDROID_NDK_ROOT / $ANDROID_HOME/ndk/<最新>
+fn find_ndk() -> PathBuf {
+    if let Some(dir) = env::var_os("WCX_ANDROID_NDK").or_else(|| env::var_os("ANDROID_NDK_HOME"))
+        .or_else(|| env::var_os("ANDROID_NDK_ROOT"))
+    {
+        let p = PathBuf::from(dir);
+        if p.is_dir() {
+            return p;
+        }
+    }
+    let sdk = ["ANDROID_HOME", "ANDROID_SDK_ROOT"]
+        .iter()
+        .filter_map(|k| env::var_os(k))
+        .map(PathBuf::from)
+        .find(|p| p.is_dir());
+    if let Some(sdk) = sdk {
+        let ndk_root = sdk.join("ndk");
+        if let Ok(entries) = std::fs::read_dir(&ndk_root) {
+            let mut dirs: Vec<PathBuf> = entries
+                .filter_map(|e| e.ok())
+                .map(|e| e.path())
+                .filter(|p| p.is_dir())
+                .collect();
+            dirs.sort();
+            if let Some(last) = dirs.pop() {
+                return last;
+            }
+        }
+    }
+    panic!("找不到 Android NDK：请设置 WCX_ANDROID_NDK 或 ANDROID_NDK_HOME");
+}
+
 fn main() {
     println!("cargo:rerun-if-env-changed=WCX_ANDROID_NDK");
     println!("cargo:rerun-if-env-changed=WCX_ANDROID_API");
@@ -25,12 +57,8 @@ fn main() {
             "aarch64-linux-android",
             "the Zygisk loader currently supports arm64-v8a only"
         );
-        let ndk = PathBuf::from(
-            env::var_os("WCX_ANDROID_NDK")
-                .expect("run ./x configure to select the pinned Android NDK"),
-        );
-        let api =
-            env::var("WCX_ANDROID_API").expect("run ./x configure to select the Android API");
+        let ndk = find_ndk();
+        let api = env::var("WCX_ANDROID_API").unwrap_or_else(|_| "28".to_string());
         config
             .define(
                 "CMAKE_TOOLCHAIN_FILE",

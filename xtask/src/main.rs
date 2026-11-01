@@ -494,7 +494,17 @@ fn task_build_native(abi_args: &[String]) -> Result<()> {
     // zygisk/<abi>.so）。只支持 arm64-v8a，且需要 WCX_ANDROID_NDK / WCX_ANDROID_API。
     if abis.iter().any(|s| s.android_name == "arm64-v8a") {
         println!("build(native): zygisk injector (arm64-v8a)");
-        run_cargo(
+        // wcx-zygisk 的 build.rs 需要 NDK 路径来驱动 CMake（编 LSPlant / Dobby / xz），
+        // cargo 最终链接也要用 NDK 的 clang，否则会用宿主 cc 找不到 -ldobby 等。
+        let android_home = find_android_home(&root)?;
+        let ndk_bin = find_ndk_bin_dir(&android_home)?;
+        let ndk_dir = Path::new(&ndk_bin)
+            .ancestors()
+            .nth(4)
+            .map(|p| p.to_string_lossy().into_owned())
+            .context("could not derive NDK root from clang bin dir")?;
+        let linker = format!("{ndk_bin}/aarch64-linux-android{MIN_SDK}-clang");
+        run_cargo_with_env(
             &[
                 "build",
                 "-p",
@@ -504,6 +514,11 @@ fn task_build_native(abi_args: &[String]) -> Result<()> {
                 "aarch64-linux-android",
             ],
             &root,
+            &[
+                ("WCX_ANDROID_NDK", ndk_dir.as_str()),
+                ("WCX_ANDROID_API", &MIN_SDK.to_string()),
+                ("CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER", linker.as_str()),
+            ],
         )?;
         let so_src = root
             .join("target/aarch64-linux-android/release/libwcx_zygisk.so");
@@ -560,6 +575,22 @@ fn run_gradlew(args: &[&str], cwd: &Path) -> Result<()> {
         "./gradlew"
     };
     run_cmd(gradlew, args, cwd)
+}
+
+fn run_cargo_with_env(args: &[&str], cwd: &Path, envs: &[(&str, &str)]) -> Result<()> {
+    let cargo = env::var("CARGO").unwrap_or_else(|_| "cargo".into());
+    let status = Command::new(&cargo)
+        .args(args)
+        .envs(envs.iter().copied())
+        .current_dir(cwd)
+        .status()
+        .with_context(|| format!("failed to spawn `{cargo} {}`", args.join(" ")))?;
+
+    if !status.success() {
+        bail!("`{cargo} {}` exited with {status}", args.join(" "));
+    }
+
+    Ok(())
 }
 
 fn run_cmd(program: &str, args: &[&str], cwd: &Path) -> Result<()> {
