@@ -104,3 +104,41 @@ HomeSidePanel: 左边缘右滑触摸条已挂载
   已不存在），会持续刷 `NoClassDefFoundError`。属于 feature 维护问题，与注入链路无关。
 - 设置 UI 仍依赖已安装的 WCX APK（Zygisk 模式下没有 Activity 入口），后续按需做 WebUI。
 - 崩溃自愈（连续启动失败自动 `disable`）未实现。
+
+## 与 master 分支的兼容性约定
+
+Zygisk 形态**不依赖** master 分支里的具体 feature 代码：注入器只认下面这些「契约」，
+只要它们不变，master 上怎么改功能都不会导致模块加载失败。
+
+### 加载链路依赖的契约（改了才会「无法加载」）
+
+| 契约 | 位置 | 说明 |
+|---|---|---|
+| 模块 zip 内有 `module.prop` / `customize.sh` / `uninstall.sh` | `wcx-zygisk/` | 安装器要用 |
+| APK 内有 `lib/arm64-v8a/libwcx_zygisk.so` | `app/src/main/jniLibs/` + `xtask`/CI | 注入器本体，`customize.sh` 会搬到 `zygisk/<abi>.so` |
+| 模块目录里有 `module.apk` | `customize.sh` 生成 | 注入器从它读 dex / 资源 |
+| `module.apk` 里有 `classes*.dex` 和 `resources.arsc` | AGP 正常产物 | 缺了就是「payload 为空」 |
+| 类名 `…loader.entry.zygisk.ZygiskEntry` 且 `static init(String,String,String)` | `ZygiskEntry.kt` | 原生按 FQCN + 签名反射调用；`app/proguard-rules.pro` 里已显式 keep |
+| 类名 `…loader.entry.zygisk.ArtHookBridge` 的 4 个 native 方法名 | `ArtHookBridge.kt` + `natives.rs` | `RegisterNatives` 按名字注册 |
+| 默认注入目标 `com.tencent.mm`（或 `target.list`） | `lifecycle.rs` | 只影响注入哪些进程 |
+
+**维护提示**：上面这些改名字时，必须同步改
+`wcx-zygisk/native/src/{natives,lifecycle}.rs` 里的字符串、`app/proguard-rules.pro` 的 keep 规则。
+
+### 不会导致加载失败、但会影响功能的改动
+
+| 改动 | 后果 |
+|---|---|
+| master 新增/删除 feature | 随 `module.apk` 一起生效，无需改注入器 |
+| 新增 `jniLibs/*.so` | 需要在 `ZygiskNativePayload.kt` 的 `names` 列表里登记，否则该库不会被解出/加载 |
+| 新增 feature 用 `de.robv.android.xposed.*`（`XposedBridge` / `XC_MethodHook`） | 编译能过（compileOnly），但 Zygisk 模式运行时会 `NoClassDefFoundError`（被 feature 隔离兜住，微信不崩）。**新代码请统一用 `IHookBridge`**（`hookBefore/hookAfter/hookDirectly`、`HookCallback`/`HookParam`） |
+| WeChat 换版本、`com.tencent.mm.app.Application` / `MultiTalkMainUI` 之类类名变化 | 属于 WeChat 适配问题，LSPosed 形态同样会挂 |
+| 模块 id / 显示名改动 | 只需改 `wcx-zygisk/module.prop`；运行期路径都由 `getModuleDir()` 取得，没有硬编码 |
+
+### 验证方式
+
+```bash
+adb shell su -c 'cat /data/adb/modules/zygisk-wcx/module.prop'   # id/版本
+adb shell su -c 'grep zygisk-wcx /data/adb/zygisksu/modules_info' # Zygisk 是否收录
+adb logcat -s WCX | grep -E 'LSPlant initialized|module started|FeaturesLoader'
+```

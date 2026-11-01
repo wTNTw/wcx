@@ -144,15 +144,22 @@
 }
 
 # ─── Zygisk 入口：注入器按【原始类名 + 方法签名】反射调用 ────────────────
-# zygisk/src/main/cpp/main.cpp 用 ClassLoader.loadClass("...NativeHookBridge") 注册 native、
-# 用 "ZygiskInjectEntry" + entry(...) 进入 payload，R8 看不到这些引用。
--keep class com.Johnny.wcx.loader.entry.zygisk.NativeHookBridge { *; }
--keep class com.Johnny.wcx.loader.entry.zygisk.NativeHooker { *; }
--keep class com.Johnny.wcx.loader.entry.zygisk.ZygiskInjectEntry { *; }
--keep class com.Johnny.wcx.loader.entry.zygisk.ZygiskStartupImpl { *; }
--keep class com.Johnny.wcx.loader.entry.zygisk.ZygiskHookBridge { *; }
-# LSPlant 通过反射拿 hooker 的 callback(Object[]) 与构造器
--keepclassmembers class com.Johnny.wcx.loader.entry.zygisk.NativeHooker {
-    <init>(java.lang.reflect.Executable);
-    public java.lang.Object callback(java.lang.Object[]);
+# 原生侧（wcx-zygisk/native/src/natives.rs、lifecycle.rs）按 FQCN 找类、
+# 按 "nativeInitialize" / "init" / "nativeHookMethod"… 注册与调用，R8 看不到这些引用。
+# 以前只靠默认的 -keepclasseswithmembernames(native) 兼运，public 方法名仍可能被改；
+# 这里显式固定，避免以后改 master 代码时 zygisk 形态静默加载失败。
+-keep class com.Johnny.wcx.loader.entry.zygisk.ZygiskEntry { *; }
+-keep class com.Johnny.wcx.loader.entry.zygisk.ArtHookBridge { *; }
+-keep class com.Johnny.wcx.loader.entry.zygisk.ArtHookBridgeRuntime { *; }
+-keep class com.Johnny.wcx.loader.entry.zygisk.ZygiskLoaderService { *; }
+
+# 原生侧用到的方法签名（被调用的静态入口 / JNI 方法与 hooker 分派）
+-keepclassmembers class com.Johnny.wcx.loader.entry.zygisk.ZygiskEntry {
+    public static void init(java.lang.String, java.lang.String, java.lang.String);
+    private static native boolean nativeInitialize();
 }
+-keepclassmembers class com.Johnny.wcx.loader.entry.zygisk.ArtHookBridge {
+    native <methods>;
+}
+# LSPlant 生成的 bridge 通过反射拿 hooker 的 callback(Object[])（嵌套类的成员名也要固定）
+-keep class com.Johnny.wcx.loader.entry.zygisk.ArtHookBridgeRuntime$HookEntry { *; }
