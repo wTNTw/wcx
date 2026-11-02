@@ -198,8 +198,12 @@
           })
       ),
     // 修改类操作只要成功即可；界面状态由 app.js 再调 targets 刷新
-    setTarget: (pkg, enabled) =>
-      exec('sh ' + CONFIG + ' set ' + pkg + ' ' + (enabled ? 1 : 0), {}).then(() => true),
+    // 作用域是 (userId, package)，双开/分身才能单独开关
+    setTarget: (userId, pkg, enabled) =>
+      exec('sh ' + CONFIG + ' set ' + (userId || '0') + ' ' + pkg + ' ' + (enabled ? 1 : 0), {})
+        .then(() => true),
+    setTargetAll: (pkg, enabled) =>
+      exec('sh ' + CONFIG + ' set all ' + pkg + ' ' + (enabled ? 1 : 0), {}).then(() => true),
     reset: () => exec('sh ' + CONFIG + ' reset', {}).then(() => true),
     toast: toast,
   };

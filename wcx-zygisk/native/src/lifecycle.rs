@@ -80,8 +80,16 @@ fn target_package(process_name: &str) -> &str {
 
 /// 是否应当注入：读 `<模块目录>/target.list`（一行一个包名，# 开头为注释）。
 /// 文件不存在时默认只注入 com.tencent.mm。命中包名的所有进程（含子进程）都会注入。
-fn should_inject(module_dir_fd: i32, process_name: &str) -> bool {
+/// 是否应当注入。
+///
+/// `target.list` 支持两种行格式：
+///   * `<userId>\t<package>`  —— 只注入该 Android 用户下的该包（双开/分身靠它区分）
+///   * `<package>`            —— 兼容旧格式，等同于该包在所有用户下都注入
+///
+/// 文件不存在 = 默认只注入 `com.tencent.mm`（所有用户）；文件存在但为空 = 一个都不注入。
+fn should_inject(module_dir_fd: i32, process_name: &str, uid: i32) -> bool {
     let package = target_package(process_name);
+    let user_id = uid / 100_000; // Android userId = uid / PER_USER_RANGE
 
     let fd = unsafe {
         libc::openat(
@@ -102,35 +110,34 @@ fn should_inject(module_dir_fd: i32, process_name: &str) -> bool {
         // 想要“恢复默认”用 config.sh reset（删除文件）。
         return false;
     }
+
     let text = String::from_utf8_lossy(&buf[..read as usize]);
     for line in text.lines() {
         let line = line.trim();
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        if line == package {
+        // 支持 tab / 空格分隔：<userId> <package>
+        let mut parts = line.split(|c: char| c == '\t' || c == ' ');
+        let first = parts.next().unwrap_or("");
+        let second = parts.next().unwrap_or("").trim();
+
+        if second.is_empty() {
+            // 旧格式：只有包名 → 所有用户
+            if first == package {
+                return true;
+            }
+            continue;
+        }
+
+        if second != package {
+            continue;
+        }
+        if first == "*" || first.parse::<i32>().map(|id| id == user_id).unwrap_or(false) {
             return true;
         }
     }
-    // 有配置文件但没有命中：不注入
     false
-}
-
-fn send_check_request(api: *mut ApiTable, uid: i32, process_name: &str) -> u8 {
-    let fd = unsafe { (*api).connect_companion() };
-    if fd < 0 {
-        return 2; // COMPANION_ERROR
-    }
-    let _ = write_u8_to_fd(fd, COMPANION_REQUEST_ENABLED);
-    // Write uid as i32 little-endian
-    let uid_bytes = uid.to_ne_bytes();
-    unsafe {
-        libc::write(fd, uid_bytes.as_ptr().cast(), 4);
-    }
-    let _ = write_string_to_fd(fd, process_name);
-    let status = read_u8_from_fd(fd).unwrap_or(2);
-    unsafe { libc::close(fd) };
-    status
 }
 
 fn negotiate_telegram_socket(api: *mut ApiTable, uid: i32, process_name: &str) -> Option<String> {
@@ -154,8 +161,6 @@ fn negotiate_telegram_socket(api: *mut ApiTable, uid: i32, process_name: &str) -
     name
 }
 
-// ── Lifecycle callbacks ───────────────────────────────────────────────────────
-
 pub unsafe fn do_pre_app_specialize(module: &mut WcxZygiskModule, args: *mut AppSpecializeArgs) {
     let nice_name = match read_jstring(module.env, (*args).nice_name) {
         Some(s) if !s.is_empty() && s.len() <= 255 => s,
@@ -172,6 +177,15 @@ pub unsafe fn do_pre_app_specialize(module: &mut WcxZygiskModule, args: *mut App
         }
     };
     let uid = *(*args).uid;
+    let wechat_family = nice_name.starts_with("com.tencent.mm");
+    if wechat_family {
+        logi!(
+            "Zygisk: preAppSpecialize {} uid={} user={}",
+            nice_name,
+            uid,
+            uid / 100_000
+        );
+    }
 
     let mod_fd = (*module.api).get_module_dir();
     if mod_fd < 0 {
@@ -188,7 +202,10 @@ pub unsafe fn do_pre_app_specialize(module: &mut WcxZygiskModule, args: *mut App
     }
 
     // 目标判定：本地 target.list（默认 com.tencent.mm），不再依赖 root companion
-    if !should_inject(mod_fd, &nice_name) {
+    if !should_inject(mod_fd, &nice_name, uid) {
+        if wechat_family {
+            logi!("Zygisk: {} 不在注入作用域内（uid={}）", nice_name, uid);
+        }
         unsafe { libc::close(mod_fd) };
         (*module.api).set_option(DLCLOSE_MODULE_LIBRARY);
         return;
@@ -419,4 +436,91 @@ pub unsafe fn do_post_app_specialize(module: &mut WcxZygiskModule, _args: *const
 
 pub unsafe fn do_pre_server_specialize(module: &mut WcxZygiskModule, _args: *mut ServerSpecializeArgs) {
     (*module.api).set_option(DLCLOSE_MODULE_LIBRARY);
+}
+
+#[cfg(test)]
+mod scope_tests {
+    use super::should_inject;
+    use std::ffi::CString;
+    use std::fs;
+    use std::os::unix::io::RawFd;
+
+    struct TempDir(std::path::PathBuf);
+
+    impl TempDir {
+        fn new() -> Self {
+            let dir = std::env::temp_dir().join(format!(
+                "wcx-scope-{}-{:?}",
+                std::process::id(),
+                std::thread::current().id()
+            ));
+            let _ = fs::remove_dir_all(&dir);
+            fs::create_dir_all(&dir).unwrap();
+            TempDir(dir)
+        }
+
+        fn fd(&self) -> RawFd {
+            let c = CString::new(self.0.to_str().unwrap()).unwrap();
+            unsafe { libc::open(c.as_ptr(), libc::O_RDONLY | libc::O_DIRECTORY) }
+        }
+
+        fn write(&self, content: &str) {
+            fs::write(self.0.join("target.list"), content).unwrap();
+        }
+
+        fn remove(&self) {
+            let _ = fs::remove_file(self.0.join("target.list"));
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    const APP_ID: i32 = 10_000;
+    const UID_USER0: i32 = APP_ID;
+    const UID_USER999: i32 = 999 * 100_000 + APP_ID;
+
+    #[test]
+    fn scope_matches_per_user_and_legacy() {
+        let dir = TempDir::new();
+        let fd = dir.fd();
+        assert!(fd >= 0);
+
+        // 1) 没有 target.list：默认注入 com.tencent.mm（任意用户）
+        assert!(should_inject(fd, "com.tencent.mm", UID_USER0));
+        assert!(should_inject(fd, "com.tencent.mm", UID_USER999));
+        assert!(!should_inject(fd, "com.example.other", UID_USER0));
+
+        // 2) 显式 (userId, package)：只命中该用户（这就是双开能单独开关的关键）
+        dir.write("0\tcom.tencent.mm\n");
+        assert!(should_inject(fd, "com.tencent.mm", UID_USER0));
+        assert!(!should_inject(fd, "com.tencent.mm", UID_USER999));
+
+        // 3) 子进程按包名匹配，仍受用户限制
+        assert!(should_inject(fd, "com.tencent.mm:push", UID_USER0));
+        assert!(!should_inject(fd, "com.tencent.mm:push", UID_USER999));
+
+        // 4) 只开分身
+        dir.write("999\tcom.tencent.mm\n");
+        assert!(!should_inject(fd, "com.tencent.mm", UID_USER0));
+        assert!(should_inject(fd, "com.tencent.mm", UID_USER999));
+
+        // 5) 旧格式（只有包名）= 所有用户
+        dir.write("com.tencent.mm\n");
+        assert!(should_inject(fd, "com.tencent.mm", UID_USER0));
+        assert!(should_inject(fd, "com.tencent.mm", UID_USER999));
+
+        // 6) 空文件 = 一个都不注入
+        dir.write("");
+        assert!(!should_inject(fd, "com.tencent.mm", UID_USER0));
+
+        // 7) 删除文件 = 恢复默认
+        dir.remove();
+        assert!(should_inject(fd, "com.tencent.mm", UID_USER0));
+
+        unsafe { libc::close(fd) };
+    }
 }

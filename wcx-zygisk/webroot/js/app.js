@@ -45,7 +45,7 @@
         const want = input.checked;
         input.disabled = true;
         try {
-          await api.setTarget(item.pkg, want);
+          await api.setTarget(item.userId, item.pkg, want);
           await loadTargets();
           setStatus(want ? '已启用注入 ' + item.pkg : '已停止注入 ' + item.pkg);
         } catch (e) {

@@ -29,7 +29,7 @@ app/build/outputs/zygisk/wcx-<版本>-arm64-v8a.apk   # 可安装 APK + 可刷�
 
 ```
 preAppSpecialize（zygote 特权）
-  ├─ 目标判定：默认 com.tencent.mm（可用 <模块目录>/target.list 覆盖，一行一个包名）
+  ├─ 目标判定：默认 com.tencent.mm；可用 <模块目录>/target.list 按 (userId, 包名) 精确控制（双开/分身）
   ├─ get_module_dir() 拿到模块目录（不依赖 root companion）
 postAppSpecialize（sandbox）
   ├─ openat(module.apk) → 读出 classes*.dex
@@ -109,17 +109,18 @@ HomeSidePanel: 左边缘右滑触摸条已挂载
 
 | 文件 | 含义 |
 |---|---|
-| `target.list` | 一行一个包名；**文件不存在** = 默认只注入 `com.tencent.mm`；**文件存在但为空** = 一个都不注入 |
+| `target.list` | 每行 `<userId>\t<package>`（双开/分身靠 userId 区分）；兼容旧格式「只有包名」= 该包所有用户；**文件不存在** = 默认注入 `com.tencent.mm`（所有用户）；**文件存在但为空** = 一个都不注入 |
 | `disable` | 存在 = 模块停用（Root 管理器写入，注入器直接识别） |
 
 `config.sh` 用法（终端调试用，和 WebUI 等价）：
 
 ```bash
-sh /data/adb/modules/zygisk-wcx/config.sh targets       # <userId>\t<package>\t<0|1>
-sh /data/adb/modules/zygisk-wcx/config.sh list          # 当前作用域（一行一个包名）
-sh /data/adb/modules/zygisk-wcx/config.sh set com.tencent.mm 1   # 加入作用域
-sh /data/adb/modules/zygisk-wcx/config.sh set com.tencent.mm 0   # 移出作用域
-sh /data/adb/modules/zygisk-wcx/config.sh reset         # 恢复默认（只注入微信）
+sh /data/adb/modules/zygisk-wcx/config.sh targets                    # <userId>\t<package>\t<0|1>
+sh /data/adb/modules/zygisk-wcx/config.sh list                       # 当前作用域
+sh /data/adb/modules/zygisk-wcx/config.sh set 0 com.tencent.mm 1     # 只开主用户
+sh /data/adb/modules/zygisk-wcx/config.sh set 999 com.tencent.mm 0   # 关掉分身（userId=999）
+sh /data/adb/modules/zygisk-wcx/config.sh set all com.tencent.mm 1   # 所有用户一起开
+sh /data/adb/modules/zygisk-wcx/config.sh reset                      # 恢复默认（微信，所有用户）
 ```
 
 > 模块升级时 `customize.sh` 会把现有的 `target.list` / `disable` 复制到新版本，作用域不会丢。
