@@ -99,11 +99,23 @@ ProxyInstrumentation: callActivityOnCreate: com.tencent.mm.app.WeChatSplashActiv
 HomeSidePanel: 左边缘右滑触摸条已挂载
 ```
 
-## WebUI：只选注入作用域
+## WebUI：作用域 + 运行状态 + 日志
 
-模块自带 `webroot/`（KernelSU / KernelSU Next / APatch 的 WebUI 会自动识别），
-所有配置都在 WebUI 里完成。本模块只注入微信，因此**没有总开关**：
-不想用时在 Root 管理器里把模块停用即可（会写 `disable`，注入器同样识别）。
+模块自带 `webroot/`（KernelSU / KernelSU Next / APatch 的 WebUI 会自动识别），WebUI 分三块：
+
+1. **注入作用域** —— 按 `(Android 用户, 包名)` 列出所有微信（含分身/双开），逐个开关
+2. **运行状态** —— 一屏看出「是否已注入 / 作用域几条开 / 模块版本 / 注入器库与 payload 是否齐全」，
+   并在异常时给出提示：
+   - 检测到**同族注入器**（如 `wekit_zygisk`，同样带 `module.apk` + `zygisk/*.so`）同时启用 →
+     红色横幅点名。两个注入器都 hook 微信 ART，共存会让微信启动即 SIGILL，必须只留一个
+   - 模块被 Root 管理器停用（`disable` / `remove` 文件存在）
+   - 微信进程还没被注入（提示强制停止微信后重开）
+3. **日志** —— 最近的 `WCX` logcat（默认 150 行，`E` 行标红、`W` 行标黄，一键复制），
+   并根据日志内容给出人话结论，例如「主进程回退内存式 dex 加载（正常）」「个别 feature 类名不匹配」
+   「有微信进程被作用域跳过」「出现 ART 崩溃（SIGILL）」等。
+
+本模块只注入微信，因此**没有总开关**：不想用时在 Root 管理器里把模块停用即可
+（会写 `disable`，注入器同样识别）。
 
 状态都在模块目录里，注入器在 `preAppSpecialize` 直接读，改完对**下一个启动的微信进程**立即生效，无需重启设备：
 
@@ -121,6 +133,8 @@ sh /data/adb/modules/zygisk-wcx/config.sh set 0 com.tencent.mm 1     # 只开主
 sh /data/adb/modules/zygisk-wcx/config.sh set 999 com.tencent.mm 0   # 关掉分身（userId=999）
 sh /data/adb/modules/zygisk-wcx/config.sh set all com.tencent.mm 1   # 所有用户一起开
 sh /data/adb/modules/zygisk-wcx/config.sh reset                      # 恢复默认（微信，所有用户）
+sh /data/adb/modules/zygisk-wcx/config.sh status                     # 注入状态（key=value，WebUI 用）
+sh /data/adb/modules/zygisk-wcx/config.sh logs 150                   # 最近 150 行 WCX 日志
 ```
 
 > 模块升级时 `customize.sh` 会把现有的 `target.list` / `disable` 复制到新版本，作用域不会丢。

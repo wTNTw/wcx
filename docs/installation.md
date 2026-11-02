@@ -45,10 +45,12 @@
 6. 卸载: 在管理器里移除模块（`zygisk-wcx`）后重启
 
 说明:
-- 默认只注入 `com.tencent.mm` 及其子进程; 需要别的目标时用模块的 WebUI，
-  或在终端执行 `sh /data/adb/modules/zygisk-wcx/config.sh set <包名> 1`
-- 模块 WebUI（KernelSU / APatch 里点模块即可打开）可以按 Android 用户选择注入作用域；
+- 默认只注入 `com.tencent.mm` 及其子进程; 作用域按 (Android 用户, 包名) 记录，双开/分身可以单独开关。
+  用模块的 WebUI 切换，或终端执行 `sh /data/adb/modules/zygisk-wcx/config.sh set <userId|all> <包名> <0|1>`
+- 模块 WebUI（KernelSU / APatch 里点模块即可打开）除作用域外还提供**运行状态**和**日志**：
+  是否已注入、作用域开了几条、注入器/payload 是否齐全、最近的 `WCX` logcat，异常时直接给出结论。
   本模块只注入微信，没有总开关，不想用时在 Root 管理器里停用模块即可
+- ⚠️ 同一个微信只能有一个注入器：如果还装着 `wekit_zygisk` 等同样带 `module.apk` + `zygisk/*.so` 的模块，两个同时启用会让微信启动即 SIGILL，WebUI 会用红色横幅点名
 - 方式二**不安装 APK**, 因此不会覆盖你已安装的 WCX; 两种方式建议二选一, 避免重复 hook
 - 更详细的架构/构建/排错见 `wcx-zygisk/README.md`
 

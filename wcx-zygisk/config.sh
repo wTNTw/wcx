@@ -13,6 +13,8 @@
 #   config.sh set <userId> <package> <0|1>
 #   config.sh set all <package> <0|1>     # 所有用户一起开关
 #   config.sh reset               # 恢复默认（com.tencent.mm，所有用户）
+#   config.sh status              # 注入状态（key=value，给 WebUI 用）
+#   config.sh logs [行数]         # 最近的 WCX 日志（给 WebUI 用）
 
 set -u
 MODDIR=${0%/*}
@@ -138,6 +140,86 @@ cmd_set() {
   cmd_targets
 }
 
+# 与本模块「同族」的注入器：另一个既带 module.apk 又带 zygisk/*.so 的模块。
+# 两个同族注入器同时启用会互相踩坏 ART hook（微信启动即 SIGILL），所以要在界面上点名。
+cmd_conflict() {
+  for prop in /data/adb/modules/*/module.prop; do
+    [ -f "$prop" ] || continue
+    dir=${prop%/*}
+    [ "$dir" = "$MODDIR" ] && continue
+    [ -f "$dir/disable" ] && continue
+    [ -f "$dir/remove" ] && continue
+    [ -f "$dir/module.apk" ] || continue
+    ls "$dir"/zygisk/*.so >/dev/null 2>&1 || continue
+    sed -n 's/^id=//p' "$prop" 2>/dev/null
+  done
+}
+
+# 微信进程里是否已经加载了本模块的 payload（= 注入成功）
+cmd_injected() {
+  for p in /proc/[0-9]*; do
+    [ -r "$p/cmdline" ] || continue
+    cmd=$(tr '\0' ' ' < "$p/cmdline" 2>/dev/null)
+    case "$cmd" in
+      com.tencent.mm*) ;;
+      *) continue ;;
+    esac
+    if grep -qF 'wcx-payload' "$p/maps" 2>/dev/null; then
+      echo 1
+      return 0
+    fi
+  done
+  echo 0
+}
+
+cmd_procs() {
+  ps -A -o NAME 2>/dev/null | grep -F 'com.tencent.mm' | sort -u | tr '\n' ',' | sed 's/,$//'
+}
+
+cmd_status() {
+  if [ -f "$MODDIR/disable" ] || [ -f "$MODDIR/remove" ]; then enabled=0; else enabled=1; fi
+  if [ -f "$MODDIR/disable" ]; then disable_file=1; else disable_file=0; fi
+  if [ -f "$MODDIR/remove" ]; then remove_file=1; else remove_file=0; fi
+  if [ -f "$MODDIR/force" ]; then force_file=1; else force_file=0; fi
+  if ls "$MODDIR"/zygisk/*.so >/dev/null 2>&1; then injector=1; else injector=0; fi
+  if [ -f "$MODDIR/module.apk" ]; then payload=1; else payload=0; fi
+
+  version=$(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null)
+  version_code=$(sed -n 's/^versionCode=//p' "$MODDIR/module.prop" 2>/dev/null)
+
+  rows=$(effective_rows | grep -v '^$')
+  total=$(printf '%s\n' "$rows" | grep -c . )
+  on=$(printf '%s\n' "$rows" | awk -F'\t' '$2 != "" {n++} END {print n+0}')
+
+  conflict=$(cmd_conflict | tr '\n' ',' | sed 's/,$//')
+  injected=$(cmd_injected)
+  procs=$(cmd_procs)
+
+  echo "enabled=$enabled"
+  echo "version=${version:-unknown}"
+  echo "version_code=${version_code:-0}"
+  echo "disable_file=$disable_file"
+  echo "remove_file=$remove_file"
+  echo "force_file=$force_file"
+  echo "injector_lib=$injector"
+  echo "payload_apk=$payload"
+  echo "targets_total=${total:-0}"
+  echo "targets_enabled=${on:-0}"
+  echo "conflict=$conflict"
+  echo "injected=$injected"
+  echo "procs=$procs"
+}
+
+cmd_logs() {
+  n=${1:-150}
+  case "$n" in ''|*[!0-9]*) n=150 ;; esac
+  out=$(logcat -d -s WCX:* -t "$n" 2>/dev/null)
+  if [ -z "$out" ]; then
+    out=$(logcat -d 2>/dev/null | grep -F ' WCX ' | tail -n "$n")
+  fi
+  printf '%s\n' "$out"
+}
+
 cmd_reset() {
   rm -f "$TARGETS"
   cmd_targets
@@ -148,7 +230,9 @@ case "${1:-targets}" in
   list)    cmd_list ;;
   set)     shift; cmd_set "$@" ;;
   reset)   cmd_reset ;;
-  *) echo "usage: config.sh {targets|list|set|reset}" >&2; exit 2 ;;
+  status)  cmd_status ;;
+  logs)    shift; cmd_logs "$@" ;;
+  *) echo "usage: config.sh {targets|list|set|reset|status|logs}" >&2; exit 2 ;;
 esac
 
 # 成功路径统一 exit 0：WebUI 用 errno 判定成败

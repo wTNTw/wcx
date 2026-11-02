@@ -7,6 +7,8 @@
   --line: #e6e6ea;
   --accent: #2f6df6;
   --danger: #d63649;
+  --warn: #b06a09;
+  --ok: #1e8e4e;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -136,3 +138,81 @@ code {
 .foot { margin-top: 18px; }
 
 .err { color: var(--danger); }
+
+/* ── 运行状态 ─────────────────────────────────────────────── */
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(127, 127, 127, .08);
+  color: var(--hint);
+  font-size: 12.5px;
+  line-height: 1.2;
+}
+
+.chip.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
+.chip.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+.chip.err { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, transparent); }
+
+.banner {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  font-size: 13px;
+  line-height: 1.45;
+  background: rgba(127, 127, 127, .08);
+}
+
+.banner.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+.banner.err { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, transparent); }
+
+.hints { list-style: none; margin: 12px 0 0; padding: 0; }
+
+.hints .hint-item {
+  position: relative;
+  padding: 8px 12px 8px 26px;
+  margin-top: 8px;
+  border-radius: 10px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  background: rgba(127, 127, 127, .08);
+}
+
+.hints .hint-item::before {
+  content: "!";
+  position: absolute;
+  left: 10px;
+  top: 8px;
+  font-weight: 700;
+}
+
+.hints .hint-item.warn { color: var(--warn); }
+.hints .hint-item.err { color: var(--danger); }
+
+/* ── 日志 ─────────────────────────────────────────────────── */
+.logs {
+  margin: 12px 0 0;
+  padding: 12px;
+  max-height: 46vh;
+  overflow: auto;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: rgba(127, 127, 127, .07);
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+  -webkit-overflow-scrolling: touch;
+}
+
+.logs .log-line { display: block; }
+.logs .log-warn { color: var(--warn); }
+.logs .log-err { color: var(--danger); }

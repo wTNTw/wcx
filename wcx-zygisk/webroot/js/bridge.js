@@ -170,6 +170,21 @@
     return exec('sh ' + CONFIG + ' ' + args, {});
   }
 
+  /** 把 config.sh status 的 key=value 输出解析成对象 */
+  function parseKeyValues(text) {
+    const out = {};
+    String(text || '')
+      .split('\n')
+      .map((l) => l.replace(/\r$/, ''))
+      .forEach((line) => {
+        if (!line) return;
+        const i = line.indexOf('=');
+        if (i <= 0) return;
+        out[line.slice(0, i)] = line.slice(i + 1);
+      });
+    return out;
+  }
+
   function toast(message) {
     const bridge = findBridge();
     if (bridge && typeof bridge.toast === 'function') {
@@ -205,6 +220,10 @@
     setTargetAll: (pkg, enabled) =>
       exec('sh ' + CONFIG + ' set all ' + pkg + ' ' + (enabled ? 1 : 0), {}).then(() => true),
     reset: () => exec('sh ' + CONFIG + ' reset', {}).then(() => true),
+    // 注入状态（模块是否启用、作用域数量、是否已注入、是否有同族注入器抢注）
+    status: () => runConfig('status').then(parseKeyValues),
+    // 最近 n 行 WCX 日志（logcat 按 tag 过滤）
+    logs: (n) => runConfig('logs ' + (Number(n) > 0 ? Number(n) : 150)),
     toast: toast,
   };
 })();

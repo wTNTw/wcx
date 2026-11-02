@@ -23,6 +23,28 @@
       <p id="targets-empty" class="hint" hidden>没有找到微信（是否已安装？）</p>
     </section>
 
+    <section class="card">
+      <div class="row between">
+        <strong>运行状态</strong>
+        <button id="refresh-status" class="btn ghost">刷新</button>
+      </div>
+      <div id="chips" class="chips"></div>
+      <div id="banner" class="banner" hidden></div>
+      <ul id="hints" class="hints" hidden></ul>
+    </section>
+
+    <section class="card">
+      <div class="row between">
+        <strong>日志</strong>
+        <span class="row">
+          <button id="copy-logs" class="btn ghost">复制</button>
+          <button id="refresh-logs" class="btn ghost">刷新</button>
+        </span>
+      </div>
+      <p class="hint">最近的 <code>WCX</code> 日志（logcat 按 tag 过滤），用于查看注入结果与异常。</p>
+      <pre id="logs" class="logs">—</pre>
+    </section>
+
     <footer class="foot">
       <span id="status" class="hint">—</span>
     </footer>
