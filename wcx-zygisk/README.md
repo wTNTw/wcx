@@ -47,7 +47,7 @@ postAppSpecialize（sandbox）
 | 问题 | 现象 | 处理 |
 |---|---|---|
 | 上游自研 Rust inline hook | Android 16 上对 `Class::SetStatus`、`VisiblyInitializedCallback::MarkVisiblyInitialized` 等 ART 函数重定位出错，进程启动即 SIGILL | 换成 **Dobby**（`third_party/dobby` 静态链入）作为 LSPlant 的 `inline_hooker`；并让符号解析跳过 `VisiblyInitializedCallback` 的两个可选 hook |
-| 上游用 root companion + WebUI 授权 | 未配置时永远不注入，且需要 `config.sh`/`webroot` 一整套 | 改成读 `<模块目录>/target.list`，默认注入 `com.tencent.mm`（命中包名的所有进程，含子进程） |
+| 上游用 root companion + WebUI 授权 | 未配置时永远不注入，判定发生在 native 与 root 进程之间 | 作用域/总开关都落到模块目录里的文件（`target.list` / `disable`），注入器自己在 pre-specialize 读，改完**立即生效**、不依赖 companion；WebUI 仍然保留（见下） |
 
 ## 依赖的固定版本
 
@@ -98,11 +98,51 @@ ProxyInstrumentation: callActivityOnCreate: com.tencent.mm.app.WeChatSplashActiv
 HomeSidePanel: 左边缘右滑触摸条已挂载
 ```
 
+## WebUI：作用域与总开关
+
+模块自带 `webroot/`（KernelSU / KernelSU Next / APatch 的 WebUI 会自动识别），也可以直接用
+`config.sh`（终端或 Magisk 的「操作」按钮 `action.sh`）。
+
+状态都在模块目录里，注入器在 `preAppSpecialize` 直接读，改完对**下一个启动的微信进程**立即生效，无需重启设备：
+
+| 文件 | 含义 |
+|---|---|
+| `target.list` | 一行一个包名；**文件不存在** = 默认只注入 `com.tencent.mm`；**文件存在但为空** = 一个都不注入 |
+| `disable` | 存在 = 总开关关闭（Root 管理器同时显示模块停用） |
+
+`config.sh` 用法：
+
+```bash
+sh /data/adb/modules/zygisk-wcx/config.sh status        # enabled=1 + 当前作用域
+sh /data/adb/modules/zygisk-wcx/config.sh targets       # <userId>	<package>	<0|1>
+sh /data/adb/modules/zygisk-wcx/config.sh set com.tencent.mm 1   # 加入作用域
+sh /data/adb/modules/zygisk-wcx/config.sh set com.tencent.mm 0   # 移出作用域
+sh /data/adb/modules/zygisk-wcx/config.sh master off    # 关闭注入
+sh /data/adb/modules/zygisk-wcx/config.sh reset         # 恢复默认（只注入微信）
+```
+
+> 模块升级时 `customize.sh` 会把现有的 `target.list` / `disable` 复制到新版本，作用域不会丢。
+
+## 冷启动优化
+
+| 优化 | 之前 | 现在 |
+|---|---|---|
+| APK 复用 | 每个进程都复制一次 35MB `module.apk` 并全量读 3 个 dex（≈33MB 堆） | 目标文件按 `(inode,size,mtime)` 命名，命中即**零拷贝复用**；顺带清理旧版本副本 |
+| 类加载方式 | `InMemoryDexClassLoader`（dex 全量进内存 + DirectByteBuffer） | `PathClassLoader`（ART 自己 mmap，按需解析），`publish=1~2ms` |
+| 原生库解包 | 每个进程都从 APK 解出 ~4.5MB `.so` 再 `System.load` | 目标已存在且大小一致就跳过（目录名带 APK 版本标记） |
+
+真机实测（Android 16 / 微信 8.0.79 / KernelSU + Zygisk Next，冷启动单进程）：
+
+```
+Zygisk: 冷启动耗时 publish=1ms loader=30ms art=24ms total=56ms (com.tencent.mm:push)
+FeaturesLoader: enabling all hook items took 20ms
+```
+
 ## 已知问题 / 待办
 
 - 个别 feature 与 WeChat 8.0.79 类名不匹配（例如 `com.tencent.mm.plugin.multitalk.ui.MultiTalkMainUI`
   已不存在），会持续刷 `NoClassDefFoundError`。属于 feature 维护问题，与注入链路无关。
-- 设置 UI 仍依赖已安装的 WCX APK（Zygisk 模式下没有 Activity 入口），后续按需做 WebUI。
+- 功能设置 UI 仍依赖已安装的 WCX APK（Zygisk 模式下没有 Activity 入口）；模块级作用域/开关已由 WebUI 提供。
 - 崩溃自愈（连续启动失败自动 `disable`）未实现。
 
 ## 与 master 分支的兼容性约定

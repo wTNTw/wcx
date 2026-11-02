@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Zygisk - WCX</title>
+  <link rel="stylesheet" href="css/app.css" />
+</head>
+<body>
+  <main class="page">
+    <header class="head">
+      <h1>Zygisk - WCX</h1>
+      <p class="sub">选择注入作用域 / 控制模块是否注入</p>
+    </header>
+
+    <section class="card">
+      <div class="row">
+        <div class="label">
+          <strong>总开关</strong>
+          <span id="master-desc" class="hint">读取中…</span>
+        </div>
+        <label class="switch">
+          <input id="master" type="checkbox" />
+          <span class="track"><span class="thumb"></span></span>
+        </label>
+      </div>
+      <p class="hint">关闭后注入器不再注入任何进程（等价于在模块目录放 disable 文件）。</p>
+    </section>
+
+    <section class="card">
+      <div class="row between">
+        <strong>注入作用域</strong>
+        <button id="refresh" class="btn ghost">刷新</button>
+      </div>
+      <p class="hint">列出设备上所有 Android 用户中包名以 <code>com.tencent.mm</code> 开头的应用（含分身）。</p>
+      <ul id="targets" class="targets"></ul>
+      <p id="targets-empty" class="hint" hidden>没有找到微信（是否已安装？）</p>
+    </section>
+
+    <footer class="foot">
+      <span id="status" class="hint">—</span>
+    </footer>
+  </main>
+
+  <script src="js/bridge.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

@@ -38,6 +38,17 @@ class ZygiskNativePayload(val apk: File, private val dataDir: File) {
         for (name in names) {
             val fileName = "lib$name.so"
             val entry = archive.getEntry("lib/$abi/$fileName") ?: continue
+            // 冷启动优化：目标已存在且大小一致时直接复用（目录名里带 APK 版本标记，
+            // 升级模块后路径会变，自然重新解出）
+            val cached = File(libraryDir, fileName)
+            if (cached.isFile && cached.length() == entry.size) {
+                libraries[name] = cached
+                when (name) {
+                    "androidx.graphics.path", "dexkit", "wekit_native", "silk_codec" ->
+                        System.load(cached.absolutePath)
+                }
+                continue
+            }
             val extracted = extractLibrary(archive, entry, libraryDir, fileName)
             libraries[name] = extracted
             // MMKV loads through its callback; executable artifacts must never be dlopen-ed.

@@ -101,6 +101,29 @@ fn read_dex_with_limits(
     Ok(buffers)
 }
 
+
+/// 只校验 ZIP 目录结构与 classes*.dex 是否存在（解压数据，冷启动用）。
+/// 与 [`read_dex`] 的区别：不解压任何 dex，成本只有读中央目录。
+pub fn validate_apk(reader: impl Read + Seek) -> Result<()> {
+    let mut archive = ZipArchive::new(reader).context("invalid APK ZIP")?;
+    let mut found = 0usize;
+    let mut total = 0u64;
+    for index in 0..archive.len() {
+        let entry = archive.by_index_raw(index)?;
+        let name = entry.name();
+        if name.contains('/') || !name.starts_with("classes") || !name.ends_with(".dex") {
+            continue;
+        }
+        ensure!(entry.is_file() && !entry.encrypted(), "invalid DEX entry: {name}");
+        ensure!(entry.size() > 0, "empty DEX entry: {name}");
+        total = total.checked_add(entry.size()).context("DEX size overflow")?;
+        ensure!(total <= MAX_TOTAL_DEX_BYTES, "total DEX size exceeds limit");
+        found += 1;
+    }
+    ensure!(found > 0, "APK 内没有 classes*.dex");
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

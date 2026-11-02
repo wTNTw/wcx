@@ -30,8 +30,6 @@ pub struct WcxZygiskModule {
     pub module_dir_fd: Option<OwnedFd>,
     pub data_dir: String,
     pub process_name: String,
-    // DirectByteBuffers reference these allocations for the process lifetime.
-    pub dex_buffers: Vec<Vec<u8>>,
     pub telegram_socket_name: Option<String>,
     pub enabled: bool,
     // filled in postAppSpecialize
@@ -46,7 +44,6 @@ impl WcxZygiskModule {
             module_dir_fd: None,
             data_dir: String::new(),
             process_name: String::new(),
-            dex_buffers: Vec::new(),
             telegram_socket_name: None,
             enabled: false,
             module_classloader: None,
@@ -101,22 +98,22 @@ fn should_inject(module_dir_fd: i32, process_name: &str) -> bool {
     let read = unsafe { libc::read(fd, buf.as_mut_ptr().cast(), buf.len()) };
     unsafe { libc::close(fd) };
     if read <= 0 {
-        return package == "com.tencent.mm";
+        // 文件存在但为空 = 用户显式清空了作用域（WebUI 全关），此时不注入任何进程。
+        // 想要“恢复默认”用 config.sh reset（删除文件）。
+        return false;
     }
     let text = String::from_utf8_lossy(&buf[..read as usize]);
-    let mut matched = false;
     for line in text.lines() {
         let line = line.trim();
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        matched = true;
         if line == package {
             return true;
         }
     }
     // 有配置文件但没有命中：不注入
-    matched && false
+    false
 }
 
 fn send_check_request(api: *mut ApiTable, uid: i32, process_name: &str) -> u8 {
@@ -182,6 +179,14 @@ pub unsafe fn do_pre_app_specialize(module: &mut WcxZygiskModule, args: *mut App
         return;
     }
 
+    // 总开关：模块目录里的 disable（WebUI / 管理器都会写这个文件），存在则不注入
+    if unsafe { libc::faccessat(mod_fd, c"disable".as_ptr(), libc::F_OK, 0) } == 0 {
+        logi!("Zygisk: 模块已停用（disable），跳过 {nice_name}");
+        unsafe { libc::close(mod_fd) };
+        (*module.api).set_option(DLCLOSE_MODULE_LIBRARY);
+        return;
+    }
+
     // 目标判定：本地 target.list（默认 com.tencent.mm），不再依赖 root companion
     if !should_inject(mod_fd, &nice_name) {
         unsafe { libc::close(mod_fd) };
@@ -236,13 +241,15 @@ pub unsafe fn do_post_app_specialize(module: &mut WcxZygiskModule, _args: *const
         return;
     }
     let data_dir = module.data_dir.clone();
-    let (apk_dst, dex_bufs) = match crate::payload::publish_apk(apk, &data_dir) {
-        Ok(payload) => payload,
+    let started = std::time::Instant::now();
+    let apk_dst = match crate::payload::publish_apk(apk, &data_dir) {
+        Ok(path) => path,
         Err(error) => {
             loge!("Zygisk: cannot prepare module APK: {error:#}");
             return;
         }
     };
+    let publish_ms = started.elapsed().as_millis();
 
     // Build InMemoryDexClassLoader
     let fns = *module.env;
@@ -254,21 +261,19 @@ pub unsafe fn do_post_app_specialize(module: &mut WcxZygiskModule, _args: *const
         c"()Ljava/lang/ClassLoader;".as_ptr(),
     );
     let parent = ((*fns).v1_6.CallStaticObjectMethod)(module.env, sys_cl_class, get_sys_id);
-    let cl = crate::payload::build_dex_classloader(module.env, &dex_bufs, parent);
+    let t_loader = std::time::Instant::now();
+    let cl = crate::payload::build_dex_classloader(module.env, &apk_dst, parent);
     if cl.is_null() {
-        loge!("Zygisk: failed to build InMemoryDexClassLoader");
+        loge!("Zygisk: failed to build PathClassLoader");
         return;
     }
-
-    // Once Java can see the loader, classes may escape even if later startup
-    // throws. Retain its direct-buffer backing memory in the process-lifetime
-    // module object, rather than freeing it on those later failure paths.
-    module.dex_buffers = dex_bufs;
+    let loader_ms = t_loader.elapsed().as_millis();
 
     // LSPlant needs unrestricted hidden-API JNI access during initialization.
     // Do this while still in the native Zygote callback, before a module Java
     // frame becomes the caller. Keep the loader resident after any partial ART
     // initialization: LSPlant's runtime inline hooks live until process exit.
+    let t_art = std::time::Instant::now();
     if !crate::art::init(module.env) || !crate::art::trust_class_loader(module.env, cl) {
         if ((*fns).v1_6.ExceptionCheck)(module.env) != jni::sys::JNI_FALSE {
             ((*fns).v1_6.ExceptionDescribe)(module.env);
@@ -295,6 +300,13 @@ pub unsafe fn do_post_app_specialize(module: &mut WcxZygiskModule, _args: *const
         ((*fns).v1_6.DeleteGlobalRef)(module.env, cl);
         return;
     }
+
+    logi!(
+        "Zygisk: 冷启动耗时 publish={publish_ms}ms loader={loader_ms}ms art={}ms total={}ms ({})",
+        t_art.elapsed().as_millis(),
+        started.elapsed().as_millis(),
+        module.process_name
+    );
 
     // Call ZygiskEntry.init(processName, dataDir, apkPath)
     let init_mid = ((*fns).v1_6.GetStaticMethodID)(
