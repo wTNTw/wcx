@@ -179,7 +179,7 @@ pub unsafe fn do_pre_app_specialize(module: &mut WcxZygiskModule, args: *mut App
         return;
     }
 
-    // 总开关：模块目录里的 disable（WebUI / 管理器都会写这个文件），存在则不注入
+    // 模块停用：Root 管理器停用模块时会写 disable，存在则不注入
     if unsafe { libc::faccessat(mod_fd, c"disable".as_ptr(), libc::F_OK, 0) } == 0 {
         logi!("Zygisk: 模块已停用（disable），跳过 {nice_name}");
         unsafe { libc::close(mod_fd) };

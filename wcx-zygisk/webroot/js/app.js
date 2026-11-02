@@ -2,8 +2,6 @@
   'use strict';
 
   const api = window.WcxZygisk;
-  const $master = document.getElementById('master');
-  const $masterDesc = document.getElementById('master-desc');
   const $targets = document.getElementById('targets');
   const $empty = document.getElementById('targets-empty');
   const $refresh = document.getElementById('refresh');
@@ -71,63 +69,35 @@
     }
   }
 
-  async function loadMaster() {
-    try {
-      const st = await api.status();
-      $master.checked = st.enabled;
-      $masterDesc.textContent = st.enabled ? '注入已开启' : '注入已关闭';
-      return st.enabled;
-    } catch (e) {
-      $master.checked = false;
-      $master.disabled = true;
-      $masterDesc.textContent = '无法读取状态';
-      setStatus(e.message, true);
-      return false;
-    }
-  }
-
   async function loadTargets() {
     try {
       const list = await api.targets();
       renderTargets(list);
-      if (list.length) setStatus('共 ' + list.length + ' 个作用域目标');
+      if (list.length) {
+        setStatus('共 ' + list.length + ' 个作用域目标');
+      } else {
+        setStatus('没有可注入的微信');
+      }
     } catch (e) {
       $empty.hidden = false;
-      setStatus(e.message, true);
+      setStatus('读取失败：' + e.message, true);
     }
   }
 
   async function refresh() {
     $refresh.disabled = true;
     try {
-      await loadMaster();
       await loadTargets();
     } finally {
       $refresh.disabled = false;
     }
   }
 
-  $master.addEventListener('change', async () => {
-    const want = $master.checked;
-    $master.disabled = true;
-    try {
-      await api.setMaster(want);
-      await loadMaster();
-      await loadTargets();
-      setStatus(want ? '已开启注入（重启微信后生效）' : '已关闭注入（重启微信后生效）');
-    } catch (e) {
-      $master.checked = !want;
-      setStatus('操作失败：' + e.message, true);
-    } finally {
-      $master.disabled = false;
-    }
-  });
-
   $refresh.addEventListener('click', refresh);
 
   if (!api.available()) {
-    $master.disabled = true;
-    setStatus('当前环境不支持 WebUI root 桥；可在终端执行 config.sh 或使用模块的“操作”按钮', true);
+    $empty.hidden = false;
+    setStatus('当前环境没有 WebUI root 桥（请在 KernelSU / APatch 的管理器里打开本页）', true);
   }
 
   refresh();

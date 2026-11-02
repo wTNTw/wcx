@@ -98,26 +98,26 @@ ProxyInstrumentation: callActivityOnCreate: com.tencent.mm.app.WeChatSplashActiv
 HomeSidePanel: 左边缘右滑触摸条已挂载
 ```
 
-## WebUI：作用域与总开关
+## WebUI：只选注入作用域
 
-模块自带 `webroot/`（KernelSU / KernelSU Next / APatch 的 WebUI 会自动识别），也可以直接用
-`config.sh`（终端或 Magisk 的「操作」按钮 `action.sh`）。
+模块自带 `webroot/`（KernelSU / KernelSU Next / APatch 的 WebUI 会自动识别），
+所有配置都在 WebUI 里完成。本模块只注入微信，因此**没有总开关**：
+不想用时在 Root 管理器里把模块停用即可（会写 `disable`，注入器同样识别）。
 
 状态都在模块目录里，注入器在 `preAppSpecialize` 直接读，改完对**下一个启动的微信进程**立即生效，无需重启设备：
 
 | 文件 | 含义 |
 |---|---|
 | `target.list` | 一行一个包名；**文件不存在** = 默认只注入 `com.tencent.mm`；**文件存在但为空** = 一个都不注入 |
-| `disable` | 存在 = 总开关关闭（Root 管理器同时显示模块停用） |
+| `disable` | 存在 = 模块停用（Root 管理器写入，注入器直接识别） |
 
-`config.sh` 用法：
+`config.sh` 用法（终端调试用，和 WebUI 等价）：
 
 ```bash
-sh /data/adb/modules/zygisk-wcx/config.sh status        # enabled=1 + 当前作用域
-sh /data/adb/modules/zygisk-wcx/config.sh targets       # <userId>	<package>	<0|1>
+sh /data/adb/modules/zygisk-wcx/config.sh targets       # <userId>\t<package>\t<0|1>
+sh /data/adb/modules/zygisk-wcx/config.sh list          # 当前作用域（一行一个包名）
 sh /data/adb/modules/zygisk-wcx/config.sh set com.tencent.mm 1   # 加入作用域
 sh /data/adb/modules/zygisk-wcx/config.sh set com.tencent.mm 0   # 移出作用域
-sh /data/adb/modules/zygisk-wcx/config.sh master off    # 关闭注入
 sh /data/adb/modules/zygisk-wcx/config.sh reset         # 恢复默认（只注入微信）
 ```
 

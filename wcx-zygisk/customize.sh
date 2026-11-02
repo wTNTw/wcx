@@ -22,7 +22,7 @@ fi
 unzip -t "$ZIPFILE" >/dev/null 2>&1 || abort "! WCX APK 已损坏"
 unzip -l "$ZIPFILE" > "$TMPDIR/wcx-apk-entries" || abort "! 无法列出 APK 内容"
 
-for entry in module.prop customize.sh uninstall.sh config.sh action.sh \
+for entry in module.prop customize.sh uninstall.sh config.sh \
   webroot/index.html webroot/css/app.css webroot/js/bridge.js webroot/js/app.js \
   META-INF/com/google/android/update-binary META-INF/com/google/android/updater-script \
   AndroidManifest.xml classes.dex resources.arsc \
@@ -34,7 +34,7 @@ done
 rm -f "$TMPDIR/wcx-apk-entries"
 
 ui_print "- 解压模块文件"
-for entry in module.prop uninstall.sh config.sh action.sh \
+for entry in module.prop uninstall.sh config.sh \
   webroot/index.html webroot/css/app.css webroot/js/bridge.js webroot/js/app.js
 do
   unzip -o "$ZIPFILE" "$entry" -d "$MODPATH" >/dev/null || abort "! 无法解压 $entry"
@@ -64,7 +64,6 @@ set_perm "$MODPATH/zygisk/arm64-v8a.so" 0 0 0644
 set_perm "$MODPATH/module.apk" 0 0 0644
 set_perm "$MODPATH/module.prop" 0 0 0644
 set_perm "$MODPATH/config.sh" 0 0 0755
-set_perm "$MODPATH/action.sh" 0 0 0755
 set_perm "$MODPATH/uninstall.sh" 0 0 0755
 
 ui_print "**********************************************"

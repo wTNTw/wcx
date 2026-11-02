@@ -167,19 +167,7 @@
 
   function runConfig(args) {
     // 路径不含空格，不加引号，避免某些桥实现二次解析
-    return exec('sh ' + CONFIG + ' ' + args, {}).then(parseStatus);
-  }
-
-  /** config.sh status 输出：enabled=1\n----\n<每行一个包名> */
-  function parseStatus(text) {
-    const lines = String(text)
-      .split('\n')
-      .map((l) => l.replace(/\r$/, '').trim());
-    const enabledLine = lines.find((l) => l.indexOf('enabled=') === 0);
-    const enabled = enabledLine === 'enabled=1';
-    const sep = lines.indexOf('----');
-    const targets = sep >= 0 ? lines.slice(sep + 1).filter(Boolean) : [];
-    return { enabled, targets, raw: text };
+    return exec('sh ' + CONFIG + ' ' + args, {});
   }
 
   function toast(message) {
@@ -198,10 +186,9 @@
     configPath: CONFIG,
     available: () => !!findBridge(),
     exec: exec,
-    status: () => runConfig('status'),
     targets: () =>
-      runConfig('targets').then((s) =>
-        String(s.raw)
+      runConfig('targets').then((out) =>
+        String(out)
           .split('\n')
           .map((l) => l.replace(/\r$/, '').trim())
           .filter(Boolean)
@@ -210,12 +197,10 @@
             return { userId: parts[0] || '0', pkg: parts[1] || parts[0], enabled: parts[2] === '1' };
           })
       ),
-    // 修改类操作只要成功即可；状态统一由 app.js 再调 status/targets 刷新
+    // 修改类操作只要成功即可；界面状态由 app.js 再调 targets 刷新
     setTarget: (pkg, enabled) =>
       exec('sh ' + CONFIG + ' set ' + pkg + ' ' + (enabled ? 1 : 0), {}).then(() => true),
-    setMaster: (enabled) =>
-      exec('sh ' + CONFIG + ' master ' + (enabled ? 'on' : 'off'), {}).then(() => true),
-    reset: () => runConfig('reset'),
+    reset: () => exec('sh ' + CONFIG + ' reset', {}).then(() => true),
     toast: toast,
   };
 })();
