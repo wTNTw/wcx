@@ -150,10 +150,7 @@ public abstract class PackageZygiskApkTask extends DefaultTask {
             Files.copy(aligned, finalApk, StandardCopyOption.REPLACE_EXISTING);
         }
 
-        // 同一个文件再存一份 .zip，方便直接刷入（内容完全相同）
-        Path finalZip = outDir.resolve(baseName + ".zip");
-        Files.copy(finalApk, finalZip, StandardCopyOption.REPLACE_EXISTING);
-
+        // 只产出这一个 APK：它本身就是可刷入的模块包（改名 .zip 即可），不再额外输出副本
         getLogger().lifecycle("一体包: {} ({} MB，改名为 .zip 即可刷入)",
                 finalApk.toAbsolutePath(), Files.size(finalApk) / 1024 / 1024);
     }

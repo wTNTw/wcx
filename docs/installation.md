@@ -37,7 +37,7 @@
 方式二: 让模块自带的注入器注入, 不需要 LSPosed。
 
 1. 确认已启用 Zygisk（Magisk 设置, 或 KernelSU/APatch 的 Zygisk 开关, 或装了 ZygiskNext）
-2. 把 `wcx-*-arm64-v8a.apk` 的后缀改成 `.zip`（发布产物里也会直接提供同字节的 `.zip`）
+2. 把 `app-standard-arm64-v8a-release.apk` 的后缀改成 `.zip`（APK 本身即模块包，不再单独提供 zip 文件）
 3. 在 Magisk / KernelSU / APatch 里刷入该 zip
 4. 重启手机, 强制停止微信后重新打开
 5. 抓日志确认: `adb logcat -s WCX`（应看到 `Zygisk: LSPlant initialized` 与

@@ -225,28 +225,24 @@ jobs:
       - name: Collect APKs
         run: |
           mkdir -p dist/apk
-          find app/build/outputs/apk -type f -name '*.apk' -exec cp -v {} dist/apk/ \;
+          # AGP 产物统一去掉 -unsigned 后缀（PR 构建设计为未签名，文件名保持一致）
+          find app/build/outputs/apk -type f -name '*.apk' | while read -r apk; do
+            cp -v "$apk" "dist/apk/$(basename "$apk" | sed 's/-unsigned\.apk$/.apk/')"
+          done
           echo "Collected APKs:"
           ls -1 dist/apk
 
-      - name: Collect Zygisk unified package
+      # APK 本身就是 Zygisk 模块包（改名 .zip 即可刷入），所以只把 standard/arm64 换成一一体包，
+      # 不再另外输出 / 上传单独的 zygisk zip。
+      - name: Replace standard arm64 APK with the dual-purpose build
         if: github.event_name != 'pull_request'
         run: |
-          mkdir -p dist/zygisk
-          find app/build/outputs/zygisk -type f \( -name '*.apk' -o -name '*.zip' \) -exec cp -v {} dist/zygisk/ \; || true
-          # 用一体包覆盖 dist/apk 里同 ABI 的普通 APK：发布的 APK 直接就是双用途包
-          for f in dist/zygisk/*.apk; do
-            [ -f "$f" ] || continue
-            case "$(basename "$f")" in
-              *arm64-v8a*)
-                rm -f dist/apk/*arm64-v8a*
-                cp -v "$f" "dist/apk/app-standard-arm64-v8a-release.apk"
-                ;;
-            esac
-          done
-          echo "Collected:"
-          ls -1 dist/zygisk dist/apk
-          test -n "$(ls -A dist/zygisk 2>/dev/null)" || { echo "::error::没有产出一体包"; exit 1; }
+          ls -1 app/build/outputs/zygisk/
+          UNIFIED=$(ls app/build/outputs/zygisk/*-arm64-v8a.apk 2>/dev/null | head -1 || true)
+          test -n "$UNIFIED" || { echo "::error::没有产出一体包"; exit 1; }
+          cp -v "$UNIFIED" dist/apk/app-standard-arm64-v8a-release.apk
+          echo "Published APKs:"
+          ls -1 dist/apk
 
       - name: Verify APK signatures (fixed keystore)
         if: github.event_name != 'pull_request' && !(github.event_name == 'workflow_dispatch' && inputs.skip_signing)
@@ -292,20 +288,30 @@ jobs:
           done
           ls -1 dist/mapping || echo "(no mappings)"
 
-      - name: Upload Release APKs
+      # 四个 APK 分开上传（不再打成一个 50MB 的 artifact zip）
+      - name: Upload APK (standard arm64-v8a)
         uses: actions/upload-artifact@v7
         with:
-          name: wcx-apk
-          path: dist/apk/*.apk
+          name: wcx-standard-arm64-v8a
+          path: dist/apk/app-standard-arm64-v8a-release.apk
 
-      - name: Upload Zygisk unified package
-        if: github.event_name != 'pull_request'
+      - name: Upload APK (standard armeabi-v7a)
         uses: actions/upload-artifact@v7
         with:
-          name: wcx-zygisk
-          path: |
-            dist/zygisk/*.apk
-            dist/zygisk/*.zip
+          name: wcx-standard-armeabi-v7a
+          path: dist/apk/app-standard-armeabi-v7a-release.apk
+
+      - name: Upload APK (legacy arm64-v8a)
+        uses: actions/upload-artifact@v7
+        with:
+          name: wcx-legacy-arm64-v8a
+          path: dist/apk/app-legacy-arm64-v8a-release.apk
+
+      - name: Upload APK (legacy armeabi-v7a)
+        uses: actions/upload-artifact@v7
+        with:
+          name: wcx-legacy-armeabi-v7a
+          path: dist/apk/app-legacy-armeabi-v7a-release.apk
 
       - name: Upload Release Obfuscation Mapping
         uses: actions/upload-artifact@v7
@@ -327,17 +333,12 @@ jobs:
           fetch-depth: 0
           submodules: recursive
 
-      - name: Download APK artifact
+      - name: Download APK artifacts
         uses: actions/download-artifact@v8
         with:
-          name: wcx-apk
+          pattern: wcx-*
           path: artifacts
-
-      - name: Download Zygisk unified artifact
-        uses: actions/download-artifact@v8
-        with:
-          name: wcx-zygisk
-          path: artifacts/zygisk
+          merge-multiple: true
 
       - name: Generate version info
         id: version
@@ -444,13 +445,11 @@ jobs:
             ${{ steps.changelog.outputs.changelog }}
 
             ### 📦 下载
-            - 下方 Assets 中下载对应架构的 APK
-            - arm64 的 APK 是**一体包**：安装即走 LSPosed；把后缀改成 `.zip` 即是在 Magisk / KernelSU / APatch 刷的 Zygisk 模块（无需 LSPosed）
-            - `wcx-*-arm64-v8a.zip`（与 APK 完全相同的字节）供直接刷入
+            - 下方 Assets 中下载对应架构/框架的 APK
+            - `standard` 的 arm64 APK 是**一体包**：直接安装走 LSPosed；把后缀改成 `.zip` 即是在 Magisk / KernelSU / APatch 刷的 Zygisk 模块（无需 LSPosed）
             - update.json 供模块内置更新器使用
           files: |
             artifacts/*.apk
-            artifacts/zygisk/*.zip
             artifacts/update.json
             artifacts/CHANGELOG.md
           prerelease: false

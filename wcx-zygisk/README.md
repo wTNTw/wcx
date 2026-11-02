@@ -11,10 +11,11 @@
 
 ```
 app/build/outputs/zygisk/wcx-<版本>-arm64-v8a.apk   # 可安装 APK + 可刷模块包（同一份字节）
-app/build/outputs/zygisk/wcx-<版本>-arm64-v8a.zip   # 上者副本，方便直接刷
 ```
 
-刷入方式：把 `.apk` 改名成 `.zip`（或直接用产物里的 `.zip`）在 Magisk / KernelSU / APatch 刷入。
+只产出这**一个** APK：它本身就是模块包，不再额外生成 `.zip` 副本。
+
+刷入方式：把 `.apk` 改名成 `.zip`，在 Magisk / KernelSU / APatch 刷入。
 `customize.sh` 用 `SKIPUNZIP=1`，只做三件事：
 
 1. 把**整包自身**复制成 `$MODPATH/module.apk`（注入器在目标进程里读它，dex + 资源都在里面）
