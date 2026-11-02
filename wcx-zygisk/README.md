@@ -128,14 +128,17 @@ sh /data/adb/modules/zygisk-wcx/config.sh reset         # 恢复默认（只注�
 | 优化 | 之前 | 现在 |
 |---|---|---|
 | APK 复用 | 每个进程都复制一次 35MB `module.apk` 并全量读 3 个 dex（≈33MB 堆） | 目标文件按 `(inode,size,mtime)` 命名，命中即**零拷贝复用**；顺带清理旧版本副本 |
-| 类加载方式 | `InMemoryDexClassLoader`（dex 全量进内存 + DirectByteBuffer） | `PathClassLoader`（ART 自己 mmap，按需解析），`publish=1~2ms` |
+| 类加载方式 | `InMemoryDexClassLoader`（dex 全量进内存 + DirectByteBuffer） | 优先 `DexClassLoader(路径, optimizedDirectory)`（ART 自己 mmap）；本 ROM 的**主进程**首次打开应用私有 APK 会拿到空 dexElements，此时自动回退 `InMemoryDexClassLoader` |
 | 原生库解包 | 每个进程都从 APK 解出 ~4.5MB `.so` 再 `System.load` | 目标已存在且大小一致就跳过（目录名带 APK 版本标记） |
 
 真机实测（Android 16 / 微信 8.0.79 / KernelSU + Zygisk Next，冷启动单进程）：
 
 ```
-Zygisk: 冷启动耗时 publish=1ms loader=30ms art=24ms total=56ms (com.tencent.mm:push)
-FeaturesLoader: enabling all hook items took 20ms
+# 子进程：文件式加载
+Zygisk: 冷启动耗时 publish=1ms loader=46ms(file) art=27ms total=75ms (com.tencent.mm:recovery3)
+# 主进程：ART 首次打开私有 APK 失败 → 自动回退内存式
+Zygisk: 文件式 dex 加载仍为空（试了 3 次），回退 InMemoryDexClassLoader
+Zygisk: 冷启动耗时 publish=1ms loader=139ms(memory) art=25ms total=165ms (com.tencent.mm)
 ```
 
 ## 已知问题 / 待办
