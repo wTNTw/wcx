@@ -18,6 +18,8 @@ use std::{
 pub fn publish_apk(mut source: File, data_dir: &str) -> Result<PathBuf> {
     use std::os::unix::fs::MetadataExt;
 
+    // 注意：不要用隐藏文件（前缀 ）。ART 对这类路径会退化成
+    // "ClassLoader referenced unknown path" 并返回空的 DexPathList。
     let directory = Path::new(data_dir).join("files/mmkv");
     fs::create_dir_all(&directory)?;
 
@@ -35,7 +37,7 @@ pub fn publish_apk(mut source: File, data_dir: &str) -> Result<PathBuf> {
         meta.mtime(),
         meta.mtime_nsec()
     );
-    let destination = directory.join(format!(".wcx-bootstrap-{marker}.apk"));
+    let destination = directory.join(format!("wcx-payload-{marker}.apk"));
 
     // 命中缓存：只做零拷贝校验，不再读/写 35MB
     if let Ok(existing) = fs::metadata(&destination) {
@@ -45,7 +47,7 @@ pub fn publish_apk(mut source: File, data_dir: &str) -> Result<PathBuf> {
         }
     }
 
-    let temporary = directory.join(format!(".wcx-bootstrap-{}.tmp", std::process::id()));
+    let temporary = directory.join(format!("wcx-payload-{}.tmp", std::process::id()));
     // A prior crash may have left this PID's temporary file. Never follow it.
     match fs::remove_file(&temporary) {
         Ok(()) => {}
@@ -104,7 +106,7 @@ fn cleanup_stale_copies(directory: &Path, keep: &Path) {
         let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
             continue;
         };
-        if !name.starts_with(".wcx-bootstrap-") {
+        if !name.starts_with("wcx-payload-") && !name.starts_with(".wcx-bootstrap-") {
             continue;
         }
         if path == keep {
@@ -117,6 +119,71 @@ fn cleanup_stale_copies(directory: &Path, keep: &Path) {
     }
 }
 
+/// 内存式加载（回退路径）：dex 全量读进内存，用 InMemoryDexClassLoader。
+pub unsafe fn build_in_memory_classloader(
+    env: *mut RawJNIEnv,
+    dex_buffers: &[Vec<u8>],
+    parent_loader: jobject,
+) -> jobject {
+    if dex_buffers.is_empty() {
+        return std::ptr::null_mut();
+    }
+    let fns = *env;
+    if ((*fns).v1_6.PushLocalFrame)(env, 16) < 0 {
+        ((*fns).v1_6.ExceptionClear)(env);
+        return std::ptr::null_mut();
+    }
+    let loader = (|| {
+        let bb_class = ((*fns).v1_6.FindClass)(env, c"java/nio/ByteBuffer".as_ptr());
+        if bb_class.is_null() {
+            return std::ptr::null_mut();
+        }
+        let arr = ((*fns).v1_6.NewObjectArray)(
+            env,
+            dex_buffers.len() as i32,
+            bb_class,
+            std::ptr::null_mut(),
+        );
+        if arr.is_null() {
+            return std::ptr::null_mut();
+        }
+        for (i, buf) in dex_buffers.iter().enumerate() {
+            let bb =
+                ((*fns).v1_6.NewDirectByteBuffer)(env, buf.as_ptr() as *mut _, buf.len() as i64);
+            if bb.is_null() {
+                return std::ptr::null_mut();
+            }
+            ((*fns).v1_6.SetObjectArrayElement)(env, arr, i as i32, bb);
+            ((*fns).v1_6.DeleteLocalRef)(env, bb);
+        }
+        let cl_class =
+            ((*fns).v1_6.FindClass)(env, c"dalvik/system/InMemoryDexClassLoader".as_ptr());
+        if cl_class.is_null() {
+            return std::ptr::null_mut();
+        }
+        let ctor = ((*fns).v1_6.GetMethodID)(
+            env,
+            cl_class,
+            c"<init>".as_ptr(),
+            c"([Ljava/nio/ByteBuffer;Ljava/lang/ClassLoader;)V".as_ptr(),
+        );
+        if ctor.is_null() {
+            return std::ptr::null_mut();
+        }
+        let loader = ((*fns).v1_6.NewObject)(env, cl_class, ctor, arr, parent_loader);
+        if loader.is_null() {
+            return std::ptr::null_mut();
+        }
+        ((*fns).v1_6.NewGlobalRef)(env, loader)
+    })();
+    if ((*fns).v1_6.ExceptionCheck)(env) != jni::sys::JNI_FALSE {
+        ((*fns).v1_6.ExceptionDescribe)(env);
+        ((*fns).v1_6.ExceptionClear)(env);
+    }
+    ((*fns).v1_6.PopLocalFrame)(env, std::ptr::null_mut());
+    loader
+}
+
 /// 用已发布到应用私有目录的 APK 建 `PathClassLoader`。
 ///
 /// 相比 `InMemoryDexClassLoader`（要把 30MB+ dex 全读进内存并建 DirectByteBuffer），
@@ -124,6 +191,7 @@ fn cleanup_stale_copies(directory: &Path, keep: &Path) {
 pub unsafe fn build_dex_classloader(
     env: *mut RawJNIEnv,
     apk_path: &Path,
+    optimized_dir: &Path,
     parent_loader: jobject,
 ) -> jobject {
     let fns = *env;
@@ -139,7 +207,15 @@ pub unsafe fn build_dex_classloader(
         if jpath.is_null() {
             return std::ptr::null_mut();
         }
-        let cl_class = ((*fns).v1_6.FindClass)(env, c"dalvik/system/PathClassLoader".as_ptr());
+        let opt_str = optimized_dir.to_string_lossy();
+        let jopt = ((*fns).v1_6.NewStringUTF)(env, opt_str.as_ptr().cast());
+        if jopt.is_null() {
+            return std::ptr::null_mut();
+        }
+        // DexClassLoader(path, optimizedDirectory, librarySearchPath, parent)
+        // 显式给一个可写 optimizedDirectory：ART 打开应用私有 APK 时要用它生成
+        // odex/vdex，否则会退化成 "ClassLoader referenced unknown path" 并得到空 dexElements。
+        let cl_class = ((*fns).v1_6.FindClass)(env, c"dalvik/system/DexClassLoader".as_ptr());
         if cl_class.is_null() {
             return std::ptr::null_mut();
         }
@@ -147,12 +223,20 @@ pub unsafe fn build_dex_classloader(
             env,
             cl_class,
             c"<init>".as_ptr(),
-            c"(Ljava/lang/String;Ljava/lang/ClassLoader;)V".as_ptr(),
+            c"(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/ClassLoader;)V".as_ptr(),
         );
         if ctor.is_null() {
             return std::ptr::null_mut();
         }
-        let loader = ((*fns).v1_6.NewObject)(env, cl_class, ctor, jpath, parent_loader);
+        let loader = ((*fns).v1_6.NewObject)(
+            env,
+            cl_class,
+            ctor,
+            jpath,
+            jopt,
+            std::ptr::null_mut::<std::ffi::c_void>(),
+            parent_loader,
+        );
         if loader.is_null() {
             return std::ptr::null_mut();
         }
@@ -164,7 +248,7 @@ pub unsafe fn build_dex_classloader(
     }
     ((*fns).v1_6.PopLocalFrame)(env, std::ptr::null_mut());
     if loader.is_null() {
-        loge!("Zygisk: PathClassLoader 创建失败");
+        loge!("Zygisk: DexClassLoader 创建失败");
     }
     loader
 }

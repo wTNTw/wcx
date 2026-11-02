@@ -215,6 +215,59 @@ fn trust_dex_file(env: *mut RawJNIEnv, dex_file: jobject) -> bool {
 }
 
 /// Trust the module's in-memory DEX files before any of its Java code runs.
+/// 数一下这个 BaseDexClassLoader 里有多少个可用的 dex element（0 表示加载失败）。
+pub fn class_loader_dex_count(env: *mut RawJNIEnv, class_loader: jobject) -> i32 {
+    if env.is_null() || class_loader.is_null() {
+        return 0;
+    }
+    unsafe {
+        let fns = *env;
+        let base_cls = ((*fns).v1_6.FindClass)(env, c"dalvik/system/BaseDexClassLoader".as_ptr());
+        let plist_cls = ((*fns).v1_6.FindClass)(env, c"dalvik/system/DexPathList".as_ptr());
+        if base_cls.is_null() || plist_cls.is_null() {
+            ((*fns).v1_6.ExceptionClear)(env);
+            if !base_cls.is_null() {
+                ((*fns).v1_6.DeleteLocalRef)(env, base_cls);
+            }
+            if !plist_cls.is_null() {
+                ((*fns).v1_6.DeleteLocalRef)(env, plist_cls);
+            }
+            return 0;
+        }
+        let plist_fid = ((*fns).v1_6.GetFieldID)(
+            env,
+            base_cls,
+            c"pathList".as_ptr(),
+            c"Ldalvik/system/DexPathList;".as_ptr(),
+        );
+        let elems_fid = ((*fns).v1_6.GetFieldID)(
+            env,
+            plist_cls,
+            c"dexElements".as_ptr(),
+            c"[Ldalvik/system/DexPathList$Element;".as_ptr(),
+        );
+        let mut count = 0;
+        if !plist_fid.is_null() && !elems_fid.is_null() {
+            let path_list = ((*fns).v1_6.GetObjectField)(env, class_loader, plist_fid);
+            if !path_list.is_null() {
+                let elements = ((*fns).v1_6.GetObjectField)(env, path_list, elems_fid);
+                if !elements.is_null() {
+                    count = ((*fns).v1_6.GetArrayLength)(env, elements as jni::sys::jobjectArray);
+                    ((*fns).v1_6.DeleteLocalRef)(env, elements);
+                }
+                ((*fns).v1_6.DeleteLocalRef)(env, path_list);
+            }
+        }
+        if ((*fns).v1_6.ExceptionCheck)(env) != JNI_FALSE {
+            ((*fns).v1_6.ExceptionClear)(env);
+            count = 0;
+        }
+        ((*fns).v1_6.DeleteLocalRef)(env, base_cls);
+        ((*fns).v1_6.DeleteLocalRef)(env, plist_cls);
+        count
+    }
+}
+
 pub fn trust_class_loader(env: *mut RawJNIEnv, class_loader: jobject) -> bool {
     if !is_initialized() || env.is_null() || class_loader.is_null() {
         return false;
@@ -296,8 +349,12 @@ pub fn trust_class_loader(env: *mut RawJNIEnv, class_loader: jobject) -> bool {
                 if trust_dex_file(env, dex_file) {
                     trusted_count += 1;
                 } else {
+                    loge!("Zygisk: dex element {i} trust failed");
                     success = false;
                 }
+            } else {
+                loge!("Zygisk: dex element {i} has no DexFile");
+                success = false;
             }
             if !dex_file.is_null() {
                 ((*fns).v1_6.DeleteLocalRef)(env, dex_file);

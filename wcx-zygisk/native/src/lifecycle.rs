@@ -262,9 +262,55 @@ pub unsafe fn do_post_app_specialize(module: &mut WcxZygiskModule, _args: *const
     );
     let parent = ((*fns).v1_6.CallStaticObjectMethod)(module.env, sys_cl_class, get_sys_id);
     let t_loader = std::time::Instant::now();
-    let cl = crate::payload::build_dex_classloader(module.env, &apk_dst, parent);
+    let odex_dir = std::path::Path::new(&data_dir).join("files/mmkv/odex");
+    let _ = std::fs::create_dir_all(&odex_dir);
+    let mut cl = crate::payload::build_dex_classloader(module.env, &apk_dst, &odex_dir, parent);
+    let mut loader_kind = "file";
+    // 文件式加载偶尔会得到空的 dexElements：**首次**打开刚发布的 APK（通常是主进程）时
+    // ART 的 odex 初始化会失败一次，随后的进程就正常。这里先重试几次，
+    // 仍失败再退回内存式加载（慢一点，但一定能用）。
+    let mut attempt = 0;
+    while !cl.is_null() && crate::art::class_loader_dex_count(module.env, cl) == 0 {
+        attempt += 1;
+        ((*fns).v1_6.DeleteGlobalRef)(module.env, cl);
+        cl = std::ptr::null_mut();
+        if attempt >= 3 {
+            loge!("Zygisk: 文件式 dex 加载仍为空（试了 {attempt} 次），回退 InMemoryDexClassLoader");
+            break;
+        }
+        loge!("Zygisk: 文件式 dex 加载为空，第 {attempt} 次重试");
+        std::thread::sleep(std::time::Duration::from_millis(40));
+        let parent_retry = ((*fns).v1_6.CallStaticObjectMethod)(
+            module.env,
+            sys_cl_class,
+            get_sys_id,
+        );
+        cl = crate::payload::build_dex_classloader(module.env, &apk_dst, &odex_dir, parent_retry);
+    }
     if cl.is_null() {
-        loge!("Zygisk: failed to build PathClassLoader");
+        match std::fs::File::open(&apk_dst)
+            .map_err(anyhow::Error::from)
+            .and_then(crate::apk::read_dex)
+        {
+            Ok(dex) => {
+                let parent2 = ((*fns).v1_6.CallStaticObjectMethod)(
+                    module.env,
+                    sys_cl_class,
+                    get_sys_id,
+                );
+                cl = crate::payload::build_in_memory_classloader(module.env, &dex, parent2);
+                loader_kind = "memory";
+                if dex.is_empty() {
+                    loge!("Zygisk: module APK 内没有 dex");
+                }
+            }
+            Err(error) => {
+                loge!("Zygisk: 读取 payload dex 失败: {error:#}");
+            }
+        }
+    }
+    if cl.is_null() {
+        loge!("Zygisk: failed to build module ClassLoader");
         return;
     }
     let loader_ms = t_loader.elapsed().as_millis();
@@ -302,7 +348,7 @@ pub unsafe fn do_post_app_specialize(module: &mut WcxZygiskModule, _args: *const
     }
 
     logi!(
-        "Zygisk: 冷启动耗时 publish={publish_ms}ms loader={loader_ms}ms art={}ms total={}ms ({})",
+        "Zygisk: 冷启动耗时 publish={publish_ms}ms loader={loader_ms}ms({loader_kind}) art={}ms total={}ms ({})",
         t_art.elapsed().as_millis(),
         started.elapsed().as_millis(),
         module.process_name
