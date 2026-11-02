@@ -99,20 +99,24 @@ ProxyInstrumentation: callActivityOnCreate: com.tencent.mm.app.WeChatSplashActiv
 HomeSidePanel: 左边缘右滑触摸条已挂载
 ```
 
-## WebUI：作用域 + 运行状态 + 日志
+## WebUI：作用域 + 注入状态
 
-模块自带 `webroot/`（KernelSU / KernelSU Next / APatch 的 WebUI 会自动识别），WebUI 分三块：
+模块自带 `webroot/`（KernelSU / KernelSU Next / APatch 的 WebUI 会自动识别）。
+界面只有一张卡片：**注入作用域**，按 `(Android 用户, 包名)` 列出设备上真正装着的微信
+（含分身/双开），每项右侧是开关。
 
-1. **注入作用域** —— 按 `(Android 用户, 包名)` 列出所有微信（含分身/双开），逐个开关
-2. **运行状态** —— 一屏看出「是否已注入 / 作用域几条开 / 模块版本 / 注入器库与 payload 是否齐全」，
-   并在异常时给出提示：
-   - 检测到**同族注入器**（如 `wekit_zygisk`，同样带 `module.apk` + `zygisk/*.so`）同时启用 →
-     红色横幅点名。两个注入器都 hook 微信 ART，共存会让微信启动即 SIGILL，必须只留一个
-   - 模块被 Root 管理器停用（`disable` / `remove` 文件存在）
-   - 微信进程还没被注入（提示强制停止微信后重开）
-3. **日志** —— 最近的 `WCX` logcat（默认 150 行，`E` 行标红、`W` 行标黄，一键复制），
-   并根据日志内容给出人话结论，例如「主进程回退内存式 dex 加载（正常）」「个别 feature 类名不匹配」
-   「有微信进程被作用域跳过」「出现 ART 崩溃（SIGILL）」等。
+包名旁边的徽标就是注入状态：
+
+| 徽标 | 含义 |
+|---|---|
+| `已注入`（绿） | 该包的主进程已经加载了本模块的 payload（`/proc/<pid>/maps` 里有 `wcx-payload`） |
+| `异常`（红） | 最近的 `WCX` 日志/崩溃记录里有**注入级**异常（LSPlant 初始化失败、注册失败、dlopen 失败、SIGILL 等），此时所有条目一律显示异常 |
+| 无徽标 | 微信还没启动，或该用户下的这个包没被注入 |
+
+看不到徽标时：强制停止微信 → 重新打开 → 点「刷新」。
+
+> 只列「当前用户下确实安装着」的包，卸载分身之后那一行会自动消失；
+> 注入级异常不包含 feature 类名失效之类的噪音。
 
 本模块只注入微信，因此**没有总开关**：不想用时在 Root 管理器里把模块停用即可
 （会写 `disable`，注入器同样识别）。
@@ -133,8 +137,8 @@ sh /data/adb/modules/zygisk-wcx/config.sh set 0 com.tencent.mm 1     # 只开主
 sh /data/adb/modules/zygisk-wcx/config.sh set 999 com.tencent.mm 0   # 关掉分身（userId=999）
 sh /data/adb/modules/zygisk-wcx/config.sh set all com.tencent.mm 1   # 所有用户一起开
 sh /data/adb/modules/zygisk-wcx/config.sh reset                      # 恢复默认（微信，所有用户）
-sh /data/adb/modules/zygisk-wcx/config.sh status                     # 注入状态（key=value，WebUI 用）
-sh /data/adb/modules/zygisk-wcx/config.sh logs 150                   # 最近 150 行 WCX 日志
+sh /data/adb/modules/zygisk-wcx/config.sh inject                     # <userId>\t<pkg>\t<0|1> 主进程是否已注入
+sh /data/adb/modules/zygisk-wcx/config.sh error                      # 0|1 最近的 WCX 日志里有没有注入级异常
 ```
 
 > 模块升级时 `customize.sh` 会把现有的 `target.list` / `disable` 复制到新版本，作用域不会丢。
