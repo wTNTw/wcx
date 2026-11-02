@@ -15,6 +15,7 @@
 #   config.sh reset               # 恢复默认（com.tencent.mm，所有用户）
 #   config.sh inject              # 每行: <userId>\t<package>\t<0|1>（1 = 主进程已被注入）
 #   config.sh error               # 0|1，1 = 最近的 WCX 日志里有注入级异常
+#   config.sh state               # WebUI 用：作用域 + 注入状态 + 异常标志（一次调用拿齐）
 
 set -u
 MODDIR=${0%/*}
@@ -25,6 +26,11 @@ export PATH
 DEFAULT_TARGET=com.tencent.mm
 PKG_PREFIX=com.tencent.mm
 TAB=$(printf '\t')
+
+# 同一次调用内缓存 pm 结果：一次 WebUI 刷新要问好几遍「某用户装了哪些包」
+CACHE=$(mktemp -d 2>/dev/null || echo /data/local/tmp/wcx-cache.$$)
+mkdir -p "$CACHE" 2>/dev/null
+trap 'rm -rf "$CACHE"' EXIT INT TERM
 
 # 注入级异常（不是 feature 类名失效那种噪音）
 FATAL_RE='LSPlant init failed|RegisterNatives failed|ZygiskEntry.init failed|UnsatisfiedLinkError|dlopen failed|cannot locate symbol|SIGILL|Fatal signal|注入失败'
@@ -43,15 +49,21 @@ known_users() {
 # 某用户下已安装的包名；`pm list packages --user` 不支持时（有 Error 输出）才回落到全局列表。
 # 注意：绝不能因为「这个用户没装包」就回落到全局列表，否则会把别的用户的微信也算进来。
 user_packages() {
+  cachef="$CACHE/pkgs.$1"
+  if [ -s "$cachef" ]; then
+    cat "$cachef"
+    return 0
+  fi
   out=$(pm list packages --user "$1" 2>&1)
   case "$out" in
     *Error*|*error*|*Exception*|*Unknown*|*unknown*)
-      pm list packages 2>/dev/null | sed -n 's/^package://p'
+      pm list packages 2>/dev/null | sed -n 's/^package://p' > "$cachef"
       ;;
     *)
-      printf '%s\n' "$out" | sed -n 's/^package://p'
+      printf '%s\n' "$out" | sed -n 's/^package://p' > "$cachef"
       ;;
   esac
+  cat "$cachef"
 }
 
 # 输出「显式 (user, package)」行：旧格式（只有包名）展开成所有已知用户
@@ -75,18 +87,12 @@ materialized() {
 
 # 只保留「该用户下确实装着这个包」的行：卸载分身/换用户后旧记录会自动消失
 prune_rows() {
-  cache_dir=$(mktemp -d 2>/dev/null || echo /data/local/tmp)
   while IFS="$TAB" read -r user pkg; do
     [ -n "$user" ] && [ -n "$pkg" ] || continue
-    cache="$cache_dir/u$user"
-    if [ ! -f "$cache" ]; then
-      user_packages "$user" > "$cache" 2>/dev/null
-    fi
-    if grep -qxF "$pkg" "$cache" 2>/dev/null; then
+    if user_packages "$user" | grep -qxF "$pkg" 2>/dev/null; then
       printf '%s\t%s\n' "$user" "$pkg"
     fi
   done
-  rm -rf "$cache_dir"
 }
 
 # 当前生效条目（供 targets/list 使用）：文件不存在 → 默认目标
@@ -171,19 +177,21 @@ cmd_set() {
   cmd_targets
 }
 
-# 每个生效目标的主进程是否已注入：看 /proc/<pid>/maps 里有没有本模块的 payload。
-# 只看主进程（cmdline 恰好等于包名），子进程（:push 等）不代表界面可用。
+# 主进程是否已注入。**不要全量扫 /proc/<pid>/maps**：几百个进程读一遍要 6-7 秒，
+# 这是 WebUI 打开很慢的元凶。这里先用一次 ps 找到目标包的 pid，只看这几个 maps（~15ms）。
 cmd_inject() {
-  for p in /proc/[0-9]*; do
-    [ -r "$p/cmdline" ] || continue
-    name=$(tr '\0' '\n' < "$p/cmdline" 2>/dev/null | head -n 1)
-    [ -n "$name" ] || continue
-    case "$name" in "$PKG_PREFIX"*) ;; *) continue ;; esac
-    case "$name" in *:*) continue ;; esac
-    uid=$(awk '/^Uid:/{print $2; exit}' "$p/status" 2>/dev/null)
-    [ -n "$uid" ] || continue
-    if grep -qF 'wcx-payload' "$p/maps" 2>/dev/null; then state=1; else state=0; fi
-    printf '%s\t%s\t%s\n' "$((uid / 100000))" "$name" "$state"
+  pids=$(ps -A -o PID,NAME 2>/dev/null)
+  effective_rows | while IFS="$TAB" read -r user pkg; do
+    [ -n "$pkg" ] || continue
+    for pid in $(printf '%s\n' "$pids" | awk -v want="$pkg" '$2 == want {print $1}'); do
+      [ -r "/proc/$pid/status" ] || continue
+      uid=$(awk '/^Uid:/{print $2; exit}' "/proc/$pid/status" 2>/dev/null)
+      [ -n "$uid" ] || continue
+      [ "$((uid / 100000))" = "$user" ] || continue
+      if grep -qF 'wcx-payload' "/proc/$pid/maps" 2>/dev/null; then
+        printf '%s\t%s\t1\n' "$user" "$pkg"
+      fi
+    done
   done | sort -u
 }
 
@@ -195,6 +203,32 @@ cmd_error() {
   crash=$(logcat -d -b crash -t 200 2>/dev/null | grep -E "$PKG_PREFIX" | grep -F 'SIGILL' | head -n 1)
 
   if [ -n "$bad" ] || [ -n "$crash" ]; then echo 1; else echo 0; fi
+}
+
+# WebUI 一次调用拿全部数据（减少 root 桥往返：每条命令都要跨 JS↔Java，很贵）
+#   T<TAB><userId><TAB><pkg><TAB><0|1>   作用域条目（1 = 已启用）
+#   I<TAB><userId><TAB><pkg><TAB><0|1>   主进程是否已注入
+#   E<TAB><0|1>                          最近日志里有没有注入级异常
+cmd_state() {
+  enabled_set=$(effective_rows)
+  users=$(known_users)
+
+  for uid in $users; do
+    for pkg in $(user_packages "$uid"); do
+      case "$pkg" in
+        "$PKG_PREFIX"*) ;;
+        *) continue ;;
+      esac
+      if printf '%s\n' "$enabled_set" | grep -qxF "$uid$TAB$pkg"; then e=1; else e=0; fi
+      printf 'T\t%s\t%s\t%s\n' "$uid" "$pkg" "$e"
+    done
+  done
+
+  cmd_inject | while IFS="$TAB" read -r iuser ipkg ist; do
+    printf 'I\t%s\t%s\t%s\n' "$iuser" "$ipkg" "$ist"
+  done
+
+  printf 'E\t%s\n' "$(cmd_error)"
 }
 
 cmd_reset() {
@@ -209,7 +243,8 @@ case "${1:-targets}" in
   reset)   cmd_reset ;;
   inject)  cmd_inject ;;
   error)   cmd_error ;;
-  *) echo "usage: config.sh {targets|list|set|reset|inject|error}" >&2; exit 2 ;;
+  state)   cmd_state ;;
+  *) echo "usage: config.sh {targets|list|set|reset|inject|error|state}" >&2; exit 2 ;;
 esac
 
 # 成功路径统一 exit 0：WebUI 用 errno 判定成败

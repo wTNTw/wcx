@@ -170,18 +170,43 @@
     return exec('sh ' + CONFIG + ' ' + args, {});
   }
 
-  /** 解析 `<userId>\t<pkg>\t<num>` 形式的输出 */
-  function parseRows(text, key) {
-    return String(text || '')
+  /**
+   * 解析 `config.sh state` 的输出（一次调用拿齐所有数据，减少 root 桥往返）：
+   *   T<TAB><userId><TAB><pkg><TAB><0|1>   作用域条目
+   *   I<TAB><userId><TAB><pkg><TAB><0|1>   该包主进程已注入
+   *   E<TAB><0|1>                          最近的 WCX 日志里有没有注入级异常
+   */
+  function parseState(text) {
+    const rows = [];
+    const byKey = new Map();
+    let error = false;
+
+    String(text || '')
       .split('\n')
       .map((l) => l.replace(/\r$/, '').trim())
       .filter(Boolean)
-      .map((l) => {
-        const parts = l.split('\t');
-        const row = { userId: parts[0] || '0', pkg: parts[1] || parts[0] };
-        row[key] = parts[2] === '1';
-        return row;
+      .forEach((line) => {
+        const parts = line.split('\t');
+        const kind = parts[0];
+        if (kind === 'T') {
+          const userId = parts[1] || '0';
+          const pkg = parts[2] || '';
+          const row = { userId: userId, pkg: pkg, enabled: parts[3] === '1', injected: false };
+          rows.push(row);
+          byKey.set(userId + '\t' + pkg, row);
+        } else if (kind === 'I') {
+          const userId = parts[1] || '0';
+          const pkg = parts[2] || '';
+          const key = userId + '\t' + pkg;
+          const row = byKey.get(key);
+          if (row) row.injected = parts[3] === '1';
+          else rows.push({ userId: userId, pkg: pkg, enabled: false, injected: parts[3] === '1' });
+        } else if (kind === 'E') {
+          error = parts[1] === '1';
+        }
       });
+
+    return { rows: rows, error: error };
   }
 
   function toast(message) {
@@ -200,13 +225,9 @@
     configPath: CONFIG,
     available: () => !!findBridge(),
     exec: exec,
-    targets: () => runConfig('targets').then((out) => parseRows(out, 'enabled')),
-    // 每个包的主进程是否已注入 + 模块是否有注入级异常（同一次刷新里取齐）
-    injectStatus: () =>
-      Promise.all([runConfig('inject'), runConfig('error')]).then(([inj, err]) => ({
-        rows: parseRows(inj, 'injected'),
-        error: String(err || '').trim() === '1',
-      })),
+    // 作用域 + 每个包是否已注入 + 是否有注入级异常，一次 root 调用拿齐
+    state: () => runConfig('state').then(parseState),
+    targets: () => runConfig('targets').then((out) => parseState(out).rows),
     // 修改类操作只要成功即可；界面状态由 app.js 再调 targets 刷新
     // 作用域是 (userId, package)，双开/分身才能单独开关
     setTarget: (userId, pkg, enabled) =>

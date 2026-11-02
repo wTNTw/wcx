@@ -90,6 +90,7 @@ code {
 
 /* ── 作用域列表 ───────────────────────────────────────────── */
 .targets { list-style: none; margin: 12px 0 0; padding: 0; }
+.targets.stale { opacity: .72; }
 
 .targets li {
   display: flex;
