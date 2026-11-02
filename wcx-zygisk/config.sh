@@ -24,8 +24,9 @@ PKG_PREFIX=com.tencent.mm
 
 list_enabled() {
   if [ -f "$TARGETS" ]; then
-    sed -e 's/\r$//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' "$TARGETS" 2>/dev/null |
-      grep -v '^#' | grep -v '^$'
+    # 末尾的 `|| true`：空列表时 grep 会返回 1，不能让整个脚本/子命令以非 0 退出
+    { sed -e 's/\r$//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' "$TARGETS" 2>/dev/null |
+      grep -v '^#' | grep -v '^$'; } || true
   else
     echo "$DEFAULT_TARGET"
   fi
@@ -44,6 +45,7 @@ cmd_status() {
   if [ -e "$DISABLE" ]; then echo "enabled=0"; else echo "enabled=1"; fi
   echo "----"
   list_enabled
+  return 0
 }
 
 # 列出设备上所有用户里、包名以 com.tencent.mm 开头的应用（含分身）。
@@ -129,3 +131,7 @@ case "${1:-status}" in
   reset)   cmd_reset ;;
   *) echo "usage: config.sh {status|targets|set|master|reset}" >&2; exit 2 ;;
 esac
+
+# 成功路径统一 exit 0：root manager 的 WebUI 用 errno 判定成败，
+# 任何「命令成功但退出码非 0」都会在页面上显示成操作失败
+exit 0

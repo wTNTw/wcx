@@ -48,7 +48,7 @@
         input.disabled = true;
         try {
           await api.setTarget(item.pkg, want);
-          item.enabled = want;
+          await loadTargets();
           setStatus(want ? '已启用注入 ' + item.pkg : '已停止注入 ' + item.pkg);
         } catch (e) {
           input.checked = !want;
@@ -112,7 +112,8 @@
     $master.disabled = true;
     try {
       await api.setMaster(want);
-      $masterDesc.textContent = want ? '注入已开启' : '注入已关闭';
+      await loadMaster();
+      await loadTargets();
       setStatus(want ? '已开启注入（重启微信后生效）' : '已关闭注入（重启微信后生效）');
     } catch (e) {
       $master.checked = !want;

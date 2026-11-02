@@ -210,8 +210,11 @@
             return { userId: parts[0] || '0', pkg: parts[1] || parts[0], enabled: parts[2] === '1' };
           })
       ),
-    setTarget: (pkg, enabled) => runConfig('set ' + pkg + ' ' + (enabled ? 1 : 0)),
-    setMaster: (enabled) => runConfig('master ' + (enabled ? 'on' : 'off')),
+    // 修改类操作只要成功即可；状态统一由 app.js 再调 status/targets 刷新
+    setTarget: (pkg, enabled) =>
+      exec('sh ' + CONFIG + ' set ' + pkg + ' ' + (enabled ? 1 : 0), {}).then(() => true),
+    setMaster: (enabled) =>
+      exec('sh ' + CONFIG + ' master ' + (enabled ? 'on' : 'off'), {}).then(() => true),
     reset: () => runConfig('reset'),
     toast: toast,
   };
