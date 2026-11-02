@@ -45,11 +45,15 @@
 6. 卸载: 在管理器里移除模块（`zygisk-wcx`）后重启
 
 说明:
-- 默认只注入 `com.tencent.mm` 及其子进程; 需要别的目标时用模块的 WebUI，
-  或在终端执行 `sh /data/adb/modules/zygisk-wcx/config.sh set <包名> 1`
+- 默认只注入 `com.tencent.mm` 及其子进程; 作用域按 (Android 用户, 包名) 记录，双开/分身可以单独开关。
+  用模块的 WebUI 切换，或终端执行 `sh /data/adb/modules/zygisk-wcx/config.sh set <userId|all> <包名> <0|1>`
 - 模块 WebUI（KernelSU / APatch 里点模块即可打开）可以按 Android 用户选择注入作用域；
   本模块只注入微信，没有总开关，不想用时在 Root 管理器里停用模块即可
 - 方式二**不安装 APK**, 因此不会覆盖你已安装的 WCX; 两种方式建议二选一, 避免重复 hook
+- ⚠️ **不要和 LSPosed 同时生效**: 两套 ART hook 会互相踩坏 trampoline, 微信会在启动瞬间 SIGILL
+  (`Class::SetStatus+20` / `MarkVisiblyInitialized+236`)。想只用 Zygisk 形态, 请先在 Root 管理器里
+  停用 LSPosed 模块再重启; 本模块检测到 LSPosed 启用时会自动让路并打日志
+  `Zygisk: 检测到 LSPosed (Zygisk) 已启用，跳过本模块以免双 hook 冲突`
 - 更详细的架构/构建/排错见 `wcx-zygisk/README.md`
 
 ## 修复微信热更新导致的模块不加载
