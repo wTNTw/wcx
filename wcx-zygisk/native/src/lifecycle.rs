@@ -161,81 +161,6 @@ fn negotiate_telegram_socket(api: *mut ApiTable, uid: i32, process_name: &str) -
     name
 }
 
-
-/// 宿主 ClassLoader 里是否存在某个类（用于检测是否已有 Xposed/LSPosed 注入）。
-unsafe fn loader_has_class(env: *mut RawJNIEnv, loader: jobject, name: &str) -> bool {
-    if loader.is_null() {
-        return false;
-    }
-    let fns = *env;
-    let cl_cls = ((*fns).v1_6.FindClass)(env, c"java/lang/ClassLoader".as_ptr());
-    if cl_cls.is_null() {
-        ((*fns).v1_6.ExceptionClear)(env);
-        return false;
-    }
-    let load = ((*fns).v1_6.GetMethodID)(
-        env,
-        cl_cls,
-        c"loadClass".as_ptr(),
-        c"(Ljava/lang/String;)Ljava/lang/Class;".as_ptr(),
-    );
-    ((*fns).v1_6.DeleteLocalRef)(env, cl_cls);
-    if load.is_null() {
-        ((*fns).v1_6.ExceptionClear)(env);
-        return false;
-    }
-    let jname = ((*fns).v1_6.NewStringUTF)(env, name.as_ptr().cast());
-    if jname.is_null() {
-        ((*fns).v1_6.ExceptionClear)(env);
-        return false;
-    }
-    let found = ((*fns).v1_6.CallObjectMethod)(env, loader, load, jname);
-    ((*fns).v1_6.DeleteLocalRef)(env, jname);
-    let ok = ((*fns).v1_6.ExceptionCheck)(env) == jni::sys::JNI_FALSE && !found.is_null();
-    if !found.is_null() {
-        ((*fns).v1_6.DeleteLocalRef)(env, found);
-    }
-    // 无论成功失败都要清掉 pending exception，否则 ART 会 abort
-    if ((*fns).v1_6.ExceptionCheck)(env) != jni::sys::JNI_FALSE {
-        ((*fns).v1_6.ExceptionClear)(env);
-    }
-    ok
-}
-
-/// 这个进程里是否已经有 Xposed/LSPosed 在注入。
-/// 两者同时 hook ART 内部函数会互相踩坏 trampoline（表现为微信启动即 SIGILL），
-/// 所以检测到就跳过本模块，让用户二选一。
-unsafe fn has_external_xposed(env: *mut RawJNIEnv, loader: jobject) -> bool {
-    loader_has_class(env, loader, "de.robv.android.xposed.XposedBridge")
-        || loader_has_class(env, loader, "io.github.libxposed.api.XposedModule")
-        || loader_has_class(env, loader, "com.Johnny.wcx.loader.entry.lsp10x.Lsp10xHookImpl")
-}
-
-
-/// 检测是否有其它 Xposed 框架处于启用状态（目前认 LSPosed 系）。
-///
-/// 两套 ART hook 同时存在会互相踩坏 trampoline，表现为微信启动即 SIGILL
-/// （实测 `Class::SetStatus+20` / `MarkVisiblyInitialized+236`），所以默认让路。
-/// 想强制用本模块：在模块目录放 `force` 文件。
-fn external_xposed_module() -> Option<&'static str> {
-    const CANDIDATES: &[(&str, &str)] = &[
-        ("/data/adb/modules/zygisk_lsposed", "LSPosed (Zygisk)"),
-        ("/data/adb/modules/riru_lsposed", "LSPosed (Riru)"),
-    ];
-    for (dir, name) in CANDIDATES {
-        let path = std::path::Path::new(dir);
-        if !path.exists() {
-            continue;
-        }
-        // 模块被停用时（Root 管理器会写 disable / remove）不算
-        if path.join("disable").exists() || path.join("remove").exists() {
-            continue;
-        }
-        return Some(name);
-    }
-    None
-}
-
 pub unsafe fn do_pre_app_specialize(module: &mut WcxZygiskModule, args: *mut AppSpecializeArgs) {
     let nice_name = match read_jstring(module.env, (*args).nice_name) {
         Some(s) if !s.is_empty() && s.len() <= 255 => s,
@@ -274,20 +199,6 @@ pub unsafe fn do_pre_app_specialize(module: &mut WcxZygiskModule, args: *mut App
         unsafe { libc::close(mod_fd) };
         (*module.api).set_option(DLCLOSE_MODULE_LIBRARY);
         return;
-    }
-
-    // 其它 Xposed 框架（LSPosed 等）启用时让路：双 hook 会直接崩微信
-    if let Some(framework) = external_xposed_module() {
-        let forced = unsafe { libc::faccessat(mod_fd, c"force".as_ptr(), libc::F_OK, 0) } == 0;
-        if !forced {
-            logi!(
-                "Zygisk: 检测到 {framework} 已启用，跳过本模块以免双 hook 冲突（想强制启用：在模块目录放 force 文件）"
-            );
-            unsafe { libc::close(mod_fd) };
-            (*module.api).set_option(DLCLOSE_MODULE_LIBRARY);
-            return;
-        }
-        logi!("Zygisk: 检测到 {framework}，但存在 force 文件，继续注入");
     }
 
     // 目标判定：本地 target.list（默认 com.tencent.mm），不再依赖 root companion
@@ -367,15 +278,6 @@ pub unsafe fn do_post_app_specialize(module: &mut WcxZygiskModule, _args: *const
         c"()Ljava/lang/ClassLoader;".as_ptr(),
     );
     let parent = ((*fns).v1_6.CallStaticObjectMethod)(module.env, sys_cl_class, get_sys_id);
-    // 已经有 Xposed/LSPosed 在注入这个进程时直接退出：两套 ART hook 同时存在必崩
-    if has_external_xposed(module.env, parent) {
-        logi!(
-            "Zygisk: 检测到 Xposed/LSPosed 已注入 {}，跳过本模块（两者不能同时启用）",
-            module.process_name
-        );
-        return;
-    }
-
     let t_loader = std::time::Instant::now();
     let odex_dir = std::path::Path::new(&data_dir).join("files/mmkv/odex");
     let _ = std::fs::create_dir_all(&odex_dir);

@@ -143,24 +143,6 @@ Zygisk: 文件式 dex 加载仍为空（试了 3 次），回退 InMemoryDexClas
 Zygisk: 冷启动耗时 publish=1ms loader=139ms(memory) art=25ms total=165ms (com.tencent.mm)
 ```
 
-## 与 LSPosed / Xposed 共存
-
-**两者不能同时注入同一个进程**：LSPlant 都要 hook ART 内部函数，第二套 hook 会踩坏第一套的
-trampoline，表现为微信一启动就 SIGILL（实测崩在 `Class::SetStatus+20` /
-`MarkVisiblyInitialized+236`）。
-
-所以本模块在 `preAppSpecialize` 会检查 `/data/adb/modules/zygisk_lsposed`（以及 `riru_lsposed`）
-是否处于启用状态（没有 `disable` / `remove`）：
-
-```
-Zygisk: 检测到 LSPosed (Zygisk) 已启用，跳过本模块以免双 hook 冲突（想强制启用：在模块目录放 force 文件）
-```
-
-- 想用本模块（脱离 LSPosed）：在 Root 管理器里**停用 LSPosed 模块** → 重启设备
-- 想继续用 LSPosed 里的 WCX：保持 LSPosed 启用即可，本模块会自动让路
-- 只想用 zygisk 形态、要绕过这个检查：`touch /data/adb/modules/zygisk-wcx/force`
-  （⚠️ 与 LSPosed 同时存在时大概率崩微信，只用于排障）
-
 ## 已知问题 / 待办
 
 - 个别 feature 与 WeChat 8.0.79 类名不匹配（例如 `com.tencent.mm.plugin.multitalk.ui.MultiTalkMainUI`
