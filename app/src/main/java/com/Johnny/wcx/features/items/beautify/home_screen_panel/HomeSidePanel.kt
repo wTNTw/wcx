@@ -378,6 +378,35 @@ object HomeSidePanel : SwitchFeature() {
         val composeView: ComposeView,
     )
 
+    /**
+     * 侧边栏的 Compose 内容用「宿主 Activity 的 configuration」判断暗色。
+     *
+     * 不能用 `isSystemInDarkTheme()`：InjectedUiTheme 把 LocalConfiguration 换成了
+     * HostInfo.application.resources.configuration，而微信的深色模式是 AppCompat 在
+     * Activity 级别套用的（应用级 resources 可能一直是 light），结果侧边栏永远亮色。
+     */
+    private fun isHostDarkMode(context: Context): Boolean {
+        // 首选：宿主 Activity 的 configuration（微信深色模式套用后会带上 night 位）
+        val nightByConfig = try {
+            (context.resources.configuration.uiMode and
+                android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
+                android.content.res.Configuration.UI_MODE_NIGHT_YES
+        } catch (_: Throwable) {
+            false
+        }
+        if (nightByConfig) return true
+
+        // 兜底：AppCompat DayNight 主题会把 android:isLightTheme 置为 false，
+        // 有些机型/微信版本只改主题不刷新 resources.configuration。
+        return try {
+            val value = android.util.TypedValue()
+            context.theme.resolveAttribute(android.R.attr.isLightTheme, value, true) &&
+                value.data == 0
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
     private data class ObservedViewListeners(
         val attach: View.OnAttachStateChangeListener,
         val layout: View.OnLayoutChangeListener,
@@ -411,6 +440,18 @@ object HomeSidePanel : SwitchFeature() {
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
             alpha = 0f
         }
+        /** 侧边栏是否暗色：随宿主 Activity 的 configuration 变化刷新（微信切深色/系统切深色都覆盖） */
+        private val darkModeState = androidx.compose.runtime.mutableStateOf(isHostDarkMode(activity))
+        private val configCallbacks = object : android.content.ComponentCallbacks {
+            override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+                darkModeState.value =
+                    (newConfig.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
+                        android.content.res.Configuration.UI_MODE_NIGHT_YES
+            }
+
+            override fun onLowMemory() = Unit
+        }
+
         private val stateScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
         private val layoutStore = HomeSidePanelLayoutStore
         private val cityIndex = HomeSidePanelCityIndex(activity)
@@ -493,6 +534,8 @@ object HomeSidePanel : SwitchFeature() {
         fun attach() {
             if (attached) return
             attached = true
+            darkModeState.value = isHostDarkMode(activity)
+            runCatching { activity.registerComponentCallbacks(configCallbacks) }
 
             parentClipChildren = parent.clipChildren
             parentClipToPadding = parent.clipToPadding
@@ -516,7 +559,7 @@ object HomeSidePanel : SwitchFeature() {
             panelView.isClickable = true
             panelView.setLifecycleOwner(LifecycleOwnerProvider.getOrCreate(activity))
             panelView.setContent {
-                InjectedUiTheme {
+                InjectedUiTheme(darkTheme = darkModeState.value) {
                     LaunchedEffect(panelState) {
                         val messagesJob = launch(start = CoroutineStart.UNDISPATCHED) {
                             panelState.messages.collect { message ->
@@ -718,6 +761,7 @@ object HomeSidePanel : SwitchFeature() {
         }
 
         fun detach() {
+            runCatching { activity.unregisterComponentCallbacks(configCallbacks) }
             if (!attached) return
             attached = false
             parent.removeCallbacks(syncRunnable)
@@ -848,6 +892,7 @@ object HomeSidePanel : SwitchFeature() {
 
         fun open() {
             if (selectedTabIndex != HOME_TAB_INDEX || isChattingVisible()) return
+            darkModeState.value = isHostDarkMode(activity)
             val from = renderedProgress
             animator?.cancel()
             animator = null
@@ -1299,7 +1344,7 @@ object HomeSidePanel : SwitchFeature() {
                 setBackgroundColor(AndroidColor.TRANSPARENT)
                 setLifecycleOwner(LifecycleOwnerProvider.getOrCreate(activity))
                 setContent {
-                    InjectedUiTheme {
+                    InjectedUiTheme(darkTheme = darkModeState.value) {
                         val state by panelState.uiState.collectAsStateWithLifecycle()
                         HomeSidePanelToolbarContent(
                             profile = state.profile,

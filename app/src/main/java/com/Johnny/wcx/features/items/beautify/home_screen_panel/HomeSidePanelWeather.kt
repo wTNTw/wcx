@@ -20,6 +20,7 @@ import androidx.annotation.StringRes
 
 import com.Johnny.wcx.features.items.beautify.BeautifyText
 import com.Johnny.wcx.features.items.beautify.beautifyText
+import com.Johnny.wcx.loader.utils.NativeLoader
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.serialization.DefaultJson
 import kotlinx.coroutines.CancellationException
@@ -554,39 +555,61 @@ internal class HomeSidePanelCityIndex(context: Context) {
     }
 
     /**
-     * 读取"模块自身"的 assets（城市库在模块 APK 里）。
-     * 注意 appContext 是微信的 context，appContext.assets 读的是微信 APK 的 assets ——
-     * 里面没有我们的城市库。必须用模块包名创建 context 才能读到模块 assets
-     * （同 ThemeStore 的 createPackageContext 模式；包名不经 R8 混淆，直接用字符串）。
+     * 能拿到城市库 assets 的 APK 列表，按优先级：
+     *   1. [NativeLoader.bootstrapApk] —— Zygisk 独立模式下的 payload APK（module.apk），
+     *      这个 APK **没有作为应用安装**，createPackageContext 会失败；
+     *   2. 已安装模块 APK 的 sourceDir（LSPosed 模式 / 装了 WCX 的情况）。
      */
-    private fun moduleAssets(): android.content.res.AssetManager {
-        return runCatching {
-            appContext.createPackageContext("com.Johnny.wcx", 0).assets
-        }.getOrElse {
-            WeLogger.w(TAG, "createPackageContext for module assets failed: ${it.message}")
-            appContext.assets
+    private fun moduleApkCandidates(): List<File> {
+        val candidates = mutableListOf<File>()
+        runCatching { candidates += NativeLoader.bootstrapApk() }
+            .onFailure { WeLogger.w(TAG, "bootstrapApk 不可用: ${it.message}") }
+        runCatching {
+            val info = appContext.packageManager.getApplicationInfo("com.Johnny.wcx", 0)
+            info.sourceDir?.let { candidates += File(it) }
+        }.onFailure { WeLogger.w(TAG, "模块未安装（Zygisk 独立模式属正常）: ${it.message}") }
+        return candidates.distinctBy { it.absolutePath }.filter { it.isFile && it.canRead() }
+    }
+
+    /** 从 APK 的 assets 里抽出城市库；成功返回 true。 */
+    private fun extractDatabase(apk: File, target: File): Boolean = try {
+        java.util.zip.ZipFile(apk).use { zip ->
+            val entry = zip.getEntry(ASSET_PATH)
+            if (entry == null) {
+                WeLogger.w(TAG, "${apk.name} 里没有 $ASSET_PATH")
+                false
+            } else {
+                zip.getInputStream(entry).use { input ->
+                    target.outputStream().use(input::copyTo)
+                }
+                true
+            }
         }
+    } catch (e: Exception) {
+        WeLogger.w(TAG, "从 ${apk.absolutePath} 抽取城市库失败: ${e.message}")
+        false
     }
 
     private fun copyDatabaseAssetOnce(): File? {
-        return try {
-            // 注意：模块运行在微信进程（uid=微信），模块自身 data 目录（com.Johnny.wcx）不可写，
-            // 之前写 noBackupFilesDir 会失败 → 城市库永远为空 → “找不到当前城市”。
-            // 改为写微信自己的 files 目录（同 uid 可写可读）。
-            val directory = File(appContext.filesDir, ASSET_DIRECTORY).apply { mkdirs() }
-            val databaseFile = File(directory, ASSET_FILE_NAME)
-            if (!databaseFile.exists()) {
-                moduleAssets().open(ASSET_PATH).use { input ->
-                    databaseFile.outputStream().use(input::copyTo)
-                }
+        // 模块运行在微信进程（uid=微信），只能写微信自己的 files 目录。
+        val directory = File(appContext.filesDir, ASSET_DIRECTORY).apply { mkdirs() }
+        val databaseFile = File(directory, ASSET_FILE_NAME)
+        if (databaseFile.length() > 0L) return databaseFile
+
+        // 上次中断留下的半截文件先删掉，否则 SQLite 打开会一直失败
+        databaseFile.delete()
+
+        for (apk in moduleApkCandidates()) {
+            if (extractDatabase(apk, databaseFile) && databaseFile.length() > 0L) {
+                WeLogger.i(TAG, "城市库已从 ${apk.absolutePath} 解出（${databaseFile.length()} 字节）")
+                return databaseFile
             }
-            databaseFile
-        } catch (e: Exception) {
-            // assets 里没有 xiaomi_weather.db 时打开会抛 FileNotFoundException,
-            // 之前在协程里未捕获导致整个天气模块崩溃。这里降级为"无城市库"。
-            WeLogger.w(TAG, "failed to copy weather asset (xiaomi_weather.db missing in APK), city lookup disabled", e)
-            null
+            databaseFile.delete()
         }
+
+        // 拿不到城市库时降级为「无城市库」：定位/搜索都会提示匹配失败，但不会崩
+        WeLogger.w(TAG, "找不到天气城市库 assets，城市匹配/搜索不可用")
+        return null
     }
 
     private fun Int.toCountryCode(): String = when (this) {
