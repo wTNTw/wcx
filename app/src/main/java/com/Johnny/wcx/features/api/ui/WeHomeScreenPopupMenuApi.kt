@@ -148,7 +148,9 @@ object WeHomeScreenPopupMenuApi : ApiFeature(), IResolveDex {
 
             // 修改 adapter 内容必须和 notifyDataSetChanged 在同一个 UI 线程任务里完成：
             // 中间只要插进一次 layout，ListView 就会认为「内容变了但没通知」并抛异常。
-            runOnUiThread {
+            // 已经在主线程时直接同步做完（菜单构建阶段），不要投递到队列尾 —— 那会让插入发生在
+            // popup 首次 layout 之后，而 notify 未必打中 ListView 真正持有的 adapter。
+            val insertTask = {
                 val inserted = insertedItemIds.getOrPut(host) { mutableSetOf() }
                 var changed = false
 
@@ -182,7 +184,18 @@ object WeHomeScreenPopupMenuApi : ApiFeature(), IResolveDex {
 
                 if (changed) {
                     baseAdapter.notifyDataSetChanged()
+                    WeLogger.d(
+                        TAG,
+                        "inserted menu items: items=${items.size()} adapterCount=${baseAdapter.count} " +
+                            "main=${android.os.Looper.myLooper() == android.os.Looper.getMainLooper()}"
+                    )
                 }
+            }
+
+            if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+                insertTask()
+            } else {
+                runOnUiThread(insertTask)
             }
         }
 
