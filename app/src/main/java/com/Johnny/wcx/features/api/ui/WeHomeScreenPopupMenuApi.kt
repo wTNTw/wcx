@@ -55,6 +55,14 @@ object WeHomeScreenPopupMenuApi : ApiFeature(), IResolveDex {
 
     private val fakeResIdToResMap = mutableIntObjectMapOf<Drawable>()
 
+    /**
+     * 每个菜单宿主（PlusSubMenuHelper / HomeUI 实例）已经插入过的 item id。
+     * `methodAddItem` 可能被调用多次（每次开菜单、或每个默认项一次），没有这个集合就会重复
+     * 往 SparseArray 里塞我们的项 —— adapter 内容变了而 ListView 没收到通知，触摸时就会抛
+     * "The content of the adapter has changed but ListView did not receive a notification"。
+     */
+    private val insertedItemIds = java.util.WeakHashMap<Any, MutableSet<Int>>()
+
     private val methodAddItem by dexMethod {
         searchPackages("com.tencent.mm.ui")
         matcher {
@@ -95,6 +103,25 @@ object WeHomeScreenPopupMenuApi : ApiFeature(), IResolveDex {
     }
 
     override fun onEnable() {
+        // 只装一次：把我们的假 resId 换成真 drawable。
+        // 以前是挂在 adapter.getView 里「每次绘制装一次、画完卸掉」，既有掉帧风险，
+        // 卸载时机也容易和并发绘制打架。
+        ImageView::class.reflekt().firstMethod {
+            name = "setImageResource"
+        }.hookBeforeDirectly {
+            try {
+                val fakeResId = args[0] as? Int ?: return@hookBeforeDirectly
+                val imageView = thisObject as? ImageView ?: return@hookBeforeDirectly
+                imageView.setImageDrawable(fakeResIdToResMap[fakeResId] ?: return@hookBeforeDirectly)
+                // setImageResource 返回 void，设置 result = null 阻断原方法
+                if ((member as? java.lang.reflect.Method)?.returnType == Void.TYPE) {
+                    result = null
+                }
+            } catch (e: Throwable) {
+                // 兜底异常捕获，防止单条 Hook 异常导致微信主线程崩溃
+            }
+        }
+
         // WeChat 8.0.70 moved this to com.tencent.mm.ui.HomeUI
         methodAddItem.hookAfter {
             var thisObj = thisObject
@@ -105,80 +132,57 @@ object WeHomeScreenPopupMenuApi : ApiFeature(), IResolveDex {
                     .get()!!
             }
 
+            val host = thisObj!!
+
             @Suppress("UNCHECKED_CAST")
-            val items = thisObj!!.reflekt()
+            val items = host.reflekt()
                 .firstField {
                     type = SparseArray::class
                 }
                 .get()!! as SparseArray<Any>
-            val baseAdapter = thisObj!!.reflekt()
+            val baseAdapter = host.reflekt()
                 .firstField {
                     type { it isSubclassOf BaseAdapter::class }
                 }
                 .get()!! as BaseAdapter
 
-            baseAdapter.reflekt().firstMethod {
-                name = "getView"
-            }.apply {
-                var unhook: com.Johnny.wcx.utils.HookHandle? = null
-
-                hookBefore {
-                    unhook = ImageView::class.reflekt().firstMethod {
-                        name = "setImageResource"
-                    }.hookBeforeDirectly {
-                        try {
-                            val fakeResId = args[0] as? Int ?: return@hookBeforeDirectly
-                            val imageView = thisObject as? ImageView ?: return@hookBeforeDirectly
-                            imageView.setImageDrawable(fakeResIdToResMap[fakeResId] ?: return@hookBeforeDirectly)
-                            // setImageResource 返回 void，设置 result = null 阻断原方法
-                            if (member is java.lang.reflect.Method) {
-                                val returnType = (member as java.lang.reflect.Method).returnType
-                                if (returnType == Void.TYPE) {
-                                    result = null
-                                }
-                            }
-                        } catch (e: Throwable) {
-                            // 兜底异常捕获，防止单条 Hook 异常导致微信主线程崩溃
-                        }
-                    }
-                }
-
-                hookAfter {
-                    unhook!!.unhook()
-                }
-            }
-
-            for (provider in providers) {
-                try {
-                    for (item in provider.getMenuItems(this)) {
-                        fakeResIdToResMap[item.fakeResId] = item.drawable
-
-                        val itemData = classMenuItemData.clazz.createInstance(
-                            item.id,
-                            item.text,
-                            "",
-                            item.fakeResId,
-                            0
-                        )
-                        val itemWrapper =
-                            classMenuItemWrapper.clazz.createInstance(itemData)
-                        items.put(items.size, itemWrapper)
-
-                        runOnUiThread {
-                            baseAdapter.notifyDataSetChanged()
-                        }
-                    }
-                } catch (ex: Exception) {
-                    WeLogger.e(
-                        TAG,
-                        "provider ${provider.javaClass.name} threw while providing menu items",
-                        ex
-                    )
-                }
-            }
-
+            // 修改 adapter 内容必须和 notifyDataSetChanged 在同一个 UI 线程任务里完成：
+            // 中间只要插进一次 layout，ListView 就会认为「内容变了但没通知」并抛异常。
             runOnUiThread {
-                baseAdapter.notifyDataSetChanged()
+                val inserted = insertedItemIds.getOrPut(host) { mutableSetOf() }
+                var changed = false
+
+                for (provider in providers) {
+                    try {
+                        for (item in provider.getMenuItems(this)) {
+                            if (!inserted.add(item.id)) continue
+
+                            fakeResIdToResMap[item.fakeResId] = item.drawable
+
+                            val itemData = classMenuItemData.clazz.createInstance(
+                                item.id,
+                                item.text,
+                                "",
+                                item.fakeResId,
+                                0
+                            )
+                            val itemWrapper =
+                                classMenuItemWrapper.clazz.createInstance(itemData)
+                            items.put(items.size, itemWrapper)
+                            changed = true
+                        }
+                    } catch (ex: Exception) {
+                        WeLogger.e(
+                            TAG,
+                            "provider ${provider.javaClass.name} threw while providing menu items",
+                            ex
+                        )
+                    }
+                }
+
+                if (changed) {
+                    baseAdapter.notifyDataSetChanged()
+                }
             }
         }
 
