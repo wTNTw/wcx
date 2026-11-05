@@ -386,25 +386,53 @@ object HomeSidePanel : SwitchFeature() {
      * Activity 级别套用的（应用级 resources 可能一直是 light），结果侧边栏永远亮色。
      */
     private fun isHostDarkMode(context: Context): Boolean {
-        // 首选：宿主 Activity 的 configuration（微信深色模式套用后会带上 night 位）
-        val nightByConfig = try {
+        val activityNight = runCatching {
             (context.resources.configuration.uiMode and
                 android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
                 android.content.res.Configuration.UI_MODE_NIGHT_YES
-        } catch (_: Throwable) {
-            false
-        }
-        if (nightByConfig) return true
+        }.getOrDefault(false)
 
-        // 兜底：AppCompat DayNight 主题会把 android:isLightTheme 置为 false，
-        // 有些机型/微信版本只改主题不刷新 resources.configuration。
-        return try {
+        val appNight = runCatching {
+            val cfg = com.Johnny.wcx.utils.HostInfo.application.resources.configuration
+            (cfg.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
+                android.content.res.Configuration.UI_MODE_NIGHT_YES
+        }.getOrDefault(false)
+
+        // AppCompat DayNight：夜间主题里 android:isLightTheme=false
+        val themeNotLight = runCatching {
             val value = android.util.TypedValue()
-            context.theme.resolveAttribute(android.R.attr.isLightTheme, value, true) &&
-                value.data == 0
-        } catch (_: Throwable) {
+            context.theme.resolveAttribute(android.R.attr.isLightTheme, value, true) && value.data == 0
+        }.getOrDefault(false)
+
+        // 兜底：宿主窗口背景是深色（微信自己的深色模式不改 uiMode，只换主题/背景）
+        val decorDark = runCatching {
+            var view: android.view.View? = (context as? Activity)?.window?.decorView
+                ?: return@runCatching false
+            var depth = 0
+            while (view != null && depth < 4) {
+                val bg = view.background
+                if (bg is android.graphics.drawable.ColorDrawable) {
+                    val c = bg.color
+                    val lum = (0.299 * android.graphics.Color.red(c) +
+                        0.587 * android.graphics.Color.green(c) +
+                        0.114 * android.graphics.Color.blue(c)) / 255.0
+                    if (android.graphics.Color.alpha(c) > 200) return@runCatching lum < 0.5
+                }
+                view = (view as? android.view.ViewGroup)?.let { g ->
+                    if (g.childCount > 0) g.getChildAt(0) else null
+                }
+                depth++
+            }
             false
-        }
+        }.getOrDefault(false)
+
+        val dark = activityNight || appNight || themeNotLight || decorDark
+        WeLogger.d(
+            TAG,
+            "dark mode probe: activityNight=$activityNight appNight=$appNight " +
+                "themeNotLight=$themeNotLight decorDark=$decorDark -> dark=$dark",
+        )
+        return dark
     }
 
     private data class ObservedViewListeners(
@@ -564,7 +592,16 @@ object HomeSidePanel : SwitchFeature() {
             panelView.isClickable = true
             panelView.setLifecycleOwner(LifecycleOwnerProvider.getOrCreate(activity))
             panelView.setContent {
-                InjectedUiTheme(darkTheme = darkModeState.value) {
+                val panelDark = darkModeState.value
+                InjectedUiTheme(darkTheme = panelDark) {
+                    val surfaceColor = androidx.compose.material3.MaterialTheme.colorScheme.surface
+                    val systemDark = androidx.compose.foundation.isSystemInDarkTheme()
+                    LaunchedEffect(panelDark, surfaceColor) {
+                        WeLogger.d(
+                            TAG,
+                            "panel composition: dark=$panelDark surface=$surfaceColor systemDark=$systemDark",
+                        )
+                    }
                     LaunchedEffect(panelState) {
                         val messagesJob = launch(start = CoroutineStart.UNDISPATCHED) {
                             panelState.messages.collect { message ->

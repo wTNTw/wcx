@@ -447,7 +447,7 @@ internal class HomeSidePanelCityMatcher(
             countryCode == null || candidate.countryCode == countryCode
         }
         val provinceMatches: (WeatherCity) -> Boolean = { candidate ->
-            normalizeRegionValue(candidate.province) == normalizedProvince
+            equalsLoosely(candidate.province, province)
         }
         val matched = cities.firstOrNull { candidate ->
             countryMatches(candidate) && provinceMatches(candidate) &&
@@ -474,9 +474,25 @@ internal class HomeSidePanelCityMatcher(
     }
 
     private fun WeatherCity.matchesCityValue(value: String): Boolean =
-        normalizedCombinedCity() == value ||
-            normalizeRegionValue(city) == value ||
-            district?.let(::normalizeRegionValue) == value
+        equalsLoosely(city + district.orEmpty(), value) ||
+            equalsLoosely(city, value) ||
+            district?.let { equalsLoosely(it, value) } == true
+
+    /**
+     * 中文城市库 vs 英文 Geocoder 结果的宽松比较：
+     * 安卓 Geocoder 在大陆机型经常只返回英文（陕西 → "Shaanxi"、汉中 → "Hanzhong"），
+     * 而城市库里是中文，直接比字符串永远不相等。这里用汉字转拼音（Han-Latin）再比一次。
+     */
+    private fun equalsLoosely(left: String, right: String): Boolean {
+        val l = normalizeRegionValue(left)
+        val r = normalizeRegionValue(right)
+        if (l == r) return true
+        val lt = normalizeRegionValue(transliterateCityQuery(left))
+        val rt = normalizeRegionValue(transliterateCityQuery(right))
+        return lt == rt ||
+            normalizeSearchValue(lt) == normalizeSearchValue(r) ||
+            normalizeSearchValue(rt) == normalizeSearchValue(l)
+    }
 
     private fun WeatherCity.normalizedCombinedCity(): String =
         normalizeRegionValue(city + district.orEmpty())
@@ -586,9 +602,10 @@ internal class HomeSidePanelCityIndex(context: Context) {
     /** 从 APK 的 assets 里抽出城市库；成功返回 true。 */
     private fun extractDatabase(apk: File, target: File): Boolean = try {
         java.util.zip.ZipFile(apk).use { zip ->
-            val entry = zip.getEntry(ASSET_PATH)
+            // AssetManager 用的路径不带 assets/ 前缀，ZipFile 的 entry 名必须带
+            val entry = zip.getEntry("assets/$ASSET_PATH")
             if (entry == null) {
-                WeLogger.w(TAG, "${apk.name} 里没有 $ASSET_PATH")
+                WeLogger.w(TAG, "${apk.name} 里没有 assets/$ASSET_PATH")
                 false
             } else {
                 zip.getInputStream(entry).use { input ->
