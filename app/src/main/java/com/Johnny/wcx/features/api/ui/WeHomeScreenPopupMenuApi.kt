@@ -55,26 +55,6 @@ object WeHomeScreenPopupMenuApi : ApiFeature(), IResolveDex {
 
     private val fakeResIdToResMap = mutableIntObjectMapOf<Drawable>()
 
-    /**
-     * 每个菜单宿主（PlusSubMenuHelper / HomeUI 实例）已经插入过的 item id。
-     * `methodAddItem` 可能被调用多次（每次开菜单、或每个默认项一次），没有这个集合就会重复
-     * 往 SparseArray 里塞我们的项 —— adapter 内容变了而 ListView 没收到通知，触摸时就会抛
-     * "The content of the adapter has changed but ListView did not receive a notification"。
-     */
-    private val insertedItemIds = java.util.WeakHashMap<Any, MutableSet<Int>>()
-
-    /**
-     * adapter 实例 -> 真正承载它的 ListView。
-     *
-     * 微信首页「+」菜单的 ListView 有 header（右上角那个小三角），所以 ListView 实际持有的是
-     * HeaderViewListAdapter，而不是我们拿到的 BaseAdapter。对 BaseAdapter 调 notifyDataSetChanged
-     * 不会传到 ListView（它的 mItemCount 不会更新），下一次 layout 就会抛
-     * "The content of the adapter has changed but ListView did not receive a notification"。
-     * 因此记下映射，稍后直接把 adapter 重新 set 回去，强制 ListView 重新计算条数。
-     */
-    private val adapterHosts =
-        java.util.WeakHashMap<Any, java.lang.ref.WeakReference<android.widget.ListView>>()
-
     private val methodAddItem by dexMethod {
         searchPackages("com.tencent.mm.ui")
         matcher {
@@ -115,42 +95,6 @@ object WeHomeScreenPopupMenuApi : ApiFeature(), IResolveDex {
     }
 
     override fun onEnable() {
-        // 只装一次：把我们的假 resId 换成真 drawable。
-        // 以前是挂在 adapter.getView 里「每次绘制装一次、画完卸掉」，既有掉帧风险，
-        // 卸载时机也容易和并发绘制打架。
-        ImageView::class.reflekt().firstMethod {
-            name = "setImageResource"
-        }.hookBeforeDirectly {
-            try {
-                val fakeResId = args[0] as? Int ?: return@hookBeforeDirectly
-                val imageView = thisObject as? ImageView ?: return@hookBeforeDirectly
-                imageView.setImageDrawable(fakeResIdToResMap[fakeResId] ?: return@hookBeforeDirectly)
-                // setImageResource 返回 void，设置 result = null 阻断原方法
-                if ((member as? java.lang.reflect.Method)?.returnType == Void.TYPE) {
-                    result = null
-                }
-            } catch (e: Throwable) {
-                // 兜底异常捕获，防止单条 Hook 异常导致微信主线程崩溃
-            }
-        }
-
-        // 记录 adapter ↔ ListView 的关系（含 HeaderViewListAdapter 包装的情况）
-        runCatching {
-            android.widget.ListView::class.java
-                .getDeclaredMethod("setAdapter", android.widget.ListAdapter::class.java)
-                .hookBeforeDirectly {
-                    try {
-                        val lv = thisObject as? android.widget.ListView ?: return@hookBeforeDirectly
-                        val a = args[0] ?: return@hookBeforeDirectly
-                        val inner = if (a is android.widget.HeaderViewListAdapter) a.wrappedAdapter else a
-                        if (inner != null) {
-                            adapterHosts[inner] = java.lang.ref.WeakReference(lv)
-                        }
-                    } catch (_: Throwable) {
-                    }
-                }
-        }.onFailure { WeLogger.w(TAG, "hook ListView.setAdapter 失败", it) }
-
         // WeChat 8.0.70 moved this to com.tencent.mm.ui.HomeUI
         methodAddItem.hookAfter {
             var thisObj = thisObject
@@ -161,83 +105,80 @@ object WeHomeScreenPopupMenuApi : ApiFeature(), IResolveDex {
                     .get()!!
             }
 
-            val host = thisObj!!
-
             @Suppress("UNCHECKED_CAST")
-            val items = host.reflekt()
+            val items = thisObj!!.reflekt()
                 .firstField {
                     type = SparseArray::class
                 }
                 .get()!! as SparseArray<Any>
-            val baseAdapter = host.reflekt()
+            val baseAdapter = thisObj!!.reflekt()
                 .firstField {
                     type { it isSubclassOf BaseAdapter::class }
                 }
                 .get()!! as BaseAdapter
 
-            // 修改 adapter 内容必须和 notifyDataSetChanged 在同一个 UI 线程任务里完成：
-            // 中间只要插进一次 layout，ListView 就会认为「内容变了但没通知」并抛异常。
-            // 已经在主线程时直接同步做完（菜单构建阶段），不要投递到队列尾 —— 那会让插入发生在
-            // popup 首次 layout 之后，而 notify 未必打中 ListView 真正持有的 adapter。
-            val insertTask = {
-                val inserted = insertedItemIds.getOrPut(host) { mutableSetOf() }
-                var changed = false
+            baseAdapter.reflekt().firstMethod {
+                name = "getView"
+            }.apply {
+                var unhook: com.Johnny.wcx.utils.HookHandle? = null
 
-                for (provider in providers) {
-                    try {
-                        for (item in provider.getMenuItems(this)) {
-                            if (!inserted.add(item.id)) continue
-
-                            fakeResIdToResMap[item.fakeResId] = item.drawable
-
-                            val itemData = classMenuItemData.clazz.createInstance(
-                                item.id,
-                                item.text,
-                                "",
-                                item.fakeResId,
-                                0
-                            )
-                            val itemWrapper =
-                                classMenuItemWrapper.clazz.createInstance(itemData)
-                            items.put(items.size, itemWrapper)
-                            changed = true
+                hookBefore {
+                    unhook = ImageView::class.reflekt().firstMethod {
+                        name = "setImageResource"
+                    }.hookBeforeDirectly {
+                        try {
+                            val fakeResId = args[0] as? Int ?: return@hookBeforeDirectly
+                            val imageView = thisObject as? ImageView ?: return@hookBeforeDirectly
+                            imageView.setImageDrawable(fakeResIdToResMap[fakeResId] ?: return@hookBeforeDirectly)
+                            // setImageResource 返回 void，设置 result = null 阻断原方法
+                            if (member is java.lang.reflect.Method) {
+                                val returnType = (member as java.lang.reflect.Method).returnType
+                                if (returnType == Void.TYPE) {
+                                    result = null
+                                }
+                            }
+                        } catch (e: Throwable) {
+                            // 兜底异常捕获，防止单条 Hook 异常导致微信主线程崩溃
                         }
-                    } catch (ex: Exception) {
-                        WeLogger.e(
-                            TAG,
-                            "provider ${provider.javaClass.name} threw while providing menu items",
-                            ex
-                        )
                     }
                 }
 
-                if (changed) {
-                    baseAdapter.notifyDataSetChanged()
+                hookAfter {
+                    unhook!!.unhook()
+                }
+            }
 
-                    // 关键：ListView 可能持有 HeaderViewListAdapter，notify 传不到它，
-                    // 重新 set 一次 adapter 会重建 observer 并重算 mItemCount。
-                    val lv = adapterHosts[baseAdapter]?.get()
-                    var resynced = false
-                    if (lv != null) {
-                        runCatching {
-                            lv.adapter = lv.adapter
-                            resynced = true
-                        }.onFailure { WeLogger.w(TAG, "重新 setAdapter 失败", it) }
+            for (provider in providers) {
+                try {
+                    for (item in provider.getMenuItems(this)) {
+                        fakeResIdToResMap[item.fakeResId] = item.drawable
+
+                        val itemData = classMenuItemData.clazz.createInstance(
+                            item.id,
+                            item.text,
+                            "",
+                            item.fakeResId,
+                            0
+                        )
+                        val itemWrapper =
+                            classMenuItemWrapper.clazz.createInstance(itemData)
+                        items.put(items.size, itemWrapper)
+
+                        runOnUiThread {
+                            baseAdapter.notifyDataSetChanged()
+                        }
                     }
-
-                    WeLogger.d(
+                } catch (ex: Exception) {
+                    WeLogger.e(
                         TAG,
-                        "inserted menu items: items=${items.size()} adapterCount=${baseAdapter.count} " +
-                            "listView=${lv != null} resynced=$resynced " +
-                            "main=${android.os.Looper.myLooper() == android.os.Looper.getMainLooper()}"
+                        "provider ${provider.javaClass.name} threw while providing menu items",
+                        ex
                     )
                 }
             }
 
-            if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
-                insertTask()
-            } else {
-                runOnUiThread(insertTask)
+            runOnUiThread {
+                baseAdapter.notifyDataSetChanged()
             }
         }
 
