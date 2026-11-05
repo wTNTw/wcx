@@ -63,6 +63,18 @@ object WeHomeScreenPopupMenuApi : ApiFeature(), IResolveDex {
      */
     private val insertedItemIds = java.util.WeakHashMap<Any, MutableSet<Int>>()
 
+    /**
+     * adapter 实例 -> 真正承载它的 ListView。
+     *
+     * 微信首页「+」菜单的 ListView 有 header（右上角那个小三角），所以 ListView 实际持有的是
+     * HeaderViewListAdapter，而不是我们拿到的 BaseAdapter。对 BaseAdapter 调 notifyDataSetChanged
+     * 不会传到 ListView（它的 mItemCount 不会更新），下一次 layout 就会抛
+     * "The content of the adapter has changed but ListView did not receive a notification"。
+     * 因此记下映射，稍后直接把 adapter 重新 set 回去，强制 ListView 重新计算条数。
+     */
+    private val adapterHosts =
+        java.util.WeakHashMap<Any, java.lang.ref.WeakReference<android.widget.ListView>>()
+
     private val methodAddItem by dexMethod {
         searchPackages("com.tencent.mm.ui")
         matcher {
@@ -121,6 +133,23 @@ object WeHomeScreenPopupMenuApi : ApiFeature(), IResolveDex {
                 // 兜底异常捕获，防止单条 Hook 异常导致微信主线程崩溃
             }
         }
+
+        // 记录 adapter ↔ ListView 的关系（含 HeaderViewListAdapter 包装的情况）
+        runCatching {
+            android.widget.ListView::class.java
+                .getDeclaredMethod("setAdapter", android.widget.ListAdapter::class.java)
+                .hookBeforeDirectly {
+                    try {
+                        val lv = thisObject as? android.widget.ListView ?: return@hookBeforeDirectly
+                        val a = args[0] ?: return@hookBeforeDirectly
+                        val inner = if (a is android.widget.HeaderViewListAdapter) a.wrappedAdapter else a
+                        if (inner != null) {
+                            adapterHosts[inner] = java.lang.ref.WeakReference(lv)
+                        }
+                    } catch (_: Throwable) {
+                    }
+                }
+        }.onFailure { WeLogger.w(TAG, "hook ListView.setAdapter 失败", it) }
 
         // WeChat 8.0.70 moved this to com.tencent.mm.ui.HomeUI
         methodAddItem.hookAfter {
@@ -184,9 +213,22 @@ object WeHomeScreenPopupMenuApi : ApiFeature(), IResolveDex {
 
                 if (changed) {
                     baseAdapter.notifyDataSetChanged()
+
+                    // 关键：ListView 可能持有 HeaderViewListAdapter，notify 传不到它，
+                    // 重新 set 一次 adapter 会重建 observer 并重算 mItemCount。
+                    val lv = adapterHosts[baseAdapter]?.get()
+                    var resynced = false
+                    if (lv != null) {
+                        runCatching {
+                            lv.adapter = lv.adapter
+                            resynced = true
+                        }.onFailure { WeLogger.w(TAG, "重新 setAdapter 失败", it) }
+                    }
+
                     WeLogger.d(
                         TAG,
                         "inserted menu items: items=${items.size()} adapterCount=${baseAdapter.count} " +
+                            "listView=${lv != null} resynced=$resynced " +
                             "main=${android.os.Looper.myLooper() == android.os.Looper.getMainLooper()}"
                     )
                 }
