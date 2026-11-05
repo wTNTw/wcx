@@ -148,6 +148,8 @@ object WeHomeScreenPopupMenuApi : ApiFeature(), IResolveDex {
                 }
             }
 
+            // 不要给这里加「已插入过就跳过」的去重：微信每次打开「+」菜单都会重建这份 items，
+            // 去重会让菜单项在第二次打开后消失（实测：只有冷启动第一次能看到）。
             for (provider in providers) {
                 try {
                     for (item in provider.getMenuItems(this)) {
