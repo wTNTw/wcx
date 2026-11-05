@@ -392,6 +392,8 @@ internal class HomeSidePanelCityMatcher(
     private val cities: List<WeatherCity>,
 ) {
 
+    fun size(): Int = cities.size
+
     fun search(query: String): List<WeatherCity> {
         val normalizedQuery = normalizeSearchValue(query)
         if (normalizedQuery.isEmpty()) return emptyList()
@@ -495,6 +497,16 @@ internal class HomeSidePanelCityIndex(context: Context) {
     private val appContext = context.applicationContext
     private val matcher by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         HomeSidePanelCityMatcher(loadCities())
+    }
+
+    /** 提前加载城市库（含从 payload APK 抽 assets），返回城市数量。 */
+    suspend fun prepare(): Int = withContext(Dispatchers.IO) {
+        val count = runCatching { matcher.size() }.getOrElse {
+            WeLogger.w("HomeSidePanelWeatherCityIndex", "城市库加载失败: ${it.message}")
+            0
+        }
+        WeLogger.i("HomeSidePanelWeatherCityIndex", "城市库就绪：$count 个城市")
+        count
     }
 
     suspend fun search(query: String): List<WeatherCity> = withContext(Dispatchers.IO) {

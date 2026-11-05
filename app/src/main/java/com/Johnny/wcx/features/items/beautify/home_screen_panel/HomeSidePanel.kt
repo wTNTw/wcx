@@ -453,6 +453,7 @@ object HomeSidePanel : SwitchFeature() {
         }
 
         private val stateScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
         private val layoutStore = HomeSidePanelLayoutStore
         private val cityIndex = HomeSidePanelCityIndex(activity)
         private val weather = HomeSidePanelWeather(
@@ -536,6 +537,10 @@ object HomeSidePanel : SwitchFeature() {
             attached = true
             darkModeState.value = isHostDarkMode(activity)
             runCatching { activity.registerComponentCallbacks(configCallbacks) }
+            // 预热城市库：Zygisk 独立模式下要从 payload APK 里抽 assets，先做掉，
+            // 免得第一次「自动检测 / 搜索城市」才现读。（不能放构造函数里，
+            // cityIndex 在那时还没赋值，会 NPE 直接崩微信。）
+            stateScope.launch { runCatching { cityIndex.prepare() } }
 
             parentClipChildren = parent.clipChildren
             parentClipToPadding = parent.clipToPadding
