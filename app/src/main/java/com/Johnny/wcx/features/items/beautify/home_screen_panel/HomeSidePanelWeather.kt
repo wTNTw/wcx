@@ -20,7 +20,7 @@ import androidx.annotation.StringRes
 
 import com.Johnny.wcx.features.items.beautify.BeautifyText
 import com.Johnny.wcx.features.items.beautify.beautifyText
-import com.Johnny.wcx.loader.utils.NativeLoader
+import com.Johnny.wcx.loader.utils.ModuleApkAssets
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.serialization.DefaultJson
 import kotlinx.coroutines.CancellationException
@@ -583,42 +583,9 @@ internal class HomeSidePanelCityIndex(context: Context) {
     }
 
     /**
-     * 能拿到城市库 assets 的 APK 列表，按优先级：
-     *   1. [NativeLoader.bootstrapApk] —— Zygisk 独立模式下的 payload APK（module.apk），
-     *      这个 APK **没有作为应用安装**，createPackageContext 会失败；
-     *   2. 已安装模块 APK 的 sourceDir（LSPosed 模式 / 装了 WCX 的情况）。
+     * 抽取城市库：统一走 [ModuleApkAssets]（payload APK / 已安装模块 APK / assets）。
+     * 半截文件先删；解出来长度为 0 视为失败。
      */
-    private fun moduleApkCandidates(): List<File> {
-        val candidates = mutableListOf<File>()
-        runCatching { candidates += NativeLoader.bootstrapApk() }
-            .onFailure { WeLogger.w(TAG, "bootstrapApk 不可用: ${it.message}") }
-        runCatching {
-            val info = appContext.packageManager.getApplicationInfo("com.Johnny.wcx", 0)
-            info.sourceDir?.let { candidates += File(it) }
-        }.onFailure { WeLogger.w(TAG, "模块未安装（Zygisk 独立模式属正常）: ${it.message}") }
-        return candidates.distinctBy { it.absolutePath }.filter { it.isFile && it.canRead() }
-    }
-
-    /** 从 APK 的 assets 里抽出城市库；成功返回 true。 */
-    private fun extractDatabase(apk: File, target: File): Boolean = try {
-        java.util.zip.ZipFile(apk).use { zip ->
-            // AssetManager 用的路径不带 assets/ 前缀，ZipFile 的 entry 名必须带
-            val entry = zip.getEntry("assets/$ASSET_PATH")
-            if (entry == null) {
-                WeLogger.w(TAG, "${apk.name} 里没有 assets/$ASSET_PATH")
-                false
-            } else {
-                zip.getInputStream(entry).use { input ->
-                    target.outputStream().use(input::copyTo)
-                }
-                true
-            }
-        }
-    } catch (e: Exception) {
-        WeLogger.w(TAG, "从 ${apk.absolutePath} 抽取城市库失败: ${e.message}")
-        false
-    }
-
     private fun copyDatabaseAssetOnce(): File? {
         // 模块运行在微信进程（uid=微信），只能写微信自己的 files 目录。
         val directory = File(appContext.filesDir, ASSET_DIRECTORY).apply { mkdirs() }
@@ -628,12 +595,9 @@ internal class HomeSidePanelCityIndex(context: Context) {
         // 上次中断留下的半截文件先删掉，否则 SQLite 打开会一直失败
         databaseFile.delete()
 
-        for (apk in moduleApkCandidates()) {
-            if (extractDatabase(apk, databaseFile) && databaseFile.length() > 0L) {
-                WeLogger.i(TAG, "城市库已从 ${apk.absolutePath} 解出（${databaseFile.length()} 字节）")
-                return databaseFile
-            }
-            databaseFile.delete()
+        if (ModuleApkAssets.extractTo(ASSET_PATH, databaseFile)) {
+            WeLogger.i(TAG, "城市库已解出（${databaseFile.length()} 字节）→ ${databaseFile.absolutePath}")
+            return databaseFile
         }
 
         // 拿不到城市库时降级为「无城市库」：定位/搜索都会提示匹配失败，但不会崩

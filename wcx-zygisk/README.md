@@ -172,6 +172,56 @@ Zygisk: 冷启动耗时 publish=1ms loader=139ms(memory) art=25ms total=165ms (c
 - 功能设置 UI 仍依赖已安装的 WCX APK（Zygisk 模式下没有 Activity 入口）；模块级作用域/开关已由 WebUI 提供。
 - 崩溃自愈（连续启动失败自动 `disable`）未实现。
 
+## 兼容性
+
+### 模块未安装（Zygisk 独立模式）
+
+本模块在 Zygisk 模式下**不作为应用安装**，所以任何「读模块 APK 里的 assets / 资源」的代码都不能
+用 `createPackageContext("com.Johnny.wcx")`（会抛 `NameNotFoundException`），否则表现为
+「素材/数据读不到」。统一走 `loader/utils/ModuleApkAssets`：
+
+```
+NativeLoader.bootstrapApk()（payload / 模块 APK）→ 已安装模块 APK 的 sourceDir → createPackageContext
+```
+
+`ModuleApkAssets` 用 `ZipFile` 直接读 `assets/<path>`（注意 entry 名要带 `assets/` 前缀，而
+AssetManager 的路径不带）。目前已覆盖：天气城市库（`xiaomi_weather.db`）、主题工坊内置壁纸/气泡。
+
+### 连续启动失败自动停用（self-heal）
+
+如果某个 feature/hook 让微信在启动阶段必崩，用户会进不去微信。现在有兜底：
+
+1. 主进程每次启动把「连续启动次数」写到
+   `/data/media/0/Android/data/com.tencent.mm/WCX/selfheal/attempts`；
+2. 功能加载完成并稳定运行 30 秒后清零；
+3. 模块自带的 `service.sh` 在开机时检查：累计 ≥ 3 次就写模块目录的 `disable`，
+   下次启动 Zygisk 与本模块注入器都会跳过注入，微信恢复可用，原因写进
+   `<模块目录>/self-heal.log`。
+
+恢复方式：在 Root 管理器里重新启用模块（或重装本包——`customize.sh` 检测到 `self-heal.log`
+会自动清掉 `disable`）。
+
+### 与其它「注入微信」的模块共存
+
+同一进程里只能有一套 ART hook 框架。已实测的坑：
+
+| 共存对象 | 现象 |
+|---|---|
+| `wekit_zygisk`（上游 WeKit） | 两套 LSPlant/Dobby 互相踩 trampoline → 微信启动瞬间 SIGILL |
+| FunBox（sHooker + 内存 dex） | 出现 `Resources.addLoaders(null)` 之类的启动期 NPE（见下面「崩溃分析」） |
+| LSPosed 里的 WCX | 同样是两套 ART hook |
+
+排查方法：`adb shell su -c 'logcat -s WCX'` 看是否两个注入器都在；确认后只保留一个。
+
+### 崩溃自愈与日志位置
+
+| 位置 | 内容 |
+|---|---|
+| `/data/adb/modules/zygisk-wcx/self-heal.log` | 自动停用的原因与次数 |
+| `/storage/emulated/0/Android/data/com.tencent.mm/WCX/logs/wcx-YYYY-MM-DD.log` | 模块运行日志 |
+| `/storage/emulated/0/Android/data/com.tencent.mm/WCX/crashes/` | 本模块捕获的崩溃详情 |
+| `/storage/emulated/0/Android/media/com.tencent.mm/fun_stable/log/crash_report/` | 微信自己（以及 FunBox 收集器）的崩溃快照 |
+
 ## 与 master 分支的兼容性约定
 
 Zygisk 形态**不依赖** master 分支里的具体 feature 代码：注入器只认下面这些「契约」，

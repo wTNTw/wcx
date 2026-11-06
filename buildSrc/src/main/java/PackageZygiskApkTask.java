@@ -225,6 +225,7 @@ public abstract class PackageZygiskApkTask extends DefaultTask {
                 "customize.sh",
                 "uninstall.sh",
                 "config.sh",
+                "service.sh",
                 "webroot/index.html",
                 "webroot/css/app.css",
                 "webroot/js/bridge.js",

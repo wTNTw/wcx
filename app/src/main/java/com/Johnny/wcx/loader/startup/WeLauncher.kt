@@ -54,6 +54,8 @@ object WeLauncher {
 
         if (TargetProcesses.isInMain) {
             val appContext = context.applicationContext ?: context
+            // 连续启动失败自愈：先记一次尝试，稳定运行一段时间后由 service.sh 之外的逻辑清零
+            runCatching { StartupCrashGuard.onMainProcessStart() }
             ActivityProxy.init(appContext)
             LocalAdaptationEngine.init(appContext)
             SelfHealingMonitor.init()

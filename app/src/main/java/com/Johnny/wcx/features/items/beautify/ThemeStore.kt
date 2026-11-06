@@ -63,6 +63,7 @@ import com.Johnny.wcx.ui.content.DefaultColumn
 import com.Johnny.wcx.ui.content.TextButton
 import com.Johnny.wcx.ui.utils.findViewWhich
 import com.Johnny.wcx.ui.utils.showComposeDialog
+import com.Johnny.wcx.loader.utils.ModuleApkAssets
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.android.showToast
 import com.Johnny.wcx.utils.fs.KnownPaths
@@ -265,15 +266,24 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
     // ══════════════════════════════════════════════════════════
     // 素材读取（模块 APK 内置 assets → 一次性提取到模块数据目录）
     // ══════════════════════════════════════════════════════════
-    /** 从模块 APK assets 读取内置素材；失败返回 null。 */
-    private fun readBuiltinAsset(assetPath: String): ByteArray? = try {
-        val pkgCtx = HostApplication?.createPackageContext(BuildConfig.APPLICATION_ID, 0)
-            ?: return null
-        pkgCtx.assets.open(assetPath).use { it.readBytes() }
-    } catch (e: Throwable) {
-        WeLogger.w(TAG, "读取内置素材失败：$assetPath（$e）")
-        null
-    }
+    /**
+     * 从模块 APK assets 读取内置素材；失败返回 null。
+     *
+     * 不能再用 createPackageContext(BuildConfig.APPLICATION_ID)：Zygisk 独立模式下模块 APK
+     * 只是 payload、没有作为应用安装，这一步必然失败 → 内置主题壁纸/气泡全都读不到。
+     * 统一走 [ModuleApkAssets]（payload APK → 已安装模块 APK → assets）。
+     */
+    @Volatile
+    private var builtinAssetLogged = false
+
+    private fun readBuiltinAsset(assetPath: String): ByteArray? =
+        ModuleApkAssets.readBytes(assetPath)?.also {
+            // 首次成功时留一条日志，方便排查「素材读不到」
+            if (!builtinAssetLogged) {
+                builtinAssetLogged = true
+                WeLogger.i(TAG, "内置素材来源可用：$assetPath（${it.size} 字节）")
+            }
+        }
 
     /** 确保某个主题的素材已提取到模块数据目录（壁纸 + 两个气泡）。 */
     private fun ensureBuiltinExtracted(theme: ThemeInfo, force: Boolean = false) {

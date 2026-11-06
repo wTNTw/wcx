@@ -22,7 +22,7 @@ fi
 unzip -t "$ZIPFILE" >/dev/null 2>&1 || abort "! WCX APK 已损坏"
 unzip -l "$ZIPFILE" > "$TMPDIR/wcx-apk-entries" || abort "! 无法列出 APK 内容"
 
-for entry in module.prop customize.sh uninstall.sh config.sh \
+for entry in module.prop customize.sh uninstall.sh config.sh service.sh \
   webroot/index.html webroot/css/app.css webroot/js/bridge.js webroot/js/app.js \
   META-INF/com/google/android/update-binary META-INF/com/google/android/updater-script \
   AndroidManifest.xml classes.dex resources.arsc \
@@ -34,19 +34,25 @@ done
 rm -f "$TMPDIR/wcx-apk-entries"
 
 ui_print "- 解压模块文件"
-for entry in module.prop uninstall.sh config.sh \
+for entry in module.prop uninstall.sh config.sh service.sh \
   webroot/index.html webroot/css/app.css webroot/js/bridge.js webroot/js/app.js
 do
   unzip -o "$ZIPFILE" "$entry" -d "$MODPATH" >/dev/null || abort "! 无法解压 $entry"
 done
 
-# 保留上一版的作用域与开关状态（安装器已把新内容解到 $MODPATH）
-for state in target.list disable; do
-  if [ -f "$ACTIVE_DIR/$state" ]; then
-    cp -f "$ACTIVE_DIR/$state" "$MODPATH/$state" || ui_print "! 恢复 $state 失败"
-    ui_print "- 已保留 $state"
-  fi
-done
+# 保留上一版的作用域；disable 只在「自愈自动停用」时恢复，其余情况重装即视为重新启用
+if [ -f "$ACTIVE_DIR/target.list" ]; then
+  cp -f "$ACTIVE_DIR/target.list" "$MODPATH/target.list" || ui_print "! 恢复 target.list 失败"
+  ui_print "- 已保留 target.list"
+fi
+if [ -f "$ACTIVE_DIR/self-heal.log" ]; then
+  cp -f "$ACTIVE_DIR/self-heal.log" "$MODPATH/self-heal.log" 2>/dev/null
+  ui_print "- 上次因连续启动失败被自动停用（见 self-heal.log）；本次重装已重新启用"
+fi
+if [ -f "$ACTIVE_DIR/disable" ] && [ ! -f "$ACTIVE_DIR/self-heal.log" ]; then
+  cp -f "$ACTIVE_DIR/disable" "$MODPATH/disable" || ui_print "! 恢复 disable 失败"
+  ui_print "- 已保留 disable（上一个版本是手动停用的）"
+fi
 
 ui_print "- 放置 Zygisk 注入器"
 mkdir -p "$MODPATH/zygisk" || abort "! 无法创建 zygisk 目录"
@@ -64,6 +70,7 @@ set_perm "$MODPATH/zygisk/arm64-v8a.so" 0 0 0644
 set_perm "$MODPATH/module.apk" 0 0 0644
 set_perm "$MODPATH/module.prop" 0 0 0644
 set_perm "$MODPATH/config.sh" 0 0 0755
+set_perm "$MODPATH/service.sh" 0 0 0755
 set_perm "$MODPATH/uninstall.sh" 0 0 0755
 
 ui_print "**********************************************"

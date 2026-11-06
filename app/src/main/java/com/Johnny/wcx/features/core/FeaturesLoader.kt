@@ -61,6 +61,14 @@ object FeaturesLoader {
         }
         WeLogger.i(TAG, "enabling all hook items took $elapsed")
 
+        // 功能全部加载完 → 30 秒后若进程仍存活就清零「连续启动失败」计数，
+        // 避免 StartupCrashGuard 把偶发的一次崩溃也算成隐患。
+        runCatching {
+            if (TargetProcesses.isInMain) {
+                com.Johnny.wcx.loader.startup.StartupCrashGuard.scheduleHealthyReset()
+            }
+        }
+
         if (TargetProcesses.isInMain && Preferences.showStartupToast) {
             showToast("WCX 加载成功!")
         }
