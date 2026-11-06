@@ -10,12 +10,19 @@
 # 都跳过注入（微信恢复可用），并把原因记进 self-heal.log。
 
 MODDIR=${0%/*}
-DATA_DIR=/data/media/0/Android/data/com.tencent.mm/WCX/selfheal
-ATTEMPTS_FILE="$DATA_DIR/attempts"
+EXT_DIR=/data/media/0/Android/data/com.tencent.mm/WCX/selfheal
+INT_DIR=/data/data/com.tencent.mm/files/selfheal
 THRESHOLD=3
 
-# sdcard 还没挂好（极少见）就直接跳过，下次开机再看
-[ -f "$ATTEMPTS_FILE" ] || exit 0
+# 计数可能在外部数据目录，也可能在微信 files 目录（外部不可写时的回退）
+ATTEMPTS_FILE=""
+for candidate in "$EXT_DIR/attempts" "$INT_DIR/attempts"; do
+  if [ -f "$candidate" ]; then
+    ATTEMPTS_FILE="$candidate"
+    break
+  fi
+done
+[ -n "$ATTEMPTS_FILE" ] || exit 0
 
 attempts=$(cat "$ATTEMPTS_FILE" 2>/dev/null | tr -d ' \r\n')
 case "$attempts" in

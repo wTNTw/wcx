@@ -35,9 +35,27 @@ object StartupCrashGuard {
 
     private val mainHandler by lazy { Handler(Looper.getMainLooper()) }
 
+    /**
+     * 计数目录：优先模块外部数据目录（/storage/emulated/0/Android/data/<微信>/WCX/selfheal），
+     * 不可写（例如 sdcard 未就绪、目录被 root 建成了别的属主）时退回微信自己的 files 目录。
+     * `service.sh` 两个位置都会检查。
+     */
     private val selfHealDir: File by lazy {
-        File(KnownPaths.moduleData.toFile(), "selfheal").also { it.mkdirs() }
+        val external = File(KnownPaths.moduleData.toFile(), "selfheal")
+        if (isUsable(external)) external else {
+            val internal = File(com.Johnny.wcx.utils.HostInfo.application.filesDir, "selfheal")
+            WeLogger.w(TAG, "外部数据目录不可写，改用 ${internal.absolutePath}")
+            internal.also { isUsable(it) }
+        }
     }
+
+    private fun isUsable(dir: File): Boolean = runCatching {
+        dir.mkdirs()
+        val probe = File(dir, ".probe")
+        probe.writeText("1")
+        probe.delete()
+        true
+    }.getOrDefault(false)
 
     val attemptsFile: File get() = File(selfHealDir, "attempts")
 
