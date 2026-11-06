@@ -19,10 +19,16 @@ class ZygiskNativePayload(val apk: File, private val dataDir: File) {
     @SuppressLint("UnsafeDynamicallyLoadedCode")
     fun loadLibraries(): Map<String, File> = ZipFile(apk).use { archive ->
         val abi = currentProcessAbi(archive)
-        val libraryDir = File(dataDir, ".wcx-native/${apk.nameWithoutExtension}/$abi")
+        val nativeRoot = File(dataDir, ".wcx-native")
+        val currentDirName = apk.nameWithoutExtension
+        val libraryDir = File(nativeRoot, "$currentDirName/$abi")
         if (!libraryDir.exists() && !libraryDir.mkdirs()) {
             error("cannot create Zygisk native-library directory: $libraryDir")
         }
+        // 每次换 payload（模块升级）都会有一个新的解包目录，一个版本约 4.4MB。
+        // 之前旧的从不清理，实测积累到 99MB/22 个目录，这里只保留当前版本。
+        // 正在运行的旧进程的 .so 已 mmap 完成，删除目录不会影响它们。
+        pruneNativeExtractionDirs(nativeRoot, currentDirName)
         require(libraryDir.isDirectory) { "Zygisk native-library path is not a directory: $libraryDir" }
 
         val libraries = mutableMapOf<String, File>()
@@ -60,6 +66,20 @@ class ZygiskNativePayload(val apk: File, private val dataDir: File) {
             require(name in libraries) { "Zygisk payload is missing lib$name.so for $abi" }
         }
         libraries
+    }
+
+    /** 只保留当前 payload 的解包目录，其它版本的目录 / 残留 .tmp 一并清掉（尽力而为）。 */
+    private fun pruneNativeExtractionDirs(root: File, keepName: String) {
+        runCatching {
+            root.listFiles()?.forEach { entry ->
+                if (entry.name == keepName) return@forEach
+                // 只处理我们自己生成的目录：wcx-payload-* / .wcx-bootstrap-*
+                val managed = entry.name.startsWith("wcx-payload-") ||
+                    entry.name.startsWith(".wcx-bootstrap-")
+                if (!managed) return@forEach
+                if (entry.isDirectory) entry.deleteRecursively() else entry.delete()
+            }
+        }
     }
 
     private fun currentProcessAbi(archive: ZipFile): String {

@@ -15,5 +15,6 @@ rm -f "$WECHAT_DATA"/files/mmkv/wcx-payload-*.apk 2>/dev/null
 
 # 自愈计数 / 崩溃日志 / 主题素材等外部数据（保留用户的日志？一并清理更干净）
 rm -rf "$EXTERNAL_DATA/selfheal" 2>/dev/null
+rm -rf "$EXTERNAL_DATA/home_side_panel" 2>/dev/null
 
 exit 0
