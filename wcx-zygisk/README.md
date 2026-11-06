@@ -187,6 +187,20 @@ NativeLoader.bootstrapApk()（payload / 模块 APK）→ 已安装模块 APK 的
 `ModuleApkAssets` 用 `ZipFile` 直接读 `assets/<path>`（注意 entry 名要带 `assets/` 前缀，而
 AssetManager 的路径不带）。目前已覆盖：天气城市库（`xiaomi_weather.db`）、主题工坊内置壁纸/气泡。
 
+### 文件放在哪
+
+模块自身的数据一律放**外部数据目录** `/storage/emulated/0/Android/data/com.tencent.mm/WCX/`
+（logs / crashes / dex_cache / home_side_panel / selfheal），不在微信私有目录留东西。
+天气城市库只写这里；外部不可写时就当作「无城市库」（定位/搜索提示匹配失败，不会崩）。
+
+微信私有目录 `/data/user/0/com.tencent.mm/` 里只有 Zygisk 模式绕不开的三样：
+
+| 路径 | 为什么必须在私有目录 |
+|---|---|
+| `files/mmkv/wcx-payload-*.apk` | 模块 APK 在 `/data/adb/modules/`，untrusted_app 读不到；dex 只能从 app 私有目录加载 |
+| `.wcx-native/<payload>/<abi>/*.so` | Android 10+ 禁止从外部存储 `dlopen`；换 payload 时旧的解包目录会被清掉（每个约 4.4MB） |
+| `files/mmkv/wekit_prefs` | 原版 WCX 的配置（MMKV 目录就是微信 files），不是本注入器新增的 |
+
 ### 连续启动失败自动停用（self-heal）
 
 如果某个 feature/hook 让微信在启动阶段必崩，用户会进不去微信。现在有兜底：

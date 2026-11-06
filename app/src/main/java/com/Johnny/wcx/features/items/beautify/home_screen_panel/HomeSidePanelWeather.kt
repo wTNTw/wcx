@@ -587,8 +587,9 @@ internal class HomeSidePanelCityIndex(context: Context) {
      * 半截文件先删；解出来长度为 0 视为失败。
      */
     private fun copyDatabaseAssetOnce(): File? {
-        // 与模块其它数据保持一致，优先放外部数据目录（/storage/emulated/0/Android/data/<微信>/WCX）；
-        // 外部不可写（没权限 / sdcard 未就绪）时才退回微信私有 files 目录。
+        // 只在模块外部数据目录里放城市库（/storage/emulated/0/Android/data/<微信>/WCX），
+        // 和 logs / crashes / dex_cache 保持一致，不在微信私有目录留文件。
+        // 外部目录不可写（sdcard 未就绪等）时就当作「无城市库」：定位/搜索提示匹配失败，但不会崩。
         val directory = runCatching {
             val dir = File(com.Johnny.wcx.utils.fs.KnownPaths.moduleData.toFile(), ASSET_DIRECTORY)
             dir.mkdirs()
@@ -597,8 +598,8 @@ internal class HomeSidePanelCityIndex(context: Context) {
             probe.delete()
             dir
         }.getOrElse {
-            WeLogger.w(TAG, "外部数据目录不可写，城市库改放微信私有目录: ${it.message}")
-            File(appContext.filesDir, ASSET_DIRECTORY).apply { mkdirs() }
+            WeLogger.w(TAG, "外部数据目录不可写，城市库不可用: ${it.message}")
+            return null
         }
         val databaseFile = File(directory, ASSET_FILE_NAME)
         if (databaseFile.length() > 0L) return databaseFile
