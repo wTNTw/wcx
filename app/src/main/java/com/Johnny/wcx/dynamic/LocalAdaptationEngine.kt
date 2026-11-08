@@ -192,13 +192,27 @@ object LocalAdaptationEngine {
         WeLogger.i(TAG, "changes detected: versionChanged=$versionChanged, apkChanged=$apkChanged")
         state = EngineState.PENDING_CONFIRMATION
 
+        // APK 变了但版本号没变（微信热更新 / 同版本重打包）时，缓存里的 DexKit 描述符可能指向
+        // 已经不存在的方法 —— 之前就是这里没处理，导致 features 用旧签名 hook 时抛
+        // NoSuchMethodException（例如 禁用「转发截图」提示 的 y0->Pj(...)）。
+        // 清空缓存让本次启动重新解析；解析是后台进行的，失败也不会卡住微信。
+        if (apkChanged) {
+            runCatching {
+                DexCacheManager.clearAllCache()
+                WeLogger.w(TAG, "APK 已变更（版本号未变）→ 已清空 DexKit 缓存，本次启动重新解析")
+            }.onFailure { WeLogger.e(TAG, "清空 DexKit 缓存失败", it) }
+        }
+
         // 通知UI层需要用户确认
         val callback = adaptationConfirmCallback
         if (callback != null) {
             val message = buildChangeMessage()
             mainHandler.post { callback(message) }
         } else {
-            WeLogger.w(TAG, "no confirmation callback registered, adaptation pending")
+            // Zygisk 独立模式没有设置界面可确认（不装 APK），等下去就永远不会适配，
+            // 所以这里直接自动适配。
+            WeLogger.w(TAG, "no confirmation callback registered → 自动开始适配")
+            startAdaptation()
         }
     }
 

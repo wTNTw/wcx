@@ -28,7 +28,7 @@ import com.Johnny.wcx.ui.content.DefaultColumn
 import com.Johnny.wcx.ui.content.TextButton
 import com.Johnny.wcx.ui.utils.showComposeDialog
 import com.Johnny.wcx.utils.WeLogger
-import com.Johnny.wcx.utils.android.constructor
+import com.Johnny.wcx.utils.android.hookAllConstructors
 import kotlin.math.roundToInt
 
 @Feature(
@@ -73,9 +73,11 @@ object FloatingChatFooter : ClickableFeature(), IResolveDex {
     override fun onEnable() {
         val reflekt = ChatFooter::class.reflekt()
 
-        // Outline + elevation can be set immediately after construction (no LayoutParams needed)
-        ChatFooter::class.constructor.hookAfter {
-            applyDrawingStyle(thisObject as ChatFooter)
+        // Outline + elevation can be set immediately after construction (no LayoutParams needed)。
+        // 用「挂全部构造器」而不是写死 (Context, AttributeSet, int)：8.0.79 的 ChatFooter
+        // 没有这个签名，之前会抛 NoSuchElementException 让整个功能 enable 失败。
+        ChatFooter::class.hookAllConstructors { footer ->
+            applyDrawingStyle(footer)
         }
 
         // Side margins must wait until onAttachedToWindow: LayoutParams is set by the parent

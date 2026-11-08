@@ -106,7 +106,7 @@ import com.Johnny.wcx.ui.utils.iterable
 import com.Johnny.wcx.ui.utils.setLifecycleOwner
 import com.Johnny.wcx.ui.utils.showComposeDialog
 import com.Johnny.wcx.utils.WeLogger
-import com.Johnny.wcx.utils.android.constructor
+import com.Johnny.wcx.utils.android.hookAllConstructors
 import com.Johnny.wcx.utils.now
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
@@ -316,8 +316,15 @@ object ChatToolbar : ClickableFeature(), IResolveDex {
             }
         }
 
-        ChatFooter::class.constructor.hookAfter {
-            val chatFooter = thisObject as FrameLayout
+        // 挂 ChatFooter 的全部构造器（各版本签名不同，写死会发现不了构造器）
+        val hooked = ChatFooter::class.hookAllConstructors { footer -> installToolbar(footer) }
+        if (hooked == 0) {
+            WeLogger.e(TAG, "聊天工具栏安装失败（工具栏将不显示）：找不到 ChatFooter 的构造器")
+        }
+    }
+
+    private fun installToolbar(chatFooter: ChatFooter) {
+        run {
             val activity = chatFooter.context as Activity
 
             val lifecycleOwner = LifecycleOwnerProvider.getOrCreate(activity)
@@ -327,10 +334,10 @@ object ChatToolbar : ClickableFeature(), IResolveDex {
             if (linearLayout == null) {
                 // 微信调整了 ChatFooter 内部层级：跳过本次注入（不再 NPE 中断整个 hook）
                 WeLogger.w(TAG, "ChatFooter 层级变化，找不到注入容器（子节点数=${chatFooter.childCount}），本次跳过")
-                return@hookAfter
+                return
             }
             linearLayout.setLifecycleOwner(lifecycleOwner)
-            if (linearLayout.findViewWhich<View> { it is ComposeView } != null) return@hookAfter
+            if (linearLayout.findViewWhich<View> { it is ComposeView } != null) return
             activity.window.decorView.setLifecycleOwner(lifecycleOwner)
 
             linearLayout.addView(ComposeView(activity).apply {
@@ -398,7 +405,6 @@ object ChatToolbar : ClickableFeature(), IResolveDex {
             }, 0)
             WeLogger.i(TAG, "聊天工具栏已注入聊天页（容器子 View 数=${linearLayout.childCount}）")
         }
-        WeLogger.i(TAG, "聊天工具栏 hook 已安装（聊天页创建时注入）")
     }
 
     override fun onDisable() {
