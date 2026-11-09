@@ -36,48 +36,30 @@ object FeaturesLoader {
         if (outdatedItems.isNotEmpty())
             WeLogger.i(TAG, "found ${validItems.size} valid items, ${outdatedItems.size} outdated items")
 
-        // Load what we can from cache. Items with *some* missing keys are still partially loaded —
-        // their valid delegates work immediately; only the item itself is queued for re-resolution.
-        // 之前已经确认「当前微信版本下缓存不可能完整」的功能：不再弹窗，尽力用缓存里已解析的委托
-        // 把功能启动起来（缺的委托是 placeholder，相关 hook 自然不生效）。
+        // 只从缓存加载「完整」的条目；不完整的条目绝不启动 —— 缺的委托是 placeholder，
+        // 带着它启动会让 feature 里的 hook 拿到假方法/空数组（8.0.80 实测会 ArrayIndexOutOfBounds
+        // 甚至把微信界面搞白）。跳过只是该功能不生效，安全得多。
+        val (cacheFailedItems, partialItems) = loadDescriptorsFromCache(validItems)
+        val brokenFromCache = (cacheFailedItems + partialItems).distinct()
+
+        // 当前微信版本已经确认「凑不齐」的功能：跳过但不再弹窗。
+        // 记录按 版本号+APK 大小/mtime 指纹保存，换微信（升级）后自动失效重试。
         val knownUnavailableNames = runCatching {
             com.Johnny.wcx.dexkit.cache.DexUnavailableStore.items(HostInfo.application)
         }.getOrDefault(emptySet())
-        val (knownOutdated, actionableOutdated) = outdatedItems.partition { item ->
+        val allBrokenItems = (outdatedItems + brokenFromCache).distinct()
+        val (knownBroken, actionableBroken) = allBrokenItems.partition { item ->
             (item as? BaseFeature)?.displayName in knownUnavailableNames
         }
-        val knownRecovered = mutableListOf<IResolveDex>()
-        for (item in knownOutdated) {
-            runCatching {
-                val name = (item as BaseFeature).displayName
-                val cache = DexCacheManager.loadItemCache(item) ?: return@runCatching
-                val missing = item.loadFromCache(cache)
-                val total = item.dexDelegates.size
-                if (missing.size < total) {
-                    knownRecovered += item
-                    WeLogger.i(TAG, "已知不完整但仍可用：$name 恢复 ${total - missing.size}/$total 个委托")
-                } else {
-                    WeLogger.w(TAG, "已知不完整且无可用委托：$name")
-                }
-            }.onFailure { WeLogger.w(TAG, "加载已知不完整功能的缓存失败: $item", it) }
-        }
-
-        val (cacheFailedItems, partialItems) = loadDescriptorsFromCache(validItems + knownRecovered)
-        if (partialItems.isNotEmpty()) {
-            WeLogger.w(
+        if (knownBroken.isNotEmpty()) {
+            WeLogger.i(
                 TAG,
-                "${partialItems.size} 个功能只有部分委托能从缓存恢复，按已解析部分启动（不再弹适配窗）: " +
-                    partialItems.joinToString { (it as BaseFeature).displayName },
+                "跳过 ${knownBroken.size} 个当前微信版本不可用的功能（不再弹窗）: " +
+                    knownBroken.joinToString { (it as? BaseFeature)?.displayName ?: it.javaClass.simpleName },
             )
         }
-        val allBrokenItems = (actionableOutdated + cacheFailedItems)
-            .filterNot { it in knownRecovered }
-            .distinct()
-
-        // 当前微信版本已经确认「适配不了」的功能不再反复扫描/弹窗：直接跳过并打日志。
-        // 记录按 版本号+APK 大小/mtime 指纹保存，换微信（升级）后会自动失效重试。
-        if (allBrokenItems.isNotEmpty())
-            handleBrokenItems(allBrokenItems)
+        if (actionableBroken.isNotEmpty())
+            handleBrokenItems(actionableBroken)
 
         val elapsed = measureTime {
             allFeatures.forEach { feature ->
