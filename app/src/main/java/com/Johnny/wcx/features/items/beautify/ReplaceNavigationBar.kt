@@ -70,6 +70,7 @@ import com.Johnny.wcx.dexkit.dsl.dexMethod
 import com.Johnny.wcx.features.api.ui.WeMainActivityBeautifyApi
 import com.Johnny.wcx.features.core.ClickableFeature
 import com.Johnny.wcx.features.core.Feature
+import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.preferences.WePrefs.Companion.prefOption
 import com.Johnny.wcx.ui.content.AlertDialogContent
 import com.Johnny.wcx.ui.content.Button
@@ -140,8 +141,17 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
 
             val navigateToTab = { index: Int -> methodOnTabClick.invoke(tabsAdapter, index) }
 
-            val viewParent = viewPager.parent as ViewGroup
-            val bottomTabViewGroup = viewParent.getChildAt(1) as ViewGroup
+            val viewParent = viewPager.parent as? ViewGroup ?: run {
+                WeLogger.w("ReplaceNavigationBar", "mViewPager 没有父容器，跳过底部导航栏美化")
+                return@hookAfter
+            }
+            val bottomTabViewGroup = viewParent.getChildAt(1) as? ViewGroup ?: run {
+                WeLogger.w(
+                    "ReplaceNavigationBar",
+                    "底部 tab 容器结构变化（childCount=${viewParent.childCount}），跳过底部导航栏美化",
+                )
+                return@hookAfter
+            }
 
             // WeChat's original bottom tab (LauncherUIBottomTabView) is kept alive — we only
             // clear its children below — so its own OnClickListener (an `f8`/`r8` instance)
@@ -199,8 +209,8 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
             tabsAdapter.reflekt()
                 .firstMethod { name = "onPageScrolled" }
                 .hookBefore {
-                    val position = args[0] as Int
-                    val positionOffset = args[1] as Float
+                    val position = args.getOrNull(0) as? Int ?: return@hookBefore
+                    val positionOffset = args.getOrNull(1) as? Float ?: return@hookBefore
 
                     selectedPageIndexState.intValue = position
                     scrollOffsetState.floatValue = positionOffset
@@ -212,13 +222,13 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
             tabsAdapter.reflekt()
                 .firstMethod { name = "onPageSelected" }
                 .hookBefore {
-                    targetPageIndexState.intValue = args[0] as Int
+                    targetPageIndexState.intValue = args.getOrNull(0) as? Int ?: return@hookBefore
                 }
 
             tabsAdapter.reflekt()
                 .firstMethod { name = "onPageScrollStateChanged" }
                 .hookBefore {
-                    when (args[0] as Int) {
+                    when (args.getOrNull(0) as? Int ?: return@hookBefore) {
                         1 -> { // DRAGGING: finger is moving the pager
                             pageDidDrag = true
                             isSwipingState.value = true
@@ -524,25 +534,25 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
         }
 
         methodUpdateTabUnread.hookBefore {
-            val count = args[0] as Int
+            val count = args.getOrNull(0) as? Int ?: return@hookBefore
             unreadCountState.intValue = count
             result = null
         }
 
         methodUpdateFriendTabUnread.hookBefore {
-            val count = args[0] as Int
+            val count = args.getOrNull(0) as? Int ?: return@hookBefore
             finderUnreadCountState.intValue = count
             result = null
         }
 
         methodShowFriendPoint.hookBefore {
-            val show = args[0] as Boolean
+            val show = args.getOrNull(0) as? Boolean ?: return@hookBefore
             showFinderDotState.value = show
             result = null
         }
 
         methodUpdateContactTabUnread.hookBefore {
-            val count = args[0] as Int
+            val count = args.getOrNull(0) as? Int ?: return@hookBefore
             contactUnreadCountState.intValue = count
             result = null
         }
