@@ -608,7 +608,10 @@ object WeMessageApi : ApiFeature(), IResolveDex {
         if (HostInfo.versionCode >= WeChatVersions.MM_8_0_67 && !HostInfo.isHostGooglePlay ||
             HostInfo.versionCode >= WeChatVersions.MM_8_0_66_PLAY && HostInfo.isHostGooglePlay
         ) {
-            methodImgUploadFeatureServiceSendImage.find(dexKit) {
+            // 8.0.80 起该 matcher 会命中 2 个同签名的重载（xa0.w::Uj / xa0.w::a），
+            // 严格模式会抛 "Multiple methods found" → 整个 API/消息发送服务 适配失败。
+            // 这里取第一个命中并只打一条告警。
+            methodImgUploadFeatureServiceSendImage.find(dexKit, allowFailure = true) {
                 matcher {
                     declaredClass {
                         usingEqStrings("MicroMsg.ImgUpload.MsgImgFeatureService", "taskListener", "params")

@@ -6,6 +6,7 @@ import android.os.Handler
 import android.os.Looper
 import com.Johnny.wcx.constants.PackageNames
 import com.Johnny.wcx.dexkit.cache.DexCacheManager
+import com.Johnny.wcx.dexkit.cache.DexUnavailableStore
 import com.Johnny.wcx.dexkit.resolution.resolveAllDex
 import com.Johnny.wcx.features.core.FeaturesLoader
 import com.Johnny.wcx.features.core.FeaturesProvider
@@ -40,6 +41,9 @@ object LocalAdaptationEngine {
     private const val KEY_LAST_APK_MTIME = "last_apk_mtime"
     private const val KEY_ADAPTATION_COUNT = "adaptation_count"
     private const val KEY_LAST_ADAPTATION_TIME = "last_adaptation_time"
+    private const val KEY_RETRY_ATTEMPTS = "quiet_retry_attempts"
+    /** 静默重试上限，避免每次启动都跑 DexKit。 */
+    private const val MAX_QUIET_RETRIES = 2
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -186,6 +190,11 @@ object LocalAdaptationEngine {
         if (!versionChanged && !apkChanged && !lastVersion.isNullOrEmpty()) {
             WeLogger.i(TAG, "no changes detected, skipping adaptation")
             state = EngineState.COMPLETED
+            // 先把「扫过但仍凑不齐委托」的功能补进不可用清单（只读缓存，很快），
+            // 再对它们做一次静默重试。这样 FeaturesLoader 不会把它们当成需要弹窗的损坏项，
+            // 也就不会出现「适配 → 报异常 → 重启又要适配」的循环。
+            refreshIncompleteFromCache()
+            retryUnavailableQuietly()
             return
         }
 
@@ -280,14 +289,36 @@ object LocalAdaptationEngine {
         val scanSummary = withContext(Dispatchers.IO) {
             scanAllFeatures(dexKit)
         }
-        if (scanSummary.failedItems.isNotEmpty()) {
-            val failed = scanSummary.failedItems.joinToString { it }
-            throw IllegalStateException(
-                "Dex adaptation incomplete: ${scanSummary.failedItems.size}/${scanSummary.attemptedItems} failed: $failed"
+        // 有的功能在新微信版本上确实匹配不到（类/方法改了名），还有一种情况是解析没抛错、
+        // 但某些委托始终匹配不到，缓存永远不完整（8.0.80 的「朋友圈服务」）。
+        // 这两种都属于「该功能不可用」，**不是适配失败**。
+        // 以前这里直接抛异常，版本指纹不保存 → 每次启动都重新完整适配、每次都弹适配窗。
+        val incomplete = withContext(Dispatchers.IO) {
+            FeaturesProvider.ALL_HOOK_ITEMS
+                .filterIsInstance<com.Johnny.wcx.dexkit.abc.IResolveDex>()
+                .filter { item ->
+                    val name = (item as? com.Johnny.wcx.features.core.BaseFeature)?.displayName
+                        ?: item.javaClass.simpleName
+                    name !in scanSummary.failedItems && !DexCacheManager.isItemCacheValid(item)
+                }
+                .map { item ->
+                    (item as? com.Johnny.wcx.features.core.BaseFeature)?.displayName
+                        ?: item.javaClass.simpleName
+                }
+        }
+        val unavailable = (scanSummary.failedItems + incomplete).distinct()
+        if (unavailable.isNotEmpty()) {
+            WeLogger.w(
+                TAG,
+                "本轮适配有 ${unavailable.size}/${scanSummary.attemptedItems} 项在当前微信版本不可用" +
+                    "（已记录，不再重复弹窗）: " + unavailable.joinToString(),
             )
+            runCatching { DexUnavailableStore.mark(HostInfo.application, unavailable) }
+        } else {
+            runCatching { DexUnavailableStore.clear(HostInfo.application) }
         }
 
-        // 步骤 3: 保存版本信息 only after all resolvable features succeeded.
+        // 步骤 3: 保存版本信息（即使有不可用功能也保存，避免每次启动重复适配）。
         val currentVersion = "${HostInfo.versionName}${HostInfo.versionCode}"
         val apkFile = File(HostInfo.appInfo.sourceDir)
         val apkSize = if (apkFile.exists()) apkFile.length() else 0L
@@ -299,9 +330,81 @@ object LocalAdaptationEngine {
             .putLong(KEY_LAST_APK_MTIME, apkMtime)
             .putInt(KEY_ADAPTATION_COUNT, p.getInt(KEY_ADAPTATION_COUNT, 0) + 1)
             .putLong(KEY_LAST_ADAPTATION_TIME, System.currentTimeMillis())
+            .putInt(KEY_RETRY_ATTEMPTS, 0)
             .apply()
 
         WeLogger.i(TAG, "version info saved: $currentVersion")
+    }
+
+    /** 把「已经扫过、但当前微信版本凑不齐委托」的功能补进不可用清单（只读缓存元信息，很便宜）。 */
+    private fun refreshIncompleteFromCache() {
+        runCatching {
+            if (!com.Johnny.wcx.utils.TargetProcesses.isInMain) return
+            val context = HostInfo.application
+            val incomplete = FeaturesProvider.ALL_HOOK_ITEMS
+                .filterIsInstance<com.Johnny.wcx.dexkit.abc.IResolveDex>()
+                .filter { DexCacheManager.hasCacheFile(it) && !DexCacheManager.isItemCacheValid(it) }
+                .map { (it as com.Johnny.wcx.features.core.BaseFeature).displayName }
+            val existing = DexUnavailableStore.items(context)
+            val union = existing + incomplete
+            if (union != existing) {
+                DexUnavailableStore.mark(context, union)
+                WeLogger.i(TAG, "补齐不可用清单: ${(union - existing).joinToString()}（共 ${union.size} 项）")
+            }
+        }.onFailure { WeLogger.w(TAG, "刷新不可用清单失败", it) }
+    }
+
+    /**
+     * 对 DexUnavailableStore 里的功能静默重试（不弹窗）。
+     * 最多 [MAX_QUIET_RETRIES] 轮；成功后写缓存并移出清单，仍不完整的继续留着。
+     */
+    private fun retryUnavailableQuietly() {
+        if (!com.Johnny.wcx.utils.TargetProcesses.isInMain) return
+        val context = runCatching { HostInfo.application }.getOrNull() ?: return
+        val names = runCatching { DexUnavailableStore.items(context) }.getOrDefault(emptySet())
+        if (names.isEmpty()) return
+
+        val p = prefs ?: return
+        val attempts = p.getInt(KEY_RETRY_ATTEMPTS, 0)
+        if (attempts >= MAX_QUIET_RETRIES) {
+            WeLogger.i(TAG, "已静默重试 $attempts 次，跳过（可在设置里「重新适配」强制再来）")
+            return
+        }
+        p.edit().putInt(KEY_RETRY_ATTEMPTS, attempts + 1).apply()
+
+        scope.launch {
+            runCatching {
+                val dexKit = DexKit
+                val stillFailed = mutableSetOf<String>()
+                var resolved = 0
+                for (item in FeaturesProvider.ALL_HOOK_ITEMS
+                    .filterIsInstance<com.Johnny.wcx.dexkit.abc.IResolveDex>()) {
+                    val name = (item as? com.Johnny.wcx.features.core.BaseFeature)?.displayName
+                        ?: item.javaClass.simpleName
+                    if (name !in names) continue
+                    runCatching {
+                        item.resolveAllDex(dexKit)
+                        DexCacheManager.saveItemCache(item)
+                        if (DexCacheManager.isItemCacheValid(item)) {
+                            resolved++
+                            WeLogger.i(TAG, "静默重试成功: $name")
+                        } else {
+                            stillFailed += name
+                            WeLogger.w(TAG, "静默重试后缓存仍不完整: $name")
+                        }
+                    }.onFailure {
+                        stillFailed += name
+                        WeLogger.w(TAG, "静默重试仍失败: $name (${it.message})")
+                    }
+                }
+                DexUnavailableStore.mark(context, stillFailed)
+                WeLogger.i(
+                    TAG,
+                    "静默重试完成（第 ${attempts + 1}/$MAX_QUIET_RETRIES 轮）: " +
+                        "成功 $resolved，仍不可用 ${stillFailed.size}",
+                )
+            }.onFailure { WeLogger.w(TAG, "静默重试异常", it) }
+        }
     }
 
     /**

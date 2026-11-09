@@ -7,6 +7,7 @@ import com.Johnny.wcx.dexkit.cache.DexCacheManager
 import com.Johnny.wcx.features.api.ui.WeSettingsInjector
 import com.Johnny.wcx.ui.content.DexResolver
 import com.Johnny.wcx.ui.utils.showComposeDialog
+import com.Johnny.wcx.utils.HostInfo
 import com.Johnny.wcx.utils.TargetProcesses
 import com.Johnny.wcx.utils.VersionCompat
 import com.Johnny.wcx.utils.WeLogger
@@ -37,9 +38,44 @@ object FeaturesLoader {
 
         // Load what we can from cache. Items with *some* missing keys are still partially loaded —
         // their valid delegates work immediately; only the item itself is queued for re-resolution.
-        val cacheFailedItems = loadDescriptorsFromCache(validItems)
-        val allBrokenItems = (outdatedItems + cacheFailedItems).distinct()
+        // 之前已经确认「当前微信版本下缓存不可能完整」的功能：不再弹窗，尽力用缓存里已解析的委托
+        // 把功能启动起来（缺的委托是 placeholder，相关 hook 自然不生效）。
+        val knownUnavailableNames = runCatching {
+            com.Johnny.wcx.dexkit.cache.DexUnavailableStore.items(HostInfo.application)
+        }.getOrDefault(emptySet())
+        val (knownOutdated, actionableOutdated) = outdatedItems.partition { item ->
+            (item as? BaseFeature)?.displayName in knownUnavailableNames
+        }
+        val knownRecovered = mutableListOf<IResolveDex>()
+        for (item in knownOutdated) {
+            runCatching {
+                val name = (item as BaseFeature).displayName
+                val cache = DexCacheManager.loadItemCache(item) ?: return@runCatching
+                val missing = item.loadFromCache(cache)
+                val total = item.dexDelegates.size
+                if (missing.size < total) {
+                    knownRecovered += item
+                    WeLogger.i(TAG, "已知不完整但仍可用：$name 恢复 ${total - missing.size}/$total 个委托")
+                } else {
+                    WeLogger.w(TAG, "已知不完整且无可用委托：$name")
+                }
+            }.onFailure { WeLogger.w(TAG, "加载已知不完整功能的缓存失败: $item", it) }
+        }
 
+        val (cacheFailedItems, partialItems) = loadDescriptorsFromCache(validItems + knownRecovered)
+        if (partialItems.isNotEmpty()) {
+            WeLogger.w(
+                TAG,
+                "${partialItems.size} 个功能只有部分委托能从缓存恢复，按已解析部分启动（不再弹适配窗）: " +
+                    partialItems.joinToString { (it as BaseFeature).displayName },
+            )
+        }
+        val allBrokenItems = (actionableOutdated + cacheFailedItems)
+            .filterNot { it in knownRecovered }
+            .distinct()
+
+        // 当前微信版本已经确认「适配不了」的功能不再反复扫描/弹窗：直接跳过并打日志。
+        // 记录按 版本号+APK 大小/mtime 指纹保存，换微信（升级）后会自动失效重试。
         if (allBrokenItems.isNotEmpty())
             handleBrokenItems(allBrokenItems)
 
@@ -83,8 +119,18 @@ object FeaturesLoader {
      * - 有任意 key 缺失的 item 加入返回列表，等待 DexKit 重新扫描。
      * - 缓存文件整体读取失败 → 删除损坏文件，整个 item 加入返回列表。
      */
-    private fun loadDescriptorsFromCache(items: List<IResolveDex>): List<IResolveDex> {
+    /**
+     * 从缓存加载描述符。
+     *
+     * 返回 (完全没有可用缓存的, 只加载了一部分的)。
+     *
+     * 两者要区别对待：**部分加载**的 item 里已经解析出来的委托是好的，功能可以先按这些委托
+     * 启动；以前把这种情况也算作「损坏」，于是每次启动都把它们丢进 DEX 适配弹窗 —— 8.0.80 上
+     * 「朋友圈服务」就卡在这个循环里（它的某些委托在这个版本匹配不到，缓存永远不完整）。
+     */
+    private fun loadDescriptorsFromCache(items: List<IResolveDex>): Pair<List<IResolveDex>, List<IResolveDex>> {
         val failedItems = mutableListOf<IResolveDex>()
+        val partialItems = mutableListOf<IResolveDex>()
 
         for (item in items) {
             val path = (item as BaseFeature).displayName
@@ -102,9 +148,12 @@ object FeaturesLoader {
                     val total = item.dexDelegates.size
                     val loaded = total - missingKeys.size
                     WeLogger.w(TAG, "$path: loaded $loaded/$total delegates from cache, missing: $missingKeys")
-                    failedItems += item
-                    // 已命中的委托此时已经可用；hook 仍然跳过（见 loadFeatures），
-                    // 等 DexKit 把缺失的部分补齐、cache 更新后下次启动即完整。
+                    if (loaded > 0) {
+                        // 部分可用：按已解析的委托正常启动，不再反复弹 DEX 适配窗。
+                        partialItems += item
+                    } else {
+                        failedItems += item
+                    }
                 }
             } catch (e: Exception) {
                 WeLogger.e(TAG, "cache load failed for $path", e)
@@ -113,7 +162,7 @@ object FeaturesLoader {
             }
         }
 
-        return failedItems
+        return failedItems to partialItems
     }
 
     private fun handleBrokenItems(brokenItems: List<IResolveDex>) {

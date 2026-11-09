@@ -55,6 +55,15 @@ object DexCacheManager {
      * 2. methodHash 匹配（检测代码变化）
      * 3. [item] 的每个委托 key 都有非空值
      */
+    /**
+     * 该功能是否**已经尝试过**适配（缓存文件存在，但可能不完整）。
+     * 用来区分「从没扫过的新功能」和「扫过但当前微信版本凑不齐」的功能。
+     */
+    fun hasCacheFile(item: IResolveDex): Boolean {
+        if (item !is BaseFeature) unreachable()
+        return getCacheFile(item.name).exists()
+    }
+
     fun isItemCacheValid(item: IResolveDex): Boolean {
         if (item !is BaseFeature) unreachable()
 
