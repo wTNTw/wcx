@@ -11,9 +11,9 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.ResultReceiver
-import com.tencent.mm.plugin.multitalk.ui.MultiTalkMainUI
 import com.tencent.mm.plugin.voip.ui.VideoActivity
 import dev.ujhhgtg.reflekt.reflekt
+import dev.ujhhgtg.reflekt.utils.toClass
 import com.Johnny.wcx.activity.PipVoipActivity
 import com.Johnny.wcx.constants.PackageNames
 import com.Johnny.wcx.dexkit.abc.IResolveDex
@@ -178,8 +178,13 @@ object PipVoip : SwitchFeature(), IResolveDex {
         }
     }
 
+    /**
+     * 旧版（<=8.0.79）多人通话会话。
+     * 8.0.80 把 MultiTalkMainUI 物理删除了，所以这里**不能**再出现该类的符号引用
+     * （否则类加载阶段就 NoClassDefFoundError，哪怕逻辑上没走到），一律用 Activity + 反射。
+     */
     private class GroupSession(
-        val groupActivity: MultiTalkMainUI,
+        val groupActivity: Activity,
     ) : Session(groupActivity) {
         override val micMuted: Boolean
             get() {
@@ -410,7 +415,7 @@ object PipVoip : SwitchFeature(), IResolveDex {
 
     private val fieldMultiTalkViewModel by dexField(allowFailure = true) {
         matcher {
-            declaredClass(runCatching { MultiTalkMainUI::class.java }.getOrDefault(Any::class.java))
+            declaredClass(runCatching { WE_CHAT_MULTI_TALK_MAIN_UI.toClass() }.getOrDefault(Any::class.java))
             type(classMultiTalkViewModel.clazz)
         }
     }
@@ -436,7 +441,7 @@ object PipVoip : SwitchFeature(), IResolveDex {
 
     private val methodMultiTalkMinimize by dexMethod(allowFailure = true) {
         matcher {
-            declaredClass(runCatching { MultiTalkMainUI::class.java }.getOrDefault(Any::class.java))
+            declaredClass(runCatching { WE_CHAT_MULTI_TALK_MAIN_UI.toClass() }.getOrDefault(Any::class.java))
             paramCount = 0
             returnType = "void"
             usingEqStrings("onMiniMultiTalk")
@@ -445,7 +450,7 @@ object PipVoip : SwitchFeature(), IResolveDex {
 
     private val methodMultiTalkExit by dexMethod(allowFailure = true) {
         matcher {
-            declaredClass(runCatching { MultiTalkMainUI::class.java }.getOrDefault(Any::class.java))
+            declaredClass(runCatching { WE_CHAT_MULTI_TALK_MAIN_UI.toClass() }.getOrDefault(Any::class.java))
             paramCount = 0
             returnType = "void"
             usingEqStrings("onExitMultiTalk")
@@ -532,19 +537,24 @@ object PipVoip : SwitchFeature(), IResolveDex {
         }
 
         if (multiTalkMainUiExists) {
-            MultiTalkMainUI::class.reflekt().firstMethod {
-                name = "onCreate"
-                parameterCount = 1
-            }.hookAfter {
-                // 8.0.77 加固: as? + 空返
-                val activity = thisObject as? MultiTalkMainUI ?: return@hookAfter
-                sessions[activity] = GroupSession(activity)
-            }
-            MultiTalkMainUI::class.reflekt().firstMethod {
-                name = "onDestroy"
-                parameterCount = 0
-            }.hookBefore {
-                removeSession(thisObject as? MultiTalkMainUI ?: return@hookBefore)
+            runCatching {
+                val multiTalkClass = WE_CHAT_MULTI_TALK_MAIN_UI.toClass()
+                multiTalkClass.reflekt().firstMethodOrNull {
+                    name = "onCreate"
+                    parameterCount = 1
+                }?.hookAfter {
+                    val activity = thisObject as? Activity ?: return@hookAfter
+                    if (activity.javaClass.name != WE_CHAT_MULTI_TALK_MAIN_UI) return@hookAfter
+                    sessions[activity] = GroupSession(activity)
+                }
+                multiTalkClass.reflekt().firstMethodOrNull {
+                    name = "onDestroy"
+                    parameterCount = 0
+                }?.hookBefore {
+                    removeSession(thisObject as? Activity ?: return@hookBefore)
+                }
+            }.onFailure {
+                WeLogger.w(TAG, "MultiTalkMainUI 已不可用（8.0.80+ 换成 Flutter 实现），跳过旧版多人通话 Hook", it)
             }
         }
 
@@ -606,8 +616,9 @@ object PipVoip : SwitchFeature(), IResolveDex {
 
         if (!methodMultiTalkMinimize.isPlaceholder) {
             methodMultiTalkMinimize.hookBefore {
-                // 8.0.77 加固: as? + 空返
-                val activity = thisObject as? MultiTalkMainUI ?: return@hookBefore
+                // 8.0.77 加固: as? + 空返（8.0.80 该类已删除，只能用 Activity + 类名判断）
+                val activity = thisObject as? Activity ?: return@hookBefore
+                if (activity.javaClass.name != WE_CHAT_MULTI_TALK_MAIN_UI) return@hookBefore
                 sessions[activity]?.enterPip() ?: WeLogger.w(TAG, "no session for $activity, leaving wechat alone")
                 try {
                     // 仅当原方法返回 void 时才设置 result = null
@@ -627,7 +638,9 @@ object PipVoip : SwitchFeature(), IResolveDex {
         // 8.0.77 适配: MultiTalkMainUI 类缺失时先短路, 避免 is 检查触发 NoClassDefFoundError
         Activity::class.reflekt().firstMethod { name = "onUserLeaveHint" }.hookBefore {
             val activity = thisObject
-            if (multiTalkMainUiExists && activity is MultiTalkMainUI) {
+            if (multiTalkMainUiExists && activity is Activity &&
+                activity.javaClass.name == WE_CHAT_MULTI_TALK_MAIN_UI
+            ) {
                 sessions[activity]?.enterPip() ?: WeLogger.w(TAG, "no session for $activity, leaving wechat alone")
             }
             // 8.0.80+ 多人通话：仅在 VoIPMP 悬浮窗存活（= 正在通话）时接管，否则立即返回

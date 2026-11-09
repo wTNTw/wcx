@@ -127,7 +127,9 @@ object SendSecMsg : ClickableFeature(), IResolveDex {
 
     override fun onEnable() {
         methodInsertMessage.hookBefore {
-            val msgInfo = MessageInfo(args[0]!!)
+            // 8.0.80 实测该方法变成 0 参 → 直接 args[0] 会 ArrayIndexOutOfBounds（日志里 25 次）
+            val rawMsgInfo = args.getOrNull(0) ?: return@hookBefore
+            val msgInfo = MessageInfo(rawMsgInfo)
 
             // 只处理自己发送的文本消息 (isSend=1, type=1)
             if (msgInfo.isSend != 1 || msgInfo.typeCode != 1) return@hookBefore
@@ -140,7 +142,7 @@ object SendSecMsg : ClickableFeature(), IResolveDex {
             if (!shouldInject) return@hookBefore
 
             // z=false: 只改内存 msgsource, 随入库方法写入
-            methodMergeSecNode.method.invoke(null, args[0], SEC_XML, false)
+            methodMergeSecNode.method.invoke(null, rawMsgInfo, SEC_XML, false)
         }
 
         WeChatInputBarMenuApi.methodSendMessage.hookBefore {
