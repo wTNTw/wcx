@@ -671,10 +671,10 @@ object HideContacts : ClickableFeature(), IResolveDex, WeChatInputBarApi.IInputB
         }
 
         method.hookBefore {
-            val eventType = args[0] as? Int ?: return@hookBefore
+            val eventType = args.getOrNull(0) as? Int ?: return@hookBefore
             if (eventType != 3) return@hookBefore
             if (temporarilyShown) return@hookBefore
-            val talker = args[2] as? String ?: return@hookBefore
+            val talker = args.getOrNull(2) as? String ?: return@hookBefore
             if (talker.isEmpty()) return@hookBefore
             if (talker !in hiddenContacts) return@hookBefore
 
@@ -727,7 +727,7 @@ object HideContacts : ClickableFeature(), IResolveDex, WeChatInputBarApi.IInputB
         }
 
         methodPatMsgInsert.hookBefore {
-            val fromUser = args[1] as? String ?: return@hookBefore
+            val fromUser = args.getOrNull(1) as? String ?: return@hookBefore
             if (!isHiddenNow(fromUser)) return@hookBefore
 
             WeLogger.d(TAG, "suppressed a pat message from a hidden contact")

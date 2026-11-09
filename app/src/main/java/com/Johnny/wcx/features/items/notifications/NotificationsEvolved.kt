@@ -182,7 +182,7 @@ object NotificationsEvolved : SwitchFeature(), IResolveDex {
         // x.d → m0.a → e0.b → Notification.Builder.build() all run synchronously on
         // this thread, so the build() hook below reads it back via the ThreadLocal.
         methodDealNotify.hookBefore {
-            currentTalker.set(args[1] as? String)
+            currentTalker.set(args.getOrNull(1) as? String)
         }
 
         Notification.Builder::class.reflekt()
@@ -361,7 +361,7 @@ object NotificationsEvolved : SwitchFeature(), IResolveDex {
                 .hookBeforeDirectly {
                     val convWxId = currentTalker.get()
                     if (convWxId != null) {
-                        val n = args[1] as? Notification
+                        val n = args.getOrNull(1) as? Notification
                         if (n != null && n.channelId == "message_channel_new_id") {
                             val origId = args[0] as Int
                             args[0] = convWxId.hashCode()
@@ -377,7 +377,7 @@ object NotificationsEvolved : SwitchFeature(), IResolveDex {
                 .hookBeforeDirectly {
                     val convWxId = currentTalker.get()
                     if (convWxId != null) {
-                        val n = args[2] as? Notification
+                        val n = args.getOrNull(2) as? Notification
                         if (n != null && n.channelId == "message_channel_new_id") {
                             val origId = args[1] as Int
                             args[1] = convWxId.hashCode()

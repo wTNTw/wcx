@@ -39,7 +39,7 @@ object HideHomeScreenSwipeDownPage : SwitchFeature() {
                     parameterCount = 3
                 }
                 .hookBefore {
-                    val view = args[0] as? View ?: return@hookBefore
+                    val view = args.getOrNull(0) as? View ?: return@hookBefore
                     val className = view.javaClass.name
                     if (!className.contains("TaskBar")) return@hookBefore
 
@@ -80,7 +80,7 @@ object HideHomeScreenSwipeDownPage : SwitchFeature() {
                     if (!isActive) return@hookBefore
                     val v = thisObject as? View ?: return@hookBefore
                     if (!isPullContainer(v)) return@hookBefore
-                    val ev = args[0] as? MotionEvent ?: return@hookBefore
+                    val ev = args.getOrNull(0) as? MotionEvent ?: return@hookBefore
                     val id = System.identityHashCode(v)
                     when (ev.actionMasked) {
                         MotionEvent.ACTION_DOWN -> {
@@ -116,7 +116,7 @@ object HideHomeScreenSwipeDownPage : SwitchFeature() {
                     if (!isActive) return@hookBefore
                     val v = thisObject as? ViewGroup ?: return@hookBefore
                     if (!isPullContainer(v)) return@hookBefore
-                    val ev = args[0] as? MotionEvent ?: return@hookBefore
+                    val ev = args.getOrNull(0) as? MotionEvent ?: return@hookBefore
                     val id = System.identityHashCode(v)
                     when (ev.actionMasked) {
                         MotionEvent.ACTION_DOWN -> {

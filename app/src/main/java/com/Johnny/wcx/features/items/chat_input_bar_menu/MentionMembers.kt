@@ -254,7 +254,9 @@ object MentionMembers : SwitchFeature(), IResolveDex {
 
     override fun onEnable() {
         methodInsertMessage.hookBefore {
-            val msgInfo = MessageInfo(args[0]!!)
+            // 8.0.80 起该方法可能没有参数（实测 args.length=0 → AIOOBE）
+            val rawMsgInfo = args.getOrNull(0) ?: return@hookBefore
+            val msgInfo = MessageInfo(rawMsgInfo)
 
             // 只处理自己发送的文本消息 (isSend=1, type=1)
             if (msgInfo.isSend != 1 || msgInfo.typeCode != 1) return@hookBefore
@@ -269,7 +271,7 @@ object MentionMembers : SwitchFeature(), IResolveDex {
             // z=false: 只改内存 msgsource, 随入库方法写入
             methodMergeMsgSourceNode.method.invoke(
                 null,
-                args[0],
+                rawMsgInfo,
                 "<atuserlist><![CDATA[${pending.second}]]></atuserlist>",
                 false,
             )

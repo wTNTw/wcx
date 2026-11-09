@@ -190,7 +190,7 @@ object VirtualVoipVideo : ClickableFeature(), IResolveDex {
 
                 WeLogger.i(TAG, "should intercept Camera::setPreviewTexture, starting virtual video...")
 
-                val targetTexture = args[0] as? SurfaceTexture? ?: return@hookBefore
+                val targetTexture = args.getOrNull(0) as? SurfaceTexture? ?: return@hookBefore
 
                 args[0] = dummySurfaceTexture
                 startVirtualVideo(
@@ -205,7 +205,7 @@ object VirtualVoipVideo : ClickableFeature(), IResolveDex {
                 parameters(BInt, Camera.CameraInfo::class)
             }.hookAfter {
                 if (!shouldInterceptCamera) return@hookAfter
-                val info = args[1] as? Camera.CameraInfo ?: return@hookAfter
+                val info = args.getOrNull(1) as? Camera.CameraInfo ?: return@hookAfter
 
                 if (isVideoPortrait) {
                     val isFront = info.facing == Camera.CameraInfo.CAMERA_FACING_FRONT
@@ -243,7 +243,7 @@ object VirtualVoipVideo : ClickableFeature(), IResolveDex {
         CameraCharacteristics::class.firstMethod { name = "get" }.hookAfter {
             if (camera2HookBypass.get()!!) return@hookAfter
             if (!shouldInterceptCamera) return@hookAfter
-            val key = args[0] as? CameraCharacteristics.Key<*>? ?: return@hookAfter
+            val key = args.getOrNull(0) as? CameraCharacteristics.Key<*>? ?: return@hookAfter
 
             if (key == CameraCharacteristics.SENSOR_ORIENTATION) {
                 if (isVideoPortrait) {

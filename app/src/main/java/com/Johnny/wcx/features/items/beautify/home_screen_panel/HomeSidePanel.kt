@@ -195,7 +195,7 @@ object HomeSidePanel : SwitchFeature() {
             pendingHostCancel.remove()
             val pager = thisObject as? WxViewPager ?: return@hookBefore
             val session = sessions[pager]?.get() ?: return@hookBefore
-            val event = args[0] as? MotionEvent ?: return@hookBefore
+            val event = args.getOrNull(0) as? MotionEvent ?: return@hookBefore
             when (session.onPagerTouch(event)) {
                 PagerTouchResult.PASS -> Unit
                 PagerTouchResult.CANCEL_HOST -> {
@@ -207,7 +207,7 @@ object HomeSidePanel : SwitchFeature() {
             }
         }
         dispatchTouchEventMethod.hookAfter {
-            val event = args[0] as? MotionEvent ?: return@hookAfter
+            val event = args.getOrNull(0) as? MotionEvent ?: return@hookAfter
             val pending = pendingHostCancel.get() ?: return@hookAfter
             if (pending.event !== event) return@hookAfter
             event.action = pending.originalAction

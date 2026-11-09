@@ -37,7 +37,7 @@ object RedirectDownloadPath : ClickableFeature(), IResolveDex {
 
     override fun onEnable() {
         methodDownloadFile.hookBefore {
-            val type = args[0] as? String? ?: return@hookBefore
+            val type = args.getOrNull(0) as? String? ?: return@hookBefore
             if (type != "attachment") return@hookBefore
             result = ensureSaveDir()
         }

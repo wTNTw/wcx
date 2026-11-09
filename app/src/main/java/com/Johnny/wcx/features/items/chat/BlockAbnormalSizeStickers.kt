@@ -11,7 +11,7 @@ object BlockAbnormalSizeStickers : SwitchFeature(), IResolveDex {
 
     override fun onEnable() {
         ctorMmWxgfDrawable.hookBefore {
-            val inputBytes = args[0] as? ByteArray? ?: return@hookBefore
+            val inputBytes = args.getOrNull(0) as? ByteArray? ?: return@hookBefore
             val magicBytes = "wxgf".toByteArray()
 
             val isWxgf = inputBytes.size >= magicBytes.size &&

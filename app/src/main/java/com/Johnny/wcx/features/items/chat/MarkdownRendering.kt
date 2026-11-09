@@ -124,7 +124,7 @@ object MarkdownRendering : ClickableFeature(), IResolveDex {
                     if (!(msgInfo.type?.isText ?: false)) return@runCatching
                     val isSelfSender = msgInfo.isSelfSender
 
-                    val canvas = args[0] as? Canvas ?: return@runCatching
+                    val canvas = args.getOrNull(0) as? Canvas ?: return@runCatching
                     val context = neatTextView.context
 
                     val isDarkMode = context.isDarkMode

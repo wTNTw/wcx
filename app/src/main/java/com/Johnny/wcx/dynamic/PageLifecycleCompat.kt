@@ -87,7 +87,7 @@ object PageLifecycleCompat {
                 Intent::class.java,
                 object : HookCallback() {
                     override fun beforeHookedMethod(param: HookParam) {
-                        val intent = param.args[0] as? Intent ?: return
+                        val intent = param.args.getOrNull(0) as? Intent ?: return
                         val component = intent.component ?: return
 
                         // 判断是否为模块 Activity
@@ -108,7 +108,7 @@ object PageLifecycleCompat {
                 android.os.Bundle::class.java,
                 object : HookCallback() {
                     override fun beforeHookedMethod(param: HookParam) {
-                        val intent = param.args[0] as? Intent ?: return
+                        val intent = param.args.getOrNull(0) as? Intent ?: return
                         val component = intent.component ?: return
 
                         if (component.className.startsWith("com.Johnny.wcx")) {

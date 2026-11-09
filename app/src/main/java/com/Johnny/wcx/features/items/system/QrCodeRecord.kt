@@ -75,7 +75,7 @@ object QrCodeRecord : ClickableFeature(), IResolveDex {
 
     override fun onEnable() {
         methodQBarString.hookBefore {
-            val rawUrl = args[1] as? String? ?: return@hookBefore
+            val rawUrl = args.getOrNull(1) as? String? ?: return@hookBefore
             handleUrl(rawUrl)
         }
     }

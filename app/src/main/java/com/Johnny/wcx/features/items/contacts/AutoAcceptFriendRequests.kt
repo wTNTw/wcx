@@ -235,9 +235,9 @@ object AutoAcceptFriendRequests : ClickableFeature(), IResolveDex,
                 ctor.hookAfter {
                     if (args.size < 3) return@hookAfter
                     if (!masterEnabled) return@hookAfter
-                    val opcode = args[0] as? Int ?: return@hookAfter
+                    val opcode = args.getOrNull(0) as? Int ?: return@hookAfter
                     if (opcode != OPCODE_VERIFY_ACCEPT && opcode != 2) return@hookAfter
-                    val arg1 = (args[1] as? String)?.takeIf { it.isNotBlank() } ?: return@hookAfter
+                    val arg1 = (args.getOrNull(1) as? String)?.takeIf { it.isNotBlank() } ?: return@hookAfter
                     WeLogger.i(TAG, "friend request accepted via ctor(8.0.77): arg1=$arg1")
                     if (sendWelcome && welcomeText.isNotBlank()) {
                         val targetWxId = if (arg1.startsWith("v2_")) {
@@ -271,13 +271,13 @@ object AutoAcceptFriendRequests : ClickableFeature(), IResolveDex,
                     // NetSceneVerifyUser 接受方法参数布局不同，先防护再取参。
                     if (args.size < 3) return@hookAfter
                     if (!masterEnabled) return@hookAfter
-                    val opcode = args[0] as? Int ?: return@hookAfter
+                    val opcode = args.getOrNull(0) as? Int ?: return@hookAfter
                     // 8.0.76: MM_VERIFYUSER_VERIFYOK == 1；旧版接受 opcode == 2
                     if (opcode != OPCODE_VERIFY_ACCEPT && opcode != 2) return@hookAfter
 
                     // 8.0.76: args[1] = userId(encryptUsername), args[2] = ticket
                     // 旧版: args[1] = verifyContent("v2_encrypt@ticket@scene"), args[2] = verifyScene
-                    val arg1 = (args[1] as? String)?.takeIf { it.isNotBlank() } ?: return@hookAfter
+                    val arg1 = (args.getOrNull(1) as? String)?.takeIf { it.isNotBlank() } ?: return@hookAfter
 
                     WeLogger.i(TAG, "friend request accepted via verify: arg1=$arg1")
 
@@ -306,11 +306,11 @@ object AutoAcceptFriendRequests : ClickableFeature(), IResolveDex,
                     // 旧版入口保留：8.0.76+ 接受 opcode == 1 (MM_VERIFYUSER_VERIFYOK)，旧版 == 2
                     if (args.size < 3) return@hookAfter
                     if (!masterEnabled) return@hookAfter
-                    val opcode = args[0] as? Int ?: return@hookAfter
+                    val opcode = args.getOrNull(0) as? Int ?: return@hookAfter
                     if (opcode != OPCODE_VERIFY_ACCEPT && opcode != 2) return@hookAfter
 
-                    val verifyContent = (args[1] as? String)?.takeIf { it.isNotBlank() } ?: return@hookAfter
-                    val verifyScene = (args[2] as? String)?.takeIf { it.isNotBlank() } ?: return@hookAfter
+                    val verifyContent = (args.getOrNull(1) as? String)?.takeIf { it.isNotBlank() } ?: return@hookAfter
+                    val verifyScene = (args.getOrNull(2) as? String)?.takeIf { it.isNotBlank() } ?: return@hookAfter
 
                     WeLogger.i(TAG, "friend request accepted via legacy method: scene=$verifyScene")
 

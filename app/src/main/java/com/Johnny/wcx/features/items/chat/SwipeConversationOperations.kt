@@ -199,7 +199,7 @@ object SwipeConversationOperations : ClickableFeature(), IResolveDex {
         adapter.reflekt().firstMethod { name = "getView"; parameterCount = 3 }
             .hookAfter {
                 val view = result as? View ?: return@hookAfter
-                val position = args[0] as? Int ?: return@hookAfter
+                val position = args.getOrNull(0) as? Int ?: return@hookAfter
 
                 // getItem(position) -> com.tencent.mm.storage.m3(rconversation model).
                 val conversation = runCatching {

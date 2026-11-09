@@ -84,7 +84,7 @@ object DisplayRedPacketDetails : SwitchFeature(), IResolveDex {
             }
 
             method.hookBefore {
-                val jsonObject = args[2] as? JSONObject ?: return@hookBefore
+                val jsonObject = args.getOrNull(2) as? JSONObject ?: return@hookBefore
                 runCatching {
                     processRedPacketJson(jsonObject)
                 }.onFailure {

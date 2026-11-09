@@ -61,7 +61,7 @@ object WeAuthApi : ApiFeature(), IResolveDex {
                     try {
                         val errType = args[0] as Int
                         val errCode = args[1] as Int
-                        val errMsg = args[2] as? String
+                        val errMsg = args.getOrNull(2) as? String
                         val scene = args[3]
 
                         if (errType == 0 && errCode == 0 && scene != null) {

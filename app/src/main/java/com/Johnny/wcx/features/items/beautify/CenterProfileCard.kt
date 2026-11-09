@@ -106,7 +106,7 @@ object CenterProfileCard : ClickableFeature(), IResolveDex {
 
     override fun onEnable() {
         methodBindAccountInfo.hookAfter {
-            val root = args[0] as? ViewGroup ?: return@hookAfter
+            val root = args.getOrNull(0) as? ViewGroup ?: return@hookAfter
             root.post {
                 runCatching { applyCenterCard(root) }
                     .onFailure { WeLogger.e(TAG, "failed to center account info card", it) }

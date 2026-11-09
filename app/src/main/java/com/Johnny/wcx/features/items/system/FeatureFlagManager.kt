@@ -198,7 +198,7 @@ object FeatureFlagManager : ClickableFeature(), IResolveDex {
     override fun onEnable() {
         methodRepairerConfigApiGet.hookBefore {
             try {
-                val key = args[0] as? String ?: return@hookBefore
+                val key = args.getOrNull(0) as? String ?: return@hookBefore
                 val override = getOverrides()[key] ?: return@hookBefore
                 // 仅当 override.value 类型与原方法返回类型一致时才设置 result
                 if (member is java.lang.reflect.Method) {

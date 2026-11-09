@@ -72,9 +72,9 @@ object NoCompressUploadedImages : ClickableFeature(), IResolveDex {
     override fun onEnable() {
         methodCreatePic.hookBefore {
             if (selectedMode == MODE_CONVERT) {
-                val str6 = args[0] as? String ?: ""
-                val str8 = args[1] as? String ?: ""
-                val str = args[2] as? String ?: ""
+                val str6 = args.getOrNull(0) as? String ?: ""
+                val str8 = args.getOrNull(1) as? String ?: ""
+                val str = args.getOrNull(2) as? String ?: ""
                 val strConcat = str6 + str
 
                 val resultBool = methodConvertImg2WxamWithoutZip.method.invoke(null, str8, strConcat) as? Boolean ?: false
@@ -84,10 +84,10 @@ object NoCompressUploadedImages : ClickableFeature(), IResolveDex {
 
         methodCreatePic.hookAfter {
             if (selectedMode == MODE_COPY) {
-                val str11 = args[0] as? String ?: ""
-                val str13 = args[1] as? String ?: ""
-                val str = args[2] as? String ?: ""
-                val isUpload = args[3] as? Boolean ?: false
+                val str11 = args.getOrNull(0) as? String ?: ""
+                val str13 = args.getOrNull(1) as? String ?: ""
+                val str = args.getOrNull(2) as? String ?: ""
+                val isUpload = args.getOrNull(3) as? Boolean ?: false
 
                 if (isUpload) {
                     val src = str13.asPath

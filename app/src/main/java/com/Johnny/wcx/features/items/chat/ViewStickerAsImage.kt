@@ -53,7 +53,7 @@ object ViewStickerAsImage : SwitchFeature(), IResolveDex {
     override fun onEnable() {
         methodEmojiClickEntry.hookBefore {
             val clickedView = args[0] as View
-            val hostMessage = args[2]!!
+            val hostMessage = args.getOrNull(2) ?: return@hookBefore
             val messageInfo = MessageInfo(hostMessage)
             if (messageInfo.type?.isSticker != true) return@hookBefore
 

@@ -168,7 +168,7 @@ object MessageEntranceAnimation : ClickableFeature(), IResolveDex {
         methodChattingAdapterOnBindViewHolder.hookAfter {
             val adapter = thisObject!!
             // 绑定方法参数在所有目标版本均为 (ViewHolder, int)
-            val holder = args[0]!!
+            val holder = args.getOrNull(0) ?: return@hookAfter
             val position = args[1] as Int
 
             // RecyclerView.ViewHolder.itemView (公开字段, 位于父类), 跨版本稳定

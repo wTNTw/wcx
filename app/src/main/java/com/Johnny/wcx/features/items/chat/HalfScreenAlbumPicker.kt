@@ -271,8 +271,8 @@ object HalfScreenAlbumPicker : ClickableFeature() {
             parameters(int, int)
         }.hookBeforeDirectly {
             if (thisObject !== picker) return@hookBeforeDirectly
-            val enter = args[0] as? Int ?: return@hookBeforeDirectly
-            val exit = args[1] as? Int ?: return@hookBeforeDirectly
+            val enter = args.getOrNull(0) as? Int ?: return@hookBeforeDirectly
+            val exit = args.getOrNull(1) as? Int ?: return@hookBeforeDirectly
             if (enter == 0 && exit == 0) return@hookBeforeDirectly
             slideInTransition = enter to exit
             WeLogger.d(TAG, "captured picker transition: enter=$enter exit=$exit")

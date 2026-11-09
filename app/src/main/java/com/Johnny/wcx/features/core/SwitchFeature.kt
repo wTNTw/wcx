@@ -26,9 +26,14 @@ abstract class SwitchFeature : BaseFeature() {
 
     final override fun startup() {
         if (!shouldLoadInCurrentProcess) return
+        // 调试开关：`adb shell setprop debug.wcx.enable_all 1` + 重启微信 = 忽略开关全开，
+        // 用来一次性收集所有功能在新版微信上的运行期错误（排错/适配用，默认不生效）。
+        if (com.Johnny.wcx.utils.DebugFlags.enableAllFeatures) _isEnabled = true
         // 「密友功能」分类有总开关：关掉总开关时整个分类都不加载（各功能自身开关状态保留）。
         if (CATEGORY_WITH_MASTER_SWITCH in categories && !Preferences.hiddenContactsMasterEnabled) return
-        _isEnabled = WePrefs.getBoolOrDef(name, defaultEnabled)
+        if (!com.Johnny.wcx.utils.DebugFlags.enableAllFeatures) {
+            _isEnabled = WePrefs.getBoolOrDef(name, defaultEnabled)
+        }
         if (shouldEnableOnStartup) enable()
     }
 

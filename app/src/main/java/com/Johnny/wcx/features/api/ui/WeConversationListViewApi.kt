@@ -120,7 +120,7 @@ object WeConversationListViewApi : ApiFeature(), IResolveDex {
             // 8.0.77 加固: 异步绑定路径上 result/thisObject 可能为 null, 直接放行避免 NPE 刷日志
             val row = result as? View ?: return@hookAfter
             val adapter = thisObject as? BaseAdapter ?: return@hookAfter
-            val position = args[0] as? Int ?: return@hookAfter
+            val position = args.getOrNull(0) as? Int ?: return@hookAfter
             val conversation = adapter.getItem(position) ?: return@hookAfter
             val bindContext = BindContext(
                 position = position,
@@ -129,7 +129,7 @@ object WeConversationListViewApi : ApiFeature(), IResolveDex {
                 nextConversation = if (position + 1 < adapter.count) adapter.getItem(position + 1) else null,
             )
             if (latestAdapter?.get() !== adapter) latestAdapter = WeakReference(adapter)
-            (args[2] as? ListView)?.let { listView ->
+            (args.getOrNull(2) as? ListView)?.let { listView ->
                 if (latestListView?.get() !== listView) latestListView = WeakReference(listView)
             }
 

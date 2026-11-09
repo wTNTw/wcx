@@ -77,7 +77,7 @@ object PredictiveBackGestures : ClickableFeature() {
             .firstConstructor {
                 parameters(ApplicationInfo::class.java)
             }.hookAfter {
-                val info = args[0] as? ApplicationInfo ?: return@hookAfter
+                val info = args.getOrNull(0) as? ApplicationInfo ?: return@hookAfter
                 runCatching {
                     val field =
                         info.reflekt().firstField { name = "privateFlagsExt" }

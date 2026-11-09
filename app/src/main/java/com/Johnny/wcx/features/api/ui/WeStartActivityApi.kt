@@ -49,7 +49,7 @@ object WeStartActivityApi : ApiFeature() {
     }
 
     private fun handleStartActivity(param: HookParam) {
-        val intent = param.args[0] as? Intent ?: param.args[1] as? Intent
+        val intent = param.args.getOrNull(0) as? Intent ?: param.args.getOrNull(1) as? Intent
         if (intent == null) {
             WeLogger.w(TAG, "startActivity called but no Intent found in arguments")
             return

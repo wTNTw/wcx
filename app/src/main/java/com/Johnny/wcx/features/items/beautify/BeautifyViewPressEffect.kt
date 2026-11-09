@@ -19,7 +19,7 @@ object BeautifyViewPressEffect : SwitchFeature() {
             }
             .hookBefore {
                 val view = thisObject as View
-                val original = args[0] as? Drawable?
+                val original = args.getOrNull(0) as? Drawable?
                 if (view.javaClass.name.startsWith("android.")) return@hookBefore
                 if (original != null && original is RippleDrawable) return@hookBefore
 

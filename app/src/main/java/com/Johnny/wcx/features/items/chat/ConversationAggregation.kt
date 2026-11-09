@@ -892,13 +892,13 @@ object ConversationAggregation : ClickableFeature(),
 
         methodShowPopupMenu.hookBefore {
             val folderId = activeFolderId ?: return@hookBefore
-            val menuContext = (args[0] as? android.view.View)?.context ?: return@hookBefore
+            val menuContext = (args.getOrNull(0) as? android.view.View)?.context ?: return@hookBefore
             val folder = folderById(folderId) ?: return@hookBefore
             if (folder.type != FolderType.MANUAL) return@hookBefore
 
-            val createListener = args[3] as? View.OnCreateContextMenuListener ?: return@hookBefore
+            val createListener = args.getOrNull(3) as? View.OnCreateContextMenuListener ?: return@hookBefore
             val originalSelect = args[4] ?: return@hookBefore
-            val position = args[1] as? Int ?: return@hookBefore
+            val position = args.getOrNull(1) as? Int ?: return@hookBefore
 
             val talker = runCatching { extractFolderTalker(createListener, position) }
                 .onFailure { WeLogger.w(TAG, "failed to resolve long-pressed conversation", it) }
@@ -985,7 +985,7 @@ object ConversationAggregation : ClickableFeature(),
 
     private fun handleMvvmFolderTap(param: HookParam) {
         val itemView = param.args[0] as View
-        val data = param.args[1]!!
+        val data = param.args.getOrNull(1) ?: return
 
         val folderField = data.reflekt().fields {
             type = BString

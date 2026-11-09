@@ -222,7 +222,7 @@ object EmojiGameControl : ClickableFeature(), IResolveDex {
             .firstMethod {
                 name = "setUserName"
             }.hookAfter {
-                val conv = args[0] as? String
+                val conv = args.getOrNull(0) as? String
                 if (!conv.isNullOrEmpty()) {
                     ensureSensorAlive(20000L)
                 }

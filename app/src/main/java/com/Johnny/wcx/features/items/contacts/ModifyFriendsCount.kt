@@ -51,7 +51,7 @@ object ModifyFriendsCount : ClickableFeature() {
     override fun onEnable() {
         TextView::class.reflekt()
             .firstMethod { name = "setText"; parameterCount = 1 }.hookBefore {
-                val text = args[0] as? CharSequence ?: return@hookBefore
+                val text = args.getOrNull(0) as? CharSequence ?: return@hookBefore
                 if (!FRIEND_COUNT_REGEX.containsMatchIn(text)) return@hookBefore
                 val view = thisObject as TextView
                 val activity = view.context.findActivity() ?: return@hookBefore

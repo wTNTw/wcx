@@ -120,7 +120,7 @@ object MonetEngine : ApiFeature() {
         // ColorDrawable draws via Canvas.drawColor (not Paint.setColor), so it needs its own swap.
         runCatching {
             View::class.reflekt().firstMethod { name = "setBackgroundDrawable" }.hookBefore {
-                val drawable = args[0] as? Drawable? ?: return@hookBefore
+                val drawable = args.getOrNull(0) as? Drawable? ?: return@hookBefore
                 if (drawable is ColorDrawable && drawable.color == DEFAULT_COLOR) {
                     drawable.color = primaryColor
                 }

@@ -337,7 +337,7 @@ private fun HideContacts.installFtsHook() {
         val hidden = hiddenContacts
         if (hidden.isEmpty()) return@hookBefore
 
-        val sql = args[1] as? String ?: return@hookBefore
+        val sql = args.getOrNull(1) as? String ?: return@hookBefore
         args[1] = rewriteFtsSql(sql, hidden) ?: return@hookBefore
     }
 }

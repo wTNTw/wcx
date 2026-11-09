@@ -242,7 +242,7 @@ object WeDatabaseListenerApi : ApiFeature() {
                 try {
                     if (queryListeners.isEmpty()) return@hookBefore
 
-                    val sql = args[0] as? String ?: return@hookBefore
+                    val sql = args.getOrNull(0) as? String ?: return@hookBefore
                     var currentSql = sql
 
                     logWithStack("rawQuery", "N/A", args)
@@ -280,12 +280,12 @@ object WeDatabaseListenerApi : ApiFeature() {
             try {
                 if (queryListeners.isEmpty()) return@hookBefore
 
-                val sql = args[1] as? String ?: return@hookBefore
+                val sql = args.getOrNull(1) as? String ?: return@hookBefore
                 var currentSql = sql
 
                 logWithStack(
                     "rawQueryWithFactory",
-                    args[3] as? String ?: "N/A",
+                    args.getOrNull(3) as? String ?: "N/A",
                     args
                 )
 

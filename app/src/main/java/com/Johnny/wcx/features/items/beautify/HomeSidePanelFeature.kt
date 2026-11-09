@@ -1053,7 +1053,7 @@ private fun isHomeTabClass(className: String): Boolean {
         // 精确限定只响应微信主页 Activity，杜绝 hook 命中基类 dispatchTouchEvent
         // 时在 ChattingUI 等其它页面全局呼出侧边栏。
         if (act.javaClass.name != "com.tencent.mm.ui.LauncherUI") return
-        val ev = param.args[0] as? MotionEvent ?: return
+        val ev = param.args.getOrNull(0) as? MotionEvent ?: return
         when (ev.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 val homeDown = isHomePageActive(act)

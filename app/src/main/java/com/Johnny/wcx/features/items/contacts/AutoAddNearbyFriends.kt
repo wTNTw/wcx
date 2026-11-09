@@ -53,13 +53,14 @@ object AutoAddNearbyFriends : ClickableFeature(), IResolveDex {
         }
 
         methodCreateMenu.hookBefore {
-            args[0]!!.reflekt().firstMethod {
+            val menu = args.getOrNull(0) ?: return@hookBefore
+            menu.reflekt().firstMethod {
                 parameters(int, CharSequence::class)
             }.invoke(6, "自动加好友")
         }
 
         methodMenuOnClick.hookBefore {
-            val menuItem = args[0] as MenuItem
+            val menuItem = args.getOrNull(0) as? MenuItem ?: return@hookBefore
             val itemId = menuItem.itemId
             if (itemId != 6) return@hookBefore
 

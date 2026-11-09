@@ -116,7 +116,7 @@ object OpenHistoryRedPackets : ClickableFeature(), WeContactPrefsScreenApi.ICont
         WeContactPrefsScreenApi.addProvider(this)
 
         methodReceiveOnGYNetEnd.hookAfter {
-            val json = args[2] as? JSONObject ?: return@hookAfter
+            val json = args.getOrNull(2) as? JSONObject ?: return@hookAfter
             val sendId = json.optString("sendId")
             val timingIdentifier = json.optString("timingIdentifier")
 
@@ -141,7 +141,7 @@ object OpenHistoryRedPackets : ClickableFeature(), WeContactPrefsScreenApi.ICont
         }
 
         methodOpenOnGYNetEnd.hookAfter {
-            val json = args[2] as? JSONObject ?: return@hookAfter
+            val json = args.getOrNull(2) as? JSONObject ?: return@hookAfter
 
             val sendId = json.optString("sendId")
             if (sendId.isNullOrEmpty()) return@hookAfter

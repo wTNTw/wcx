@@ -118,12 +118,12 @@ object ModifyWalletBalanceDisplay : ClickableFeature(), IResolveDex {
     override fun onEnable() {
         // 零钱余额：setFirstMoney
         methodSetFirstMoney.hookBefore {
-            val raw = args[0] as? String ?: return@hookBefore
+            val raw = args.getOrNull(0) as? String ?: return@hookBefore
             args[0] = applyConfig(raw, balance, realtimeEnabled, realtimeOffsetYuan)
         }
         // 零钱通余额：setNewMoney
         methodSetNewMoney.hookBefore {
-            val raw = args[0] as? String ?: return@hookBefore
+            val raw = args.getOrNull(0) as? String ?: return@hookBefore
             args[0] = applyConfig(raw, lqtBalance, lqtRealtimeEnabled, lqtRealtimeOffsetYuan)
         }
         // 8.0.77 反查：网络结算场景结束（onGYNetEnd/doScene）会用真实余额再次调用
@@ -131,18 +131,18 @@ object ModifyWalletBalanceDisplay : ClickableFeature(), IResolveDex {
         // 匹配不到（其它版本改名）时静默跳过，不影响既有 hook。
         if (!methodE.isPlaceholder && !methodG.isPlaceholder) {
             methodE.hookBefore {
-                val raw = args[0] as? String ?: return@hookBefore
+                val raw = args.getOrNull(0) as? String ?: return@hookBefore
                 args[0] = applyConfig(raw, balance, realtimeEnabled, realtimeOffsetYuan)
             }
             methodG.hookBefore {
-                val raw = args[0] as? String ?: return@hookBefore
+                val raw = args.getOrNull(0) as? String ?: return@hookBefore
                 args[0] = applyConfig(raw, balance, realtimeEnabled, realtimeOffsetYuan)
             }
         }
         // 兜底：setMoney(String) 调用者（8.0.77 亦存在），同样按零钱配置覆盖。
         if (!methodSetMoney.isPlaceholder) {
             methodSetMoney.hookBefore {
-                val raw = args[0] as? String ?: return@hookBefore
+                val raw = args.getOrNull(0) as? String ?: return@hookBefore
                 args[0] = applyConfig(raw, balance, realtimeEnabled, realtimeOffsetYuan)
             }
         }

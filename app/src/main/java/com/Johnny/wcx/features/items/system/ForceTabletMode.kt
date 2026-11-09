@@ -57,7 +57,7 @@ object ForceTabletMode : SwitchFeature(), IResolveDex {
 
         methodOtherDeviceLoginButtonIsVisible.hookBefore {
             try {
-                val view = args[0] as? Button? ?: return@hookBefore
+                val view = args.getOrNull(0) as? Button? ?: return@hookBefore
                 if (view.isGone) view.isVisible = true
             } catch (e: Throwable) {
                 // 兜底异常捕获

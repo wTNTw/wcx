@@ -229,7 +229,7 @@ object HideContactsNotifications : ApiFeature(), IResolveDex {
         // notifications.
 
         methodDealNotify.hookBefore(100) {
-            val talker = args[1] as? String ?: return@hookBefore
+            val talker = args.getOrNull(1) as? String ?: return@hookBefore
             if (!isSuppressed(talker)) return@hookBefore
             WeLogger.i(TAG, "suppressing message notification from $talker")
             vibrateIfRequested()
@@ -243,7 +243,7 @@ object HideContactsNotifications : ApiFeature(), IResolveDex {
         }
 
         methodNotifyForLightPush.hookBefore(100) {
-            val userName = args[1] as? String ?: return@hookBefore
+            val userName = args.getOrNull(1) as? String ?: return@hookBefore
             if (!isSuppressed(userName)) return@hookBefore
             WeLogger.i(TAG, "suppressing LightPush notification from $userName")
             vibrateIfRequested()

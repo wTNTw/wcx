@@ -227,6 +227,27 @@ AssetManager 的路径不带）。目前已覆盖：天气城市库（`xiaomi_we
 
 排查方法：`adb shell su -c 'logcat -s WCX'` 看是否两个注入器都在；确认后只保留一个。
 
+### 新版微信适配（排错用开关）
+
+微信改版后，DexKit 的匹配能过（`scan complete: 133 success`）但个别功能的 hook 会因为
+**方法签名变了**而每次事件都抛异常（`ArrayIndexOutOfBoundsException: length=0` 最常见，
+即原来的 `args[0]` 在新版里方法已经没有参数）。适配流程：
+
+```bash
+# 1. 忽略功能开关，全部启用（排错模式；会打一行 W 提示）
+adb shell su -c 'setprop debug.wcx.enable_all 1'
+adb shell am force-stop com.tencent.mm && adb shell am start -n com.tencent.mm/.ui.LauncherUI
+
+# 2. 跑一遍常用界面（首页/会话/通讯录/朋友圈/设置…），再抓日志
+adb logcat -d -s WCX:* | grep -A1 'failed to execute hook of '
+
+# 3. 适配完关掉
+adb shell su -c 'setprop debug.wcx.enable_all 0'
+```
+
+另外 `BaseFeature` 里有**熔断**：同一功能连续失败 5 次后，本进程内直接停用它的 hook
+（日志只打一次），避免刷屏和「改了一半再抛」把界面搞坏。
+
 ### 崩溃自愈与日志位置
 
 | 位置 | 内容 |

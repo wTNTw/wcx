@@ -52,11 +52,11 @@ object ErudaConsole : SwitchFeature(), IResolveDex {
     override fun onEnable() {
         xwebOnPageFinished.hookAfter {
             WeLogger.i(TAG, "injecting into xwebOnPageFinished: ${args[0]}")
-            injectEruda(args[0]!!)
+            injectEruda(args.getOrNull(0) ?: return@hookAfter)
         }
         androidOnPageFinished.hookAfter {
             WeLogger.i(TAG, "injecting into androidOnPageFinished: ${args[0]}")
-            injectEruda(args[0]!!)
+            injectEruda(args.getOrNull(0) ?: return@hookAfter)
         }
     }
 

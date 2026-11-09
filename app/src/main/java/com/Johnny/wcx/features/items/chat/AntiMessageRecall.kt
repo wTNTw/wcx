@@ -538,7 +538,7 @@ object AntiMessageRecall : ClickableFeature(), WeXmlParserApi.IAfterParseListene
 
     override fun onParse(param: HookParam, result: MutableMap<String, Any?>) {
         val args = param.args
-        val xmlContent = args[0] as? String ?: return
+        val xmlContent = args.getOrNull(0) as? String ?: return
         if (!xmlContent.contains("revokemsg")) return
 
         // 不依赖微信解析结果（8.0.79 上 `$.sysmsg.$type` 恒为 null），直接自己从 XML 取 newmsgid。

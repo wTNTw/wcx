@@ -127,7 +127,7 @@ object WeHomeScreenPopupMenuApi : ApiFeature(), IResolveDex {
                         name = "setImageResource"
                     }.hookBeforeDirectly {
                         try {
-                            val fakeResId = args[0] as? Int ?: return@hookBeforeDirectly
+                            val fakeResId = args.getOrNull(0) as? Int ?: return@hookBeforeDirectly
                             val imageView = thisObject as? ImageView ?: return@hookBeforeDirectly
                             imageView.setImageDrawable(fakeResIdToResMap[fakeResId] ?: return@hookBeforeDirectly)
                             // setImageResource 返回 void，设置 result = null 阻断原方法

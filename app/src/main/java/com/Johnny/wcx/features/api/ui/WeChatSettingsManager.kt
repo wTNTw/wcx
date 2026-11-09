@@ -151,7 +151,7 @@ class WeChatSettingsManager(
 
     private fun createSwitchHandlerProxy(switchHandlerClass: Class<*>, spec: SettingItemSpec): Any {
         val switchClassHandler = InvocationHandler { _, _, args ->
-            spec.onSwitchChanged?.invoke(args[0] as? Boolean ?: false)
+            spec.onSwitchChanged?.invoke(args.getOrNull(0) as? Boolean ?: false)
         }
 
         return Proxy.newProxyInstance(switchHandlerClass.classLoader, arrayOf(switchHandlerClass), switchClassHandler)
@@ -187,7 +187,7 @@ class WeChatSettingsManager(
                 if (!currentUiName.endsWith("MainSettingsUI") && !currentUiName.endsWith("CommonSettingsUI")) return@hookAfterDirectly
 
                 @Suppress("UNCHECKED_CAST")
-                val layoutComponentSet = args[0] as? HashSet<Class<*>> ?: return@hookAfterDirectly
+                val layoutComponentSet = args.getOrNull(0) as? HashSet<Class<*>> ?: return@hookAfterDirectly
 
                 for (item in registeredItems) {
                     layoutComponentSet.add(item.proxyClass)
@@ -196,11 +196,11 @@ class WeChatSettingsManager(
                 contextGetStringUnhook = Context::class.reflekt()
                     .firstMethod { name = "getString"; parameters(Int::class) }
                     .hookBeforeDirectly {
-                        stringPool[args[0] as? Int ?: 0]?.let { result = it }
+                        stringPool[args.getOrNull(0) as? Int ?: 0]?.let { result = it }
                     }
 
                 resourcesGetStringUnhook = methodResourceHelperGetStringById.hookBeforeDirectly {
-                    stringPool[args[1] as? Int ?: 0]?.let { result = it }
+                    stringPool[args.getOrNull(1) as? Int ?: 0]?.let { result = it }
                 }
             }
 

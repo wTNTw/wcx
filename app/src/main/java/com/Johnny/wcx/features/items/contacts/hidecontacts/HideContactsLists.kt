@@ -93,7 +93,7 @@ private fun HideContacts.hookMvvmListPreprocess(target: DexMethodDelegate, label
     target.hookBefore {
         if (isTemporarilyShown) return@hookBefore
 
-        val contacts = args[0] as? List<*> ?: return@hookBefore
+        val contacts = args.getOrNull(0) as? List<*> ?: return@hookBefore
         // MvvmList hands us an empty snapshot on the initial load and whenever a filter matches
         // nothing; there is no entry to read the shape off then.
         if (contacts.isEmpty()) return@hookBefore
@@ -188,7 +188,7 @@ private fun HideContacts.installContactCountHook() {
 
         val hiddenNormal = countHiddenNormalContacts(
             hidden,
-            includeBlack = args[0] == true,
+            includeBlack = args.getOrNull(0) == true,
             excluded = excluded,
         )
         if (hiddenNormal <= 0) return@hookAfter
@@ -289,7 +289,7 @@ private fun HideContacts.installGroupMemberHooks() {
     } else {
         methodSeeRoomMemberSetMemberList.hookBefore {
             if (isTemporarilyShown) return@hookBefore
-            val members = args[0] as? List<*> ?: return@hookBefore
+            val members = args.getOrNull(0) as? List<*> ?: return@hookBefore
             val filtered = filterHiddenUsernames(members) ?: return@hookBefore
             WeLogger.d(TAG, "filtered ${members.size - filtered.size} hidden member(s) from SeeRoomMemberUI")
             args[0] = filtered
@@ -350,7 +350,7 @@ private fun HideContacts.installFavoriteHooks() {
 
         // `r(null)` is a real call shape (FavApiLogic returns null when the storage is missing),
         // so this must tolerate a null argument rather than assume a list.
-        val items = args[0] as? List<*> ?: return@hookBefore
+        val items = args.getOrNull(0) as? List<*> ?: return@hookBefore
         if (items.isEmpty()) return@hookBefore
 
         val sample = items.firstNotNullOfOrNull { it } ?: return@hookBefore
@@ -442,7 +442,7 @@ private fun HideContacts.installFinderLikeHooks() {
     methodFinderLikeDrawerLoadMore.hookBefore {
         if (isTemporarilyShown || hiddenContacts.isEmpty()) return@hookBefore
 
-        val likes = args[0] as? List<*> ?: return@hookBefore
+        val likes = args.getOrNull(0) as? List<*> ?: return@hookBefore
         val filtered = likes.filterNot { it != null && isHiddenLikeEntry(it) }
         if (filtered.size == likes.size) return@hookBefore
 

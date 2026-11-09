@@ -375,7 +375,7 @@ object WeDatabaseApi : ApiFeature(), IResolveDex {
                 val cipherSpec = args[2] as SQLiteCipherSpec?
                 WeLogger.d(
                     TAG,
-                    "openDatabase() called with: name=${args[0] as String?}, password=${String(args[1] as? ByteArray? ?: return@hookBefore)}, cipherSpec=${
+                    "openDatabase() called with: name=${args[0] as String?}, password=${String(args.getOrNull(1) as? ByteArray? ?: return@hookBefore)}, cipherSpec=${
                         cipherSpec.run {
                             "${this?.hmacAlgorithm},${this?.hmacEnabled},${this?.kdfAlgorithm},${this?.kdfIteration},${this?.pageSize}"
                         }

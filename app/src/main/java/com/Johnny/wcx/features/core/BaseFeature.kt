@@ -204,13 +204,42 @@ abstract class BaseFeature {
 
     // --- end dex delegate ---
 
+    /**
+     * 每个功能自己的 hook 体执行入口：出错只记日志，不中断宿主。
+     *
+     * 8.0.80 适配经验：微信改签名后，某个功能的 hook 可能**每次事件都抛**（实测某个功能
+     * 一次启动就刷 250 条 `ArrayIndexOutOfBoundsException`）。除了刷日志，更危险的是
+     * 「改了一半再抛」——例如先 removeAllViews 再失败，界面直接白掉。
+     * 所以这里加了一道熔断：同一个功能连续失败 [MAX_HOOK_FAILURES] 次后本轮进程内直接停用它
+     * （日志只打一次），等我们按功能适配完再恢复。
+     */
     internal fun executeHookAction(param: HookParam, action: HookAction) {
+        if (runtimeDisabled) return
         runCatching {
             action(param)
-        }.onFailure { e -> WeLogger.e("executeHookAction", "failed to execute hook of $name", e) }
+        }.onFailure { e ->
+            val count = hookFailureCount.incrementAndGet()
+            if (count == 1) {
+                WeLogger.e("executeHookAction", "failed to execute hook of $name", e)
+            }
+            if (count == MAX_HOOK_FAILURES) {
+                runtimeDisabled = true
+                WeLogger.w(
+                    "executeHookAction",
+                    "$name 连续失败 $count 次，本进程内停止该功能的 hook（多半是当前微信版本签名变了，等适配）",
+                )
+            }
+        }
     }
+
+    @Volatile
+    private var runtimeDisabled = false
+
+    private val hookFailureCount = java.util.concurrent.atomic.AtomicInteger(0)
 
     companion object {
         private const val TAG = "BaseFeature"
+        /** 同一功能连续失败多少次后在当前进程内熔断。 */
+        private const val MAX_HOOK_FAILURES = 5
     }
 }

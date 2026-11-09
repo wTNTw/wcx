@@ -17,7 +17,7 @@ object SpoofEnvironment : SwitchFeature(), IResolveDex {
                 parameterCount = 3
             }.hookBefore {
                 try {
-                    val name = args[1] as? String? ?: return@hookBefore
+                    val name = args.getOrNull(1) as? String? ?: return@hookBefore
                     if (name == "adb_enabled") {
                         // 仅当原方法返回 int 时才设置 result = 0，避免对非 int 方法（如 getInstance）造成 ClassCastException
                         if (member is java.lang.reflect.Method) {
@@ -38,7 +38,7 @@ object SpoofEnvironment : SwitchFeature(), IResolveDex {
                 parameterCount = 3
             }.hookBefore {
                 try {
-                    val name = args[1] as? String? ?: return@hookBefore
+                    val name = args.getOrNull(1) as? String? ?: return@hookBefore
                     if (name == "development_settings_enabled") {
                         // 仅当原方法返回 int 时才设置 result = 0，避免对非 int 方法（如 getInstance）造成 ClassCastException
                         if (member is java.lang.reflect.Method) {

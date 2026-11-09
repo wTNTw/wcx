@@ -22,7 +22,7 @@ object WeCurrentConversationApi : ApiFeature() {
                 name = "setUserName"
             }.hookAfter {
                 chatFooterRef = WeakReference(thisObject as ChatFooter)
-                val conv = args[0] as? String
+                val conv = args.getOrNull(0) as? String
                 if (!conv.isNullOrEmpty()) {
                     value = conv
                 }

@@ -68,7 +68,7 @@ object ForwardFavoriteVoices : SwitchFeature() {
     override fun onEnable() {
         "com.tencent.mm.plugin.fav.ui.FavSelectUI".toClass().reflekt().firstMethod { name = "onItemClick" }.hookBefore {
             runCatching {
-                val view = args[1] as? View ?: return@runCatching
+                val view = args.getOrNull(1) as? View ?: return@runCatching
                 val tag = view.tag ?: return@runCatching
 
                 val a = tag.reflekt().firstFieldOrNull { name = "a"; superclass() }?.get() ?: return@runCatching

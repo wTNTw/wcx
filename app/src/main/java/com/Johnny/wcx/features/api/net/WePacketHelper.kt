@@ -542,7 +542,7 @@ object WePacketHelper : ApiFeature(), IResolveDex {
             if (method.name == "onSceneEnd" && args != null) {
                 val errType = args[0] as Int
                 val errCode = args[1] as Int
-                val errMsg = args[2] as? String ?: "null"
+                val errMsg = args.getOrNull(2) as? String ?: "null"
                 val netScene = args[3]
 
                 Handler(Looper.getMainLooper()).post {
@@ -606,7 +606,7 @@ object WePacketHelper : ApiFeature(), IResolveDex {
                         userCallback?.onFailure(
                             errType,
                             errCode,
-                            args[2] as? String ?: "null (No Error Message)"
+                            args.getOrNull(2) as? String ?: "null (No Error Message)"
                         )
                     }
                 }
