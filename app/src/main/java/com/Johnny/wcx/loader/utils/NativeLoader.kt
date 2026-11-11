@@ -36,6 +36,19 @@ object NativeLoader {
         zygiskPayload?.apk ?: File(StartupInfo.loaderService.mainModulePath)
     }
 
+    /**
+     * 已解包原生库的绝对路径（供 h/Hchat 那套老 Xposed 代码复用）。
+     *
+     * 背景：Hchat 的 NativeLibraryLoader 会按「模块 APK 在 /data/app 下的路径」去解包
+     * libdexkit.so；Zygisk 独立模式下模块不是已安装应用，它拿不到路径，回落到
+     * System.loadLibrary("dexkit") 又失败（库不在 app 的库搜索路径里）→ 脚本子系统引导失败。
+     * 这里把本模块已经解包好的路径暴露出去，让它直接 System.load(绝对路径) 即可。
+     */
+    fun loadedLibraryPath(soName: String): File? = synchronized(nativeLoadLock) {
+        val key = soName.removePrefix("lib").removeSuffix(".so")
+        zygiskNativeLibraries[key]?.takeIf { it.isFile }
+    }
+
     fun init(hostCtx: Context) {
         val libLoader = synchronized(nativeLoadLock) {
             ensureNativeLibrariesLoaded()

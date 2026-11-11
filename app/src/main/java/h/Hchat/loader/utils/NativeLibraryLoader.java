@@ -180,6 +180,20 @@ public class NativeLibraryLoader {
 
     private boolean loadLibraryUncached(Context ctx, ClassLoader moduleClassLoader, String soName,
                                         String libName, boolean optional) {
+        // Zygisk 独立模式：模块不是已安装应用，本文件按 /data/app 找模块 APK 会失败。
+        // 本模块的主加载链已经把原生库解包到私有目录并 System.load 过了，这里直接复用它的绝对路径。
+        try {
+            java.io.File preloaded = com.Johnny.wcx.loader.utils.NativeLoader.INSTANCE
+                    .loadedLibraryPath(soName);
+            if (preloaded != null && preloaded.isFile()) {
+                System.load(preloaded.getAbsolutePath());
+                h.Hchat.utils.HLog.e(TAG + " " + soName + " 复用本模块已解包的库: " + preloaded);
+                return true;
+            }
+        } catch (Throwable ignored) {
+            // 拿不到就走原来的逻辑（LSPosed 模式 / 已安装 APK）
+        }
+
         String moduleApk = getModuleApkPath(moduleClassLoader);
         String abi = "arm64-v8a";
         String entryPath = "lib/" + abi + "/" + soName;
