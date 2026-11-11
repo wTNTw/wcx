@@ -1097,7 +1097,19 @@ object MiuixSettingsPage {
                 h.Hchat.utils.HLog.e("[Hchat:MiuixSettings] 销毁页面 Composition 失败: ${it.message}", it)
             }
             runCatching {
-                if (page.parent === decor) decor.removeView(page)
+                if (page.parent === decor) {
+                    val density = page.resources?.displayMetrics?.density ?: 1f
+                    page.animate().cancel()
+                    page.animate()
+                        .alpha(0f)
+                        .translationY(18f * density)
+                        .setDuration(140L)
+                        .setInterpolator(android.view.animation.AccelerateInterpolator())
+                        .withEndAction {
+                            runCatching { if (page.parent === decor) decor.removeView(page) }
+                        }
+                        .start()
+                }
             }.onFailure {
                 h.Hchat.utils.HLog.e("[Hchat:MiuixSettings] 移除页面失败: ${it.message}", it)
             }
@@ -1327,6 +1339,16 @@ object MiuixSettingsPage {
             )
             decor.addView(page)
             composeView.createComposition()
+            // 其它设置页都是带转场的路由，这里是把 FrameLayout 直接塞进 decorView，
+            // 不加动画就会「闪现」。做一个和模块一致的淡入 + 轻微上滑。
+            page.alpha = 0f
+            page.translationY = 18f * (page.resources?.displayMetrics?.density ?: 1f)
+            page.animate()
+                .alpha(1f)
+                .translationY(0f)
+                .setDuration(180L)
+                .setInterpolator(android.view.animation.DecelerateInterpolator())
+                .start()
         } catch (throwable: Throwable) {
             closePage()
             h.Hchat.utils.HLog.e(
