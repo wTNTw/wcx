@@ -187,7 +187,7 @@ public class NativeLibraryLoader {
                     .loadedLibraryPath(soName);
             if (preloaded != null && preloaded.isFile()) {
                 System.load(preloaded.getAbsolutePath());
-                h.Hchat.utils.HLog.e(TAG + " " + soName + " 复用本模块已解包的库: " + preloaded);
+                com.Johnny.wcx.utils.WeLogger.INSTANCE.i(TAG, soName + " 复用本模块已解包的库: " + preloaded);
                 return true;
             }
         } catch (Throwable ignored) {

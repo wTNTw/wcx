@@ -1,5 +1,7 @@
 package h.Hchat.hooks.items.shortvideo
 
+import com.Johnny.wcx.utils.WeLogger
+
 import android.os.Looper
 import de.robv.android.xposed.XC_MethodHook
 import h.Hchat.dexkit.DexMethodCache
@@ -150,10 +152,30 @@ internal class FinderFeedDetailResolver private constructor(
                 }.filter(::isRequestConstructor)
                     .distinctBy { it.toGenericString() }
             }.onFailure {
-                HLog.e("$TAG DexKit定位视频号详情请求失败: ${it.message}", it)
+                WeLogger.w("FinderDetail", "DexKit 定位视频号详情请求失败: ${it.message}")
             }.getOrDefault(emptyList())
             if (candidates.size != 1) {
-                HLog.e("$TAG 视频号详情请求候选数量异常: count=${candidates.size}")
+                // 8.0.80 起请求构造器的参数个数变了（strict 过滤会得到 0 个）。
+                // 这里放宽为「类里带 CGI 串 + 至少 (long, String) 参数」，能命中就用。
+                val lenient = runCatching {
+                    context.dexKitBridge().findMethod(
+                        FindMethod().apply {
+                            matcher(MethodMatcher().apply { usingEqStrings(CGI_URI) })
+                        }
+                    ).mapNotNull { data ->
+                        if (!data.isConstructor) return@mapNotNull null
+                        runCatching { data.getConstructorInstance(context.hostClassLoader()) }.getOrNull()
+                    }.filter { ctor ->
+                        val types = ctor.parameterTypes
+                        types.isNotEmpty() && types[0] == java.lang.Long.TYPE &&
+                            types.any { it == String::class.java }
+                    }.distinctBy { it.toGenericString() }
+                }.getOrDefault(emptyList())
+                if (lenient.isNotEmpty()) {
+                    WeLogger.i("FinderDetail", "视频号详情请求改用宽松匹配，候选 ${lenient.size} 个")
+                    return lenient.first()
+                }
+                WeLogger.w("FinderDetail", "视频号详情请求候选数量异常: count=${candidates.size}（当前微信版本该能力不可用）")
             }
             return candidates.singleOrNull()
         }

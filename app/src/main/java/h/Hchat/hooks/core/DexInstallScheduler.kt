@@ -184,7 +184,8 @@ object DexInstallScheduler {
         if (index >= MAX_RETRY_ATTEMPTS) {
             state.retryScheduled.set(false)
             state.installer = null
-            HLog.e("$TAG ${state.label} 多次安装失败，停止本轮重试")
+            // 只是某个可选的脚本能力在当前微信版本上没锚点，不该按错误刷栈
+            com.Johnny.wcx.utils.WeLogger.w(TAG, "${state.label} 多次安装失败，停止本轮重试")
             return
         }
         val retry = Runnable {
