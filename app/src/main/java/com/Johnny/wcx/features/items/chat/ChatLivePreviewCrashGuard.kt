@@ -52,6 +52,9 @@ object ChatLivePreviewCrashGuard : SwitchFeature() {
         "org.luckypray.dexkit",
     )
 
+    /** 模块自己的 hook 桥接包：这些帧出现在异常栈里不代表模块业务代码出错。 */
+    private const val BRIDGE_PACKAGE = "com.Johnny.wcx.loader.entry.zygisk"
+
     /** 已知微信自身崩溃的特征（聊天页「附近直播」预览浮窗初始化 NPE）。 */
     private const val VICTIM_PACKAGE = "com.tencent.mm.plugin.finder"
     private const val VICTIM_HINT = "nearby"
@@ -97,26 +100,60 @@ object ChatLivePreviewCrashGuard : SwitchFeature() {
         WeLogger.i(TAG, "聊天直播浮窗崩溃防御已安装（iq0.run，仅豁免该已知崩溃）")
     }
 
-    /** 栈里有 finder 直播预览帧、且没有任何模块帧 → 视为已知的微信自身崩溃。 */
+    /**
+     * 判定是否「已知的微信自身崩溃」。
+     *
+     * 关键点：异常是在我们自己的 hook 里 `invokeOriginal()` 抛出来的，所以**异常栈里必然
+     * 包含模块的桥接帧**（`loader.entry.zygisk.ArtHookBridgeRuntime*`、`LSPHooker_*`、
+     * `java.lang.reflect.Method.invoke`）。不能简单地说「栈里有模块帧就不是微信的锅」——
+     * 要只看「比桥接帧更深（更靠栈顶）」的那部分调用链，那才是崩溃真正发生的现场。
+     */
     private fun isKnownWeChatCrash(t: Throwable): Boolean {
         var foundVictim = false
-        var foundModule = false
+        var foundModuleCode = false
+        var hasAudioCallbackFrame = false
+        var hasAudioManagerFrame = false
 
         var cause: Throwable? = t
-        while (cause != null && !foundModule) {
+        while (cause != null && !foundModuleCode) {
+            var crossedBridge = false
             for (frame in cause.stackTrace) {
                 val cls = frame.className
-                if (MODULE_PACKAGES.any { cls.startsWith(it) }) {
-                    foundModule = true
-                    break
+                if (cls.startsWith(BRIDGE_PACKAGE) || cls.startsWith("LSPHooker_") ||
+                    (cls == "java.lang.reflect.Method" && frame.methodName == "invoke")
+                ) {
+                    crossedBridge = true
+                    continue
                 }
-                if (!foundVictim && cls.startsWith(VICTIM_PACKAGE) && cls.contains(VICTIM_HINT)) {
-                    foundVictim = true
+                if (!crossedBridge) {
+                    // 比桥接帧更深：这里出现的模块帧才是「模块代码引起的崩溃」，绝不能吞
+                    if (MODULE_PACKAGES.any { cls.startsWith(it) } && !cls.startsWith(BRIDGE_PACKAGE)) {
+                        foundModuleCode = true
+                        break
+                    }
+                    if (cls.startsWith(VICTIM_PACKAGE) && cls.contains(VICTIM_HINT)) {
+                        foundVictim = true
+                    }
+                    if (cls == "android.media.CallbackUtil") hasAudioCallbackFrame = true
+                    if (cls == "android.media.AudioManager") hasAudioManagerFrame = true
                 }
             }
             cause = cause.cause
         }
 
-        return foundVictim && !foundModule
+        if (foundModuleCode) return false
+        if (foundVictim) return true
+
+        // 第二个已知崩溃：iq0.o.run 被重复执行时 AudioManager 回调二次注册，
+        // 框架抛 IllegalArgumentException（栈里只有 android.media，无模块代码）。
+        val duplicateListener = t is IllegalArgumentException &&
+            t.message?.contains("previously registered listener") == true &&
+            hasAudioCallbackFrame && hasAudioManagerFrame
+        if (duplicateListener) {
+            WeLogger.i(TAG, "命中第二个已知的微信自身崩溃（AudioManager 回调重复注册），本次任务跳过")
+            return true
+        }
+        return false
     }
+
 }
