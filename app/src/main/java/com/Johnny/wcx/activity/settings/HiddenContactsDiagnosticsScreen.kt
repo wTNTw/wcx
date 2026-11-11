@@ -40,6 +40,7 @@ import com.Johnny.wcx.features.api.core.WeDatabaseApi
 import com.Johnny.wcx.features.items.contacts.HideContacts
 import com.Johnny.wcx.features.items.contacts.hidecontacts.BlockHiddenChatSurface
 import com.Johnny.wcx.features.items.contacts.hidecontacts.BlockHiddenProfileSurface
+import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.android.showToast
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -343,12 +344,31 @@ private fun repairFlow(): List<DiagStep> {
             after += collect()
             val bad = after.count { !it.ok }
             after.forEach { row -> SelfCheckLog.step(row.ok, "复检·" + row.label, row.value) }
+            // 「密友功能」是有分类总开关的：启动时总开关关着，整个分类根本不会加载，
+            // 本次运行里把开关打开也不会让 hook 生效 —— 必须重启微信。不能把这种情况
+            // 报成「修复失败」。
+            val needsRestart = after.any { row ->
+                !row.ok && (row.label.contains("隐藏联系人") || row.label.contains("总开关"))
+            }
+            if (needsRestart) {
+                WeLogger.i("自检", "修复后仍需重启微信：密友分类在启动时未加载，开关生效需要重新拉起进程")
+            }
             listOf(
                 DiagRow(
-                    "修复后异常", "复检", "$bad 项", bad == 0,
-                    "共 ${after.size} 项，异常 $bad 项。" +
-                        if (bad > 0) "\n若异常项是「锚点自检」里的类/方法缺失，说明当前微信版本已改名，" +
-                            "只能等模块适配，开关和修复都解决不了。" else "",
+                    "修复后异常", "复检",
+                    if (needsRestart) "需重启微信后复检" else "$bad 项",
+                    bad == 0,
+                    buildString {
+                        append("共 ").append(after.size).append(" 项，异常 ").append(bad).append(" 项。")
+                        if (needsRestart) {
+                            append("\n\n⚠️ 需要重启微信：密友功能是「分类总开关」控制的，")
+                            append("本次运行里启动时它还是关着的，整个分类没有加载，")
+                            append("开关刚打开也不会生效。强停微信再打开，然后重新检测即可。")
+                        } else if (bad > 0) {
+                            append("\n若异常项是「锚点自检」里的类/方法缺失，说明当前微信版本已改名，")
+                            append("只能等模块适配，开关和修复都解决不了。")
+                        }
+                    },
                 )
             )
         },
@@ -443,8 +463,9 @@ private fun masterRows(): List<DiagRow> {
     )
 
     val count = runCatching { HideContacts.hiddenContacts.size }.getOrDefault(0)
+    // 名单为空只有「总开关+功能都开着」时才算是问题；否则只是没配置，不该和真正的故障混在一起计数
     out += DiagRow(
-        "名单人数", "总开关与名单", "$count", count > 0,
+        "名单人数", "总开关与名单", "$count", count > 0 || !(master && enabled),
         if (count > 0) "当前名单共 $count 人。"
         else "名单为空，不会有任何隐藏效果。请到「配置隐藏列表」添加。",
     )
