@@ -441,12 +441,20 @@ internal object ModuleDiagnostics {
             inactive = stats == null,
         )
 
-        val recall = runCatching { AntiMessageRecall.isActive }.getOrDefault(false)
+        // 防撤回：要区分「功能本来就没开」和「开着但 Hook 没装上」——
+        // 以前一律报 ❌ 失效，用户以为坏了，其实只是开关没开。
+        val recallEnabled = runCatching { AntiMessageRecall.isEnabled }.getOrDefault(false)
+        val recallActive = runCatching { AntiMessageRecall.isActive }.getOrDefault(false)
         out += Live(
             "防撤回",
-            recall,
-            if (recall) "Hook 已安装，可拦截撤回"
-            else "Hook 未安装：功能未开启，或锚点已随微信版本漂移",
+            recallActive,
+            when {
+                recallActive -> "Hook 已安装，可拦截撤回"
+                !recallEnabled -> "功能未开启（不是故障）：到「聊天 → 防撤回」打开即可"
+                else -> "开关是开的，但 Hook 没有安装成功（锚点可能随微信版本漂移）——" +
+                    "运行日志里搜「防撤回」能看到失败原因"
+            },
+            inactive = !recallEnabled,
         )
 
         // ---- 功能回执：不看开关，看「开了之后到底有没有生效」 ----
