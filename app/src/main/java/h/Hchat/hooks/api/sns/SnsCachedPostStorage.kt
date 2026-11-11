@@ -3,6 +3,7 @@ package h.Hchat.hooks.api.sns
 import android.content.ContentValues
 import android.content.Context
 import android.database.Cursor
+import com.Johnny.wcx.utils.WeLogger
 import h.Hchat.dexkit.DexMethodCache
 import h.Hchat.hooks.core.DexInstallScheduler
 import h.Hchat.utils.KavaReflector
@@ -200,7 +201,20 @@ internal class SnsCachedPostStorage(
             storageGetter = it
         } ?: return null
         return runCatching { KavaReflector.invokeOrThrow(getter, null) }
-            .onFailure { logger("获取朋友圈缓存存储失败: ${it.message}") }
+            .onFailure { error ->
+                // 反射调用把目标异常包在 InvocationTargetException 里，message 通常是 null，
+                // 真正原因在 cause（例如 SNS 子系统还没初始化）。
+                val cause = (error as? java.lang.reflect.InvocationTargetException)?.targetException
+                    ?: error.cause
+                    ?: error
+                // 这不是错误：微信的 SNS 存储要等朋友圈模块初始化后才有实例，
+                // 这里拿不到就返回 null，调用方按「暂时没有缓存」处理，下次调用会再试。
+                WeLogger.i(
+                    "SnsCachedPostStorage",
+                    "朋友圈缓存存储暂不可用（入口=" + describe(getter) + "）: " +
+                        cause.javaClass.name + ": " + cause.message,
+                )
+            }
             .getOrNull()
     }
 
@@ -209,15 +223,58 @@ internal class SnsCachedPostStorage(
         DexMethodCache.load(prefs, runtimeKey, classLoader, CACHE_STORAGE_GETTER)
             ?.takeIf(::isStorageGetter)
             ?.let { return it }
-        val methods = findMethods(STORAGE_GETTER_ANCHORS).filter(::isStorageGetter)
+
+        val raw = findMethods(STORAGE_GETTER_ANCHORS)
+        var methods = raw.filter(::isStorageGetter)
+
+        if (methods.size != 1) {
+            // 8.0.80 上「严格条件」不再唯命中（微信把入口挪了位置/改了修饰符）。
+            // 退一步：只要「无参 + 返回 SnsInfoStorage 之类的存储类型」就接受，
+            // 静态/实例都允许（实例方法后续用反射从宿主取实例）。
+            methods = raw.filter(::isStorageGetterLoose)
+            if (methods.size == 1) {
+                WeLogger.i(
+                    "SnsCachedPostStorage",
+                    "朋友圈缓存存储入口改用宽松条件命中: " + describe(methods.single()),
+                )
+            }
+        }
+
         if (methods.size != 1) {
             DexMethodCache.clear(prefs, runtimeKey, CACHE_STORAGE_GETTER)
-            logger("朋友圈缓存存储入口数量异常: ${methods.size}")
+            // 把候选签名打出来（只打一次，W 级），下次适配直接照着改
+            WeLogger.w(
+                "SnsCachedPostStorage",
+                "朋友圈缓存存储入口数量异常: strict=${raw.count(::isStorageGetter)} " +
+                    "loose=${raw.count(::isStorageGetterLoose)} 候选: " +
+                    raw.take(10).joinToString(" | ") { describe(it) },
+            )
             return null
         }
         return methods.single().also {
+            WeLogger.i("SnsCachedPostStorage", "朋友圈缓存存储入口: " + describe(it))
             DexMethodCache.save(prefs, runtimeKey, CACHE_STORAGE_GETTER, it)
         }
+    }
+
+    private fun describe(method: Method): String {
+        val static = if (Modifier.isStatic(method.modifiers)) "static " else ""
+        return static + method.declaringClass.name + "#" + method.name + "(" +
+            method.parameterTypes.joinToString(",") { it.simpleName } + ")->" +
+            method.returnType.name
+    }
+
+    /**
+     * 宽松判定：无参、非抽象、返回类型名里含 `Sns` 的存储类（不再是严格的
+     * `com.tencent.mm.plugin.sns.storage.` 前缀 + 必须 static）。
+     */
+    private fun isStorageGetterLoose(method: Method): Boolean {
+        if (Modifier.isAbstract(method.modifiers)) return false
+        if (method.parameterTypes.isNotEmpty()) return false
+        val returnType = method.returnType
+        if (returnType.isPrimitive) return false
+        val name = returnType.name
+        return name.contains("Sns") && (name.contains("Storage") || name.contains("SnsInfo"))
     }
 
     private fun locateMethod(

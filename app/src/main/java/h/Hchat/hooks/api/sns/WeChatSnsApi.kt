@@ -78,7 +78,50 @@ class WeChatSnsApi(
 
     fun installPostObserver(): Boolean = postObserver?.install() == true
 
-    fun warmupCachedPosts(): Boolean = cachedPostStorage?.warmup() == true
+    /**
+     * 预热「朋友圈缓存存储」。
+     *
+     * 注意：微信的 SNS 存储入口在 `mCoreAccount` 初始化之前调用会抛
+     * `oa6.b: mCoreAccount not initialized!` —— 而这里是在 API 安装阶段（登录/账号
+     * 初始化之前）调的，所以第一次几乎必然失败。以前失败后就不再重试，导致脚本的
+     * 朋友圈缓存能力一直不可用；现在失败就延后重试，账号就绪后自动恢复。
+     */
+    fun warmupCachedPosts(): Boolean {
+        // 只有主进程有 SNS 核心账号（mCoreAccount）。:push / :patch / :appbrand 这些子进程
+        // 调这个入口永远抛 "mCoreAccount not initialized"，既没用又刷日志。
+        if (!com.Johnny.wcx.utils.TargetProcesses.isInMain) return false
+        if (cachedPostStorage?.warmup() == true) return true
+        scheduleWarmupRetry()
+        return false
+    }
+
+    @Volatile
+    private var warmupRetryScheduled = false
+    private var warmupRetryCount = 0
+
+    private fun scheduleWarmupRetry() {
+        if (warmupRetryScheduled) return
+        if (warmupRetryCount >= WARMUP_MAX_RETRIES) return
+        warmupRetryScheduled = true
+        val handler = android.os.Handler(android.os.Looper.getMainLooper())
+        handler.postDelayed({
+            warmupRetryScheduled = false
+            warmupRetryCount++
+            val ok = cachedPostStorage?.warmup() == true
+            if (ok) {
+                log("朋友圈缓存存储已就绪（第 $warmupRetryCount 次重试）")
+                warmupRetryCount = 0
+            } else {
+                scheduleWarmupRetry()
+            }
+        }, WARMUP_RETRY_DELAY_MS)
+    }
+
+    private companion object {
+        /** 账号初始化通常在登录后完成，10s 一轮、最多 30 轮（约 5 分钟）。 */
+        private const val WARMUP_RETRY_DELAY_MS = 10_000L
+        private const val WARMUP_MAX_RETRIES = 30
+    }
 
     internal fun warmupCachedPostReadWrite(): Boolean {
         return cachedPostStorage?.warmupReadWrite() == true
