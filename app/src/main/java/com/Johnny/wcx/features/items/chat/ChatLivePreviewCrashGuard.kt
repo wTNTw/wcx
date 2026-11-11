@@ -5,10 +5,8 @@ import com.Johnny.wcx.features.core.Feature
 import com.Johnny.wcx.features.core.SwitchFeature
 import com.Johnny.wcx.utils.reflection.ClassLoaders
 import com.Johnny.wcx.utils.WeLogger
+import com.Johnny.wcx.utils.hookBeforeDirectly
 import com.Johnny.wcx.utils.invokeOriginal
-import de.robv.android.xposed.XC_MethodHook
-import de.robv.android.xposed.XC_MethodReplacement
-import de.robv.android.xposed.XposedBridge
 
 /**
  * 聊天页「附近直播」浮窗崩溃防御。
@@ -78,23 +76,23 @@ object ChatLivePreviewCrashGuard : SwitchFeature() {
             return
         }
 
-        XposedBridge.hookMethod(runMethod, object : XC_MethodReplacement() {
-            override fun replaceHookedMethod(param: XC_MethodHook.MethodHookParam): Any? {
-                return try {
-                    param.invokeOriginal()
-                } catch (t: Throwable) {
-                    if (isKnownWeChatCrash(t)) {
-                        WeLogger.e(
-                            TAG,
-                            "已吞掉微信自身崩溃（聊天页「附近直播」浮窗 NPE，本次浮窗不显示）: ${t.message}",
-                        )
-                        null
-                    } else {
-                        throw t
-                    }
+        // 上游用 XposedBridge.hookMethod(…, XC_MethodReplacement)；
+        // Zygisk 形态统一走模块自己的 hook 桥：hookBefore 里调用原方法并只吞掉已知崩溃。
+        runMethod.hookBeforeDirectly {
+            try {
+                invokeOriginal()
+            } catch (t: Throwable) {
+                if (isKnownWeChatCrash(t)) {
+                    WeLogger.e(
+                        TAG,
+                        "已吞掉微信自身崩溃（聊天页「附近直播」浮窗 NPE，本次浮窗不显示）: ${t.message}",
+                    )
+                    result = null
+                } else {
+                    throw t
                 }
             }
-        })
+        }
 
         WeLogger.i(TAG, "聊天直播浮窗崩溃防御已安装（iq0.run，仅豁免该已知崩溃）")
     }

@@ -141,7 +141,8 @@ object WeChatMessageViewApi : ApiFeature(), IResolveDex {
     @Volatile
     private var cachedAdapter: Any? = null
 
-    private fun cacheAdapter(param: XC_MethodHook.MethodHookParam) {
+    /** 上游用 Xposed 的 MethodHookParam；Zygisk 形态统一用 [HookParam]（thisObject 是接收者）。 */
+    private fun cacheAdapter(param: HookParam) {
         if (cachedAdapter != null) return
         runCatching {
             if (WeMessageApi.classChattingDataAdapter.isPlaceholder) return

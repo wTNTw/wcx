@@ -43,7 +43,7 @@ object AutoSpeechToText : SwitchFeature(),
     }
 
     private fun handleCreateView(
-        param: XC_MethodHook.MethodHookParam,
+        param: HookParam,
         view: View
     ) {
         val msgInfo = WeChatMessageViewApi.getMsgInfoFromParam(param)

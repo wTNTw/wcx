@@ -1,0 +1,25 @@
+merge: 同步上游 master（164 commits，v345 → v346）
+
+把 upstream/master（238faced，含 v346 与 8.0.80 相关修复）合并进 zygisk-module 分支。
+
+冲突（4 个文件，全部手工解决）：
+- WeMessageApi.kt：采用上游「多候选 + 按返回类型择优」的 sendImage 定位（比我们之前的
+  「allowFailure 取第一个」更准），并保留我们的注释风格；
+- AutoViewOriginalMedia.kt：采用上游重写（字段 + Activity 视图树两路查找、命中即节流），
+  我们原来只遍历 Button 字段，8.0.80 上点不到；
+- ChatToolbar.kt：上游同样是「显式接管全部构造器」思路，保留我们的 hookAllConstructors
+  实现，同时合并上游的 healthIssue / describeChildren 自检诊断；
+- BaseFeature.kt：把上游的 noteHookHit()（功能回执）和我们的 hook 失败熔断合并。
+
+为在 Zygisk 形态下编译，把上游新增的三处 Xposed API 用法适配到模块 hook 桥：
+- WeChatMessageViewApi.cacheAdapter(param: XC_MethodHook…) → HookParam
+- AutoSpeechToText.handleCreateView(param: XC_MethodHook…) → HookParam
+- ChatLivePreviewCrashGuard：XposedBridge.hookMethod + XC_MethodReplacement →
+  runMethod.hookBeforeDirectly + invokeOriginal()，仍只吞已知的微信自身崩溃
+
+保留的本分支特性（合并后逐个校验存在）：StartupCrashGuard、DexUnavailableStore、
+ModuleApkAssets、hookAllConstructors、debug.wcx.enable_all、hook 失败熔断。
+
+构建：:app:compileStandardDebugKotlin 通过；packageZygiskApk 产出
+wcx-v346-arm64-v8a.apk（42MB，上游新增依赖导致体积变大）。
+真机验证待做（当前 adb 无设备连接）。

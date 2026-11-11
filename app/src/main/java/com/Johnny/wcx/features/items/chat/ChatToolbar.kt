@@ -487,8 +487,6 @@ object ChatToolbar : ClickableFeature(), IResolveDex {
                 healthIssue = null
             }
             WeLogger.i(TAG, "聊天工具栏已注入聊天页（容器子 View 数=${linearLayout.childCount}）")
-            }
-            hookedConstructors++
         }
     }
 
