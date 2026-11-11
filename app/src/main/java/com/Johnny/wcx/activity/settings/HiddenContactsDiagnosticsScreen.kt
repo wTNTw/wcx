@@ -333,6 +333,8 @@ private fun repairFlow(): List<DiagStep> {
             before.clear()
             before += collect()
             val bad = before.count { !it.ok }
+            // 逐行落日志：否则「N 项异常」的结论在日志里没有依据，反馈问题时无从定位
+            before.forEach { row -> SelfCheckLog.step(row.ok, row.label, row.value) }
             listOf(DiagRow("修复前异常", "体检", "$bad 项", true, "共 ${before.size} 项，异常 $bad 项"))
         },
     ) + repairSteps() + listOf(
@@ -340,7 +342,15 @@ private fun repairFlow(): List<DiagStep> {
             after.clear()
             after += collect()
             val bad = after.count { !it.ok }
-            listOf(DiagRow("修复后异常", "复检", "$bad 项", bad == 0, "共 ${after.size} 项，异常 $bad 项"))
+            after.forEach { row -> SelfCheckLog.step(row.ok, "复检·" + row.label, row.value) }
+            listOf(
+                DiagRow(
+                    "修复后异常", "复检", "$bad 项", bad == 0,
+                    "共 ${after.size} 项，异常 $bad 项。" +
+                        if (bad > 0) "\n若异常项是「锚点自检」里的类/方法缺失，说明当前微信版本已改名，" +
+                            "只能等模块适配，开关和修复都解决不了。" else "",
+                )
+            )
         },
         DiagStep("前后对比") {
             val beforeBad = before.filter { !it.ok }.map { it.label }.toSet()
@@ -356,7 +366,13 @@ private fun repairFlow(): List<DiagStep> {
                         append("修复前异常 ").append(beforeBad.size).append(" 项，修复后 ")
                             .append(remain.size).append(" 项")
                         if (fixed.isNotEmpty()) append("\n已解决：").append(fixed.joinToString("、"))
-                        if (remain.isNotEmpty()) append("\n仍存在：").append(remain.joinToString("、"))
+                        if (remain.isNotEmpty()) {
+                            append("\n仍存在：").append(remain.joinToString("、"))
+                            if (beforeBad.any { it.contains("锚点") }) {
+                                append("\n\n锚点类异常无法通过「一键修复」解决：")
+                                append("它表示当前微信版本里对应的类/方法已改名，需要模块适配。")
+                            }
+                        }
                     },
                 )
             )
