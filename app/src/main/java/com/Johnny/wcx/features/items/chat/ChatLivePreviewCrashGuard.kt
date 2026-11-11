@@ -79,19 +79,30 @@ object ChatLivePreviewCrashGuard : SwitchFeature() {
             return
         }
 
-        // 上游用 XposedBridge.hookMethod(…, XC_MethodReplacement)；
-        // Zygisk 形态统一走模块自己的 hook 桥：hookBefore 里调用原方法并只吞掉已知崩溃。
+        // 上游用 XposedBridge.hookMethod(…, XC_MethodReplacement)：完全替换原方法。
+        // 本模块的桥是 hookBefore 语义 —— **必须设置 result（earlyReturn）**，否则
+        // 我们调用完 invokeOriginal() 之后，桥还会再执行一次原方法：
+        //   iq0.o.run 被跑两遍 → AudioManager 回调重复注册 →
+        //   IllegalArgumentException: attempt to call addOnModeChangedListener ...
+        // 真机就是这么崩的（栈里 LSPHooker_.run 抛在主线程）。
         runMethod.hookBeforeDirectly {
             try {
                 invokeOriginal()
+                // 原方法已执行完，告诉桥不要再跑一次
+                result = null
             } catch (t: Throwable) {
                 if (isKnownWeChatCrash(t)) {
                     WeLogger.e(
                         TAG,
-                        "已吞掉微信自身崩溃（聊天页「附近直播」浮窗 NPE，本次浮窗不显示）: ${t.message}",
+                        "已吞掉微信自身崩溃（聊天页「附近直播」浮窗，本次任务跳过）: ${t.message}",
                     )
                     result = null
                 } else {
+                    WeLogger.w(
+                        TAG,
+                        "未命中已知崩溃特征，照常抛出: ${t.javaClass.name}: ${t.message} " +
+                            "frames=" + t.stackTrace.take(6).joinToString { it.className },
+                    )
                     throw t
                 }
             }
@@ -150,10 +161,39 @@ object ChatLivePreviewCrashGuard : SwitchFeature() {
             t.message?.contains("previously registered listener") == true &&
             hasAudioCallbackFrame && hasAudioManagerFrame
         if (duplicateListener) {
-            WeLogger.i(TAG, "命中第二个已知的微信自身崩溃（AudioManager 回调重复注册），本次任务跳过")
+            WeLogger.i(TAG, "命中已知崩溃：AudioManager 回调重复注册（微信自身），本次任务跳过")
+            return true
+        }
+
+        // 兜底：IllegalArgumentException 且崩溃现场（桥接帧更深的部分）全在 android./java.
+        // 框架里 → 归为微信自身调用姿势问题，同样吞掉，避免主线程闪退。
+        if (t is IllegalArgumentException && !foundModuleCode && allFramesAreFramework(t)) {
+            WeLogger.i(TAG, "命中框架级 IllegalArgumentException（无模块代码参与），本次任务跳过: ${t.message}")
             return true
         }
         return false
+    }
+
+    /** 异常栈（不含模块桥接帧）里是否全是 android./java./kotlin. 框架帧。 */
+    private fun allFramesAreFramework(t: Throwable): Boolean {
+        var sawAny = false
+        var cause: Throwable? = t
+        while (cause != null) {
+            for (frame in cause.stackTrace) {
+                val cls = frame.className
+                if (cls.startsWith(BRIDGE_PACKAGE) || cls.startsWith("LSPHooker_") ||
+                    (cls == "java.lang.reflect.Method" && frame.methodName == "invoke")
+                ) {
+                    continue
+                }
+                sawAny = true
+                val framework = cls.startsWith("android.") || cls.startsWith("java.") ||
+                    cls.startsWith("kotlin.") || cls.startsWith("com.android.")
+                if (!framework) return false
+            }
+            cause = cause.cause
+        }
+        return sawAny
     }
 
 }
