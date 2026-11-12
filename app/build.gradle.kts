@@ -40,6 +40,14 @@ android {
     val commitCount = getCommitCount()
     val gitHash = getGitHash()
 
+    // BUILD_TIMESTAMP 必须是稳定的：以前用 System.currentTimeMillis()，导致生成的
+    // BuildConfig 每次配置都变 → generate*BuildConfig 永不 up-to-date，Kotlin/Java 增量
+    // 编译每次都要重编 BuildConfig 及其下游，配置缓存也无法复用。
+    // 默认取最后一次提交时间（毫秒），可用 -PwekitBuildTimestamp=<epochMillis> 覆盖。
+    val buildTimestamp: Long = providers.gradleProperty("wekitBuildTimestamp").orNull?.toLongOrNull()
+        ?: gitValue("log", "-1", "--format=%ct")?.toLongOrNull()?.times(1000)
+        ?: 0L
+
     defaultConfig {
         applicationId = libs.versions.namespace.get()
         minSdk = libs.versions.minSdk.get().toInt()
@@ -51,15 +59,24 @@ android {
 
         buildConfigField("String", "COMMIT_HASH", "\"${gitHash}\"")
         buildConfigField("String", "TAG", "\"WCX\"")
-        buildConfigField("long", "BUILD_TIMESTAMP", "${System.currentTimeMillis()}L")
+        buildConfigField("long", "BUILD_TIMESTAMP", "${buildTimestamp}L")
         buildConfigField("boolean", "BEAUTIFY_ENABLED", "true")
     }
+
+    // -Pwekit.abi=arm64-v8a[,armeabi-v7a]：只打指定 ABI 的包。
+    // 本地调试只需要自己设备那一套 .so，砍掉多余 ABI 就省掉一整套 资源/dex/打包/对齐/签名，
+    // 以及一半的 .so 拷贝与 strip。缺省仍是出齐两个 ABI（CI / 发版行为不变）。
+    val abiSplits: List<String> = (providers.gradleProperty("wekit.abi").orNull ?: "")
+        .split(',', ' ', ';')
+        .map { it.trim() }
+        .filter { it.isNotEmpty() }
+        .ifEmpty { listOf("arm64-v8a", "armeabi-v7a") }
 
     splits {
         abi {
             reset()
             isEnable = true
-            include("arm64-v8a", "armeabi-v7a")
+            include(*abiSplits.toTypedArray())
             isUniversalApk = false
         }
     }
@@ -193,7 +210,29 @@ android {
         // 默认 locale values/ 仅有少量 key，完整字符串位于 values-zh-rCN；
         // androidResources.localeFilters=zh 打包时只保留中文资源，ExtraTranslation 属误报。
         disable += "ExtraTranslation"
+        // 本地快速构建：跳过 release 的 lint vital 分析（这一步实测要 8 分钟）。
+        // CI 里不带 -Pfast，仍然照常检查。
+        checkReleaseBuilds = !fastBuild
     }
+}
+
+/**
+ * 本地快速构建开关：`./gradlew packageZygiskApk -Pfast`
+ *
+ * 只影响「出包速度」，不影响产物行为：
+ * - 跳过 release 的 lint vital（实测 8m25s）；
+ * - 跳过 Compose 编译映射（produce/mergeComposeMapping，实测约 1m40s）。
+ * CI 与正式发布不带这个开关，检查项保持完整。
+ */
+val fastBuild = providers.gradleProperty("fast").isPresent
+if (fastBuild) {
+    // Compose 编译映射（约 1m40s）只在做 Compose 工具链分析时需要
+    tasks.matching { it.name.contains("ComposeMapping") }.configureEach {
+        enabled = false
+    }
+    // release 的 lint vital 分析（实测 9 分钟）：直接禁任务，比 lint.checkReleaseBuilds 可靠
+    tasks.matching { it.name.startsWith("lintVital") || it.name.startsWith("lintAnalyze") }
+        .configureEach { enabled = false }
 }
 
 tasks.withType<KotlinCompile> {
@@ -295,6 +334,29 @@ val packageZygiskApk = tasks.register<PackageZygiskApkTask>("packageZygiskApk") 
 // assembleRelease 跑完后再串一步：finalizedBy 不会造成任务循环
 tasks.matching { it.name == "assembleRelease" }.configureEach {
     finalizedBy(packageZygiskApk)
+}
+
+/**
+ * 开发用快速出包：`./gradlew packageZygiskApkDebug`
+ *
+ * 用 debug 变体打包（**不做 R8 混淆/压缩**，release 里 R8 实测要 4 分半），
+ * 适合「改代码 → 推设备验证」的迭代；正式包仍用 `packageZygiskApk -Pfast`（或 CI）。
+ * 注意 debug 包体积更大、且默认可调试，别拿它当发布包。
+ */
+val packageZygiskApkDebug = tasks.register<PackageZygiskApkTask>("packageZygiskApkDebug") {
+    description = "开发用：用 debug 变体打一体包（不做 R8，快很多）"
+    group = "wekit"
+
+    dependsOn("assembleStandardDebug")
+
+    apkDir.set(layout.buildDirectory.dir("outputs/apk/standard/debug"))
+    templateDir.set(rootProject.layout.projectDirectory.dir("wcx-zygisk"))
+    outputDir.set(layout.buildDirectory.dir("outputs/zygisk-debug"))
+    rootProjectDir.set(rootProject.projectDir.absolutePath)
+    versionName.set((android.defaultConfig.versionName ?: "v0") + "-debug")
+    versionCode.set(android.defaultConfig.versionCode ?: 0)
+    moduleAuthor.set("wcx-dev")
+    abi.set("arm64-v8a")
 }
 
 // --- end tasks ---
