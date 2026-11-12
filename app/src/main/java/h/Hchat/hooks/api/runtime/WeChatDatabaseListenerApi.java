@@ -83,6 +83,8 @@ public final class WeChatDatabaseListenerApi {
     private final ThreadLocal<Integer> mutationDepth = ThreadLocal.withInitial(() -> 0);
     private final ThreadLocal<Integer> queryDepth = ThreadLocal.withInitial(() -> 0);
     private volatile boolean installed;
+    /** wrapper 还没就绪时的重试次数（最多 10 次 × 3s）。 */
+    private int retriesLeft = 10;
     private volatile int hookedMethodCount;
     private volatile Class<?> hookedWrapperClass;
 
@@ -144,7 +146,28 @@ public final class WeChatDatabaseListenerApi {
     }
 
     public synchronized void install() {
-        if (!isAvailable()) return;
+        // 顺序很关键：isAvailable() 本身就要求 sqliteDbWrapperClass != null，
+        // 所以必须先向主模块要 wrapper 类，否则会在这里直接 return，什么都不装、也不打日志。
+        // 8.0.80 起 DexFinder 的 "MicroMsg.SqliteDB" / "sql is null " 锚点失效，
+        // 主模块（WeDatabaseApi）能按形状匹配到同一个类。
+        if (dexFinder != null && dexFinder.sqliteDbWrapperClass == null) {
+            try {
+                Class<?> fromHost = com.Johnny.wcx.features.api.core.WeDatabaseApi.INSTANCE
+                        .getSqliteDbWrapperClass();
+                if (fromHost != null) {
+                    dexFinder.sqliteDbWrapperClass = fromHost;
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+        if (!isAvailable()) {
+            // 主模块的数据库初始化可能晚于这里：延后重试若干次，拿到 wrapper 再装。
+            if (dexFinder != null && dexFinder.sqliteDbWrapperClass == null && retriesLeft-- > 0) {
+                new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(this::install, 3000L);
+            }
+            return;
+        }
+        retriesLeft = 10;
         Class<?> wrapperClass = dexFinder != null ? dexFinder.sqliteDbWrapperClass : null;
         if (isOperational()) return;
         if (wrapperClass != hookedWrapperClass) {

@@ -41,6 +41,47 @@ object HchatBootstrap {
     var bootstrapped: Boolean = false
         private set
 
+    private val pendingWrapperRetries = java.util.concurrent.atomic.AtomicInteger(0)
+    private const val MAX_WRAPPER_RETRIES = 10
+    private const val WRAPPER_RETRY_DELAY_MS = 3_000L
+
+    /** 引导完成后的上下文（给「数据库 wrapper 补救」用）。 */
+    @Volatile
+    private var featureContext: FeatureContext? = null
+
+    /**
+     * 用主模块（WeDatabaseApi）解析出来的 SqliteDB wrapper 类补装 Hchat 的数据库监听。
+     *
+     * 背景：8.0.80 起 Hchat 的 DexFinder 靠 "MicroMsg.SqliteDB" / "sql is null " 找不到 wrapper，
+     * 于是 `WeChatDatabaseListenerApi.isOperational()` 永远 false →「消息变更监听未就绪」。
+     * 主模块用自己的形状匹配能找到同一个类，这里把结果塞进去并重新 install 一次。
+     */
+    fun applyHostSqliteDbWrapper(wrapperClass: Class<*>?) {
+        if (wrapperClass == null) return
+        val ctx = featureContext
+        val apiReady = runCatching {
+            h.Hchat.hooks.api.core.WeChatApis.databaseChanges() != null &&
+                h.Hchat.hooks.api.core.WeChatApis.messageChanges() != null
+        }.getOrDefault(false)
+        if (ctx == null || !apiReady) {
+            // 两边顺序不固定：主模块解析出 wrapper 时，Hchat 引导可能还没跑完。
+            // 这里延后重试，最多 ~30s（引导正常几秒内完成）。
+            if (pendingWrapperRetries.addAndGet(1) > MAX_WRAPPER_RETRIES) return
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                applyHostSqliteDbWrapper(wrapperClass)
+            }, WRAPPER_RETRY_DELAY_MS)
+            return
+        }
+        runCatching {
+            val finder = ctx.dexFinder()
+            if (finder.sqliteDbWrapperClass == wrapperClass) return
+            finder.sqliteDbWrapperClass = wrapperClass
+            WeLogger.i(TAG, "补装 Hchat 数据库监听：wrapper=${wrapperClass.name}")
+            runCatching { h.Hchat.hooks.api.core.WeChatApis.databaseChanges()?.install() }
+            runCatching { h.Hchat.hooks.api.core.WeChatApis.messageChanges()?.install() }
+        }.onFailure { WeLogger.w(TAG, "补装 Hchat 数据库监听失败", it) }
+    }
+
     fun install(hostContext: Context) {
         if (!android.os.Process.is64Bit()) {
             WeLogger.i(TAG, "32 位进程，跳过 Hchat 脚本子系统引导")
@@ -95,6 +136,8 @@ object HchatBootstrap {
                             bridgeHolder,
                             UIRegistry.get()
                         )
+
+                        featureContext = context
 
                         // 4. 只装脚本最小集：先 onInit（注册设置 provider），再 install。
                         val features = listOf(WechatApiFeature(), ScriptPluginFeature())

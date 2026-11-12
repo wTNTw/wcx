@@ -464,6 +464,12 @@ object WeDatabaseApi : ApiFeature(), IResolveDex {
 
         db = database
         WeLogger.i(TAG, "数据库服务就绪：${storageObj.javaClass.name} -> ${wrapperObj.javaClass.name}")
+
+        // 把 wrapper 类同步给 Hchat（它的 DexFinder 锚点在 8.0.80 已失效），
+        // 否则脚本子系统的「消息变更监听」永远未就绪。两端顺序不定，所以这里主动推。
+        runCatching {
+            com.Johnny.wcx.features.hchat.HchatBootstrap.applyHostSqliteDbWrapper(wrapperObj.javaClass)
+        }.onFailure { WeLogger.w(TAG, "同步 wrapper 类给 Hchat 失败", it) }
     }
 
     /**
