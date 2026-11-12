@@ -14,6 +14,8 @@ import h.Hchat.hooks.api.runtime.WeChatDatabaseApi
 import h.Hchat.hooks.core.DexInstallScheduler
 import h.Hchat.hooks.core.FeatureContext
 import h.Hchat.preferences.HchatStorage
+import de.robv.android.xposed.XC_MethodHook
+import de.robv.android.xposed.XposedBridge
 import h.Hchat.utils.HLog
 import h.Hchat.utils.KavaReflector
 import org.luckypray.dexkit.query.FindMethod
@@ -361,10 +363,45 @@ object QuickMarkReadRuntime {
         }
         val storage = nativeMarkReadStorage(database, method)
         if (storage == null) {
-            com.Johnny.wcx.utils.WeLogger.w(TAG, "原生已读入口定位成功但 storage 未就绪: ${method.toGenericString()}")
-            return false
+            // 不是安装失败：入口已定位、storage 实例会在微信读会话时被捕获，调用时也会再取一次。
+            com.Johnny.wcx.utils.WeLogger.i(
+                TAG,
+                "原生已读入口已就绪，storage 实例待捕获: ${method.toGenericString()}",
+            )
         }
         return true
+    }
+
+    /**
+     * 8.0.80 起会话存储实例既不在 CoreStorage 字段图里，也没有对应的无参 getter，
+     * 所以改成「谁创建谁给」：挂住该类的所有构造器，把创建出来的实例留下。
+     * 存储是懒加载的，可能在引导之后才创建，因此这里只挂一次、捕获到就用。
+     */
+    @Volatile private var capturedStorageClass: Class<*>? = null
+
+    private fun captureStorageInstance(clazz: Class<*>) {
+        if (capturedStorageClass === clazz) return
+        capturedStorageClass = clazz
+        // 实例在引导跑起来之前就创建好了（构造器钩子抓不到），
+        // 所以改成挂它的实例方法：微信读会话列表时必然会调到，届时把 thisObject 留下。
+        val capture = object : XC_MethodHook() {
+            override fun afterHookedMethod(param: MethodHookParam) {
+                val instance = param.thisObject ?: return
+                if (nativeMarkReadStorage == null) {
+                    nativeMarkReadStorage = instance
+                    com.Johnny.wcx.utils.WeLogger.i(TAG, "已捕获原生已读 storage 实例: ${clazz.name}")
+                }
+            }
+        }
+        var hooked = 0
+        KavaReflector.declaredMethods(clazz).forEach { method ->
+            if (KavaReflector.isStatic(method)) return@forEach
+            val ok = runCatching {
+                h.Hchat.hooks.core.HookRegistry.get().hook(method, capture) != null
+            }.getOrDefault(false)
+            if (ok) hooked++
+        }
+        com.Johnny.wcx.utils.WeLogger.i(TAG, "已挂 ${clazz.name} 的 $hooked 个实例方法用于捕获 storage")
     }
 
     private fun nativeMarkReadStorage(database: WeChatDatabaseApi, method: Method): Any? {
@@ -388,6 +425,7 @@ object QuickMarkReadRuntime {
         )
         if (cached != null && isNativeMarkReadMethod(cached)) {
             nativeMarkReadMethod = cached
+            captureStorageInstance(cached.declaringClass)
             return cached
         }
         if (cached != null) {
@@ -406,6 +444,7 @@ object QuickMarkReadRuntime {
             nativeMarkReadMethod = method
             nativeMarkReadStorage = null
             DexMethodCache.save(prefs, methodCacheKey, CACHE_NATIVE_MARK_READ, method)
+            captureStorageInstance(method.declaringClass)
             return method
         }
         DexMethodCache.clear(prefs, methodCacheKey, CACHE_NATIVE_MARK_READ)
