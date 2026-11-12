@@ -74,9 +74,13 @@ object HchatBootstrap {
         }
         runCatching {
             val finder = ctx.dexFinder()
-            if (finder.sqliteDbWrapperClass == wrapperClass) return
-            finder.sqliteDbWrapperClass = wrapperClass
-            WeLogger.i(TAG, "补装 Hchat 数据库监听：wrapper=${wrapperClass.name}")
+            // 注意：wrapper 类可能已经被 DexFinder 自己填上了（我们上一次推的），
+            // 但 Hchat 的监听是在「还没拿到 wrapper」时 install 过一次、失败后不会再自己重来。
+            // 所以这里无条件再 install 一次（install() 内部是幂等的：operational 就直接返回）。
+            if (finder.sqliteDbWrapperClass != wrapperClass) {
+                finder.sqliteDbWrapperClass = wrapperClass
+                WeLogger.i(TAG, "补装 Hchat 数据库监听：wrapper=${wrapperClass.name}")
+            }
             runCatching { h.Hchat.hooks.api.core.WeChatApis.databaseChanges()?.install() }
             runCatching { h.Hchat.hooks.api.core.WeChatApis.messageChanges()?.install() }
         }.onFailure { WeLogger.w(TAG, "补装 Hchat 数据库监听失败", it) }
