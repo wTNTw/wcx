@@ -83,7 +83,7 @@ jobs:
           org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g -Xss512k -Dfile.encoding=UTF-8 -XX:+UseParallelGC -XX:ReservedCodeCacheSize=512m
           org.gradle.parallel=false
           kotlin.compiler.execution.strategy=daemon
-          kotlin.daemon.jvmargs=-Xmx3g -XX:MaxMetaspaceSize=768m
+          kotlin.daemon.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=1g
           android.r8.maxWorkers=1
           EOF
           echo "CI gradle profile:"; cat "$GUH/gradle.properties"
