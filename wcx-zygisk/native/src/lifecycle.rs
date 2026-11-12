@@ -10,7 +10,7 @@ use crate::protocol::{
     read_u8_from_fd, write_string_to_fd, write_u8_to_fd,
 };
 use crate::zygisk::{ApiTable, AppSpecializeArgs, DLCLOSE_MODULE_LIBRARY, ServerSpecializeArgs};
-use crate::{loge, logi};
+use crate::{loge, logi, logw};
 use jni::sys::{JNIEnv as RawJNIEnv, jobject, jstring};
 use std::{
     ffi::{CStr, c_char},
@@ -292,10 +292,10 @@ pub unsafe fn do_post_app_specialize(module: &mut WcxZygiskModule, _args: *const
         ((*fns).v1_6.DeleteGlobalRef)(module.env, cl);
         cl = std::ptr::null_mut();
         if attempt >= 3 {
-            loge!("Zygisk: 文件式 dex 加载仍为空（试了 {attempt} 次），回退 InMemoryDexClassLoader");
+            logw!("Zygisk: 文件式 dex 加载仍为空（试了 {attempt} 次），回退 InMemoryDexClassLoader（本 ROM 预期路径）");
             break;
         }
-        loge!("Zygisk: 文件式 dex 加载为空，第 {attempt} 次重试");
+        logw!("Zygisk: 文件式 dex 加载为空，第 {attempt} 次重试");
         std::thread::sleep(std::time::Duration::from_millis(40));
         let parent_retry = ((*fns).v1_6.CallStaticObjectMethod)(
             module.env,

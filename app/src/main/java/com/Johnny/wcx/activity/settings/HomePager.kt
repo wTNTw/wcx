@@ -301,7 +301,9 @@ fun HomePager(
                     }
                 }
             }.onFailure {
-                WeLogger.e("HomePager", "Update check exception", it)
+                // 网络类失败（connection closed / 超时）不是模块故障，界面已经提示「检查更新失败」，
+                // 这里降到 W，避免用户日志出现 E 级堆栈。
+                WeLogger.w("HomePager", "Update check exception", it)
                 latestVersion = null
                 isLatest = false
             }
