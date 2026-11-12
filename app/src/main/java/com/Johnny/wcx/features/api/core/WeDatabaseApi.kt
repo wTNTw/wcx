@@ -509,11 +509,17 @@ object WeDatabaseApi : ApiFeature(), IResolveDex {
             val methods = cls.declaredMethods.filter { it.parameterCount == 0 }.take(40).joinToString("; ") { m ->
                 m.name + "():" + m.returnType.simpleName
             }
-            WeLogger.w(
-                TAG,
-                "initializeDatabase: CoreStorage(${cls.name}) 中未找到 SqliteDB wrapper，本次跳过。" +
-                    "\n  字段: " + fields + "\n  无参方法: " + methods,
-            )
+            // 首次调用时 CoreStorage 的字段还没填（下一次就会成功），属于时序而非故障 → I 级。
+            // 结构明细只在排错开关打开时输出。
+            if (com.Johnny.wcx.utils.DebugFlags.enableAllFeatures) {
+                WeLogger.i(
+                    TAG,
+                    "initializeDatabase: CoreStorage(${cls.name}) 中未找到 SqliteDB wrapper，本次跳过。" +
+                        "\n  字段: " + fields + "\n  无参方法: " + methods,
+                )
+            } else {
+                WeLogger.i(TAG, "initializeDatabase: CoreStorage(${cls.name}) 中未找到 SqliteDB wrapper，本次跳过。")
+            }
         }.onFailure { WeLogger.w(TAG, "dumpStorageShape 失败", it) }
     }
 

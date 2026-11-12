@@ -220,7 +220,8 @@ object WeSettingsInjector : ApiFeature(), IResolveDex, WeChatInputBarApi.IInputB
     private fun injectLegacy() {
         val clsSettingsUi = "${PackageNames.WECHAT}.plugin.setting.ui.setting.SettingsUI"
             .toClassOrNull() ?: run {
-            WeLogger.w(TAG, "legacy settings class not found, skipping")
+            // 新版本已无该 Activity（Zygisk 版走自己的入口），预期缺失 → I 级。
+            WeLogger.i(TAG, "legacy settings class not found, skipping")
             return
         }
 
