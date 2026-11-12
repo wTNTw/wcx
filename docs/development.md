@@ -123,17 +123,34 @@ adb shell cmd package compile -m speed-profile com.Johnny.wcx
 
 ## 5. Zygisk 模块的刷入与更新
 
-产物在 ，**改后缀为 ** 即可在
+产物在 `app/build/outputs/zygisk/wcx-<ver>-<abi>.apk`，**改后缀为 `.zip`** 即可在
 Magisk / KernelSU / APatch 里刷入。刷入脚本会把 APK 里的东西摊到模块目录：
 
+```none
+/data/adb/modules/zygisk-wcx/
+├── module.apk            # 整个 APK（payload：dex + assets + 原生库）
+├── zygisk/arm64-v8a.so   # 从 APK 的 lib/arm64-v8a/libwcx_zygisk.so 复制出来的注入器
+├── config.sh / service.sh / uninstall.sh / webroot/
+└── target.list
+```
 
+> **更新时容易踩的坑**：只替换 `module.apk`（`cp 新包 module.apk`）**不会**更新
+> `zygisk/arm64-v8a.so`。注入器（`wcx-zygisk/native`，含 `should_inject`、payload
+> 发布与清理、dex 加载策略）改动后必须同步这个文件，否则设备上跑的还是刷入那天的
+> 旧逻辑（现象：改了 Rust 却「没生效」）。手工更新：
 
-> **更新时容易踩的坑**：只替换 （）**不会**更新
-> 。注入器（，含 、payload 发布与
-> 清理、dex 加载策略）改动后必须同步这个文件，否则设备上跑的还是刷入那天的旧逻辑
-> （现象：改了 Rust 却「没生效」）。手工更新：
+```bash
+adb push app/build/outputs/zygisk/wcx-v<ver>-arm64-v8a.apk /data/local/tmp/m.apk
+adb shell su -c '
+  M=/data/adb/modules/zygisk-wcx
+  cp /data/local/tmp/m.apk $M/module.apk && chmod 0644 $M/module.apk
+  cd /data/local/tmp && rm -rf zsol && mkdir zsol && cd zsol &&
+    unzip -o -q $M/module.apk "lib/arm64-v8a/libwcx_zygisk.so" &&
+    cp lib/arm64-v8a/libwcx_zygisk.so $M/zygisk/arm64-v8a.so &&
+    chmod 0644 $M/zygisk/arm64-v8a.so
+  am force-stop com.tencent.mm
+'
+```
 
-
-
-（Zygisk 在开机时缓存模块列表，**换注入器 .so 后要重启手机**；只换 
+（Zygisk 在开机时缓存模块列表，**换注入器 `.so` 后要重启手机**；只换 `module.apk`
 时杀掉微信进程重开即可。）
