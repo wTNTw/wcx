@@ -108,7 +108,7 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/configuration-cache
-          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties', '**/gradle.properties') }}
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties', '**/gradle.properties', 'gradle/libs.versions.toml', 'app/libs/**') }}
           restore-keys: |
             gradle-${{ runner.os }}-
 
