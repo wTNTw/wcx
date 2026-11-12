@@ -3,6 +3,17 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 import org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile
 
+/**
+ * 本地/CI 快速构建开关：`-Pfast`
+ *
+ * 必须声明在 `android { }` 之前：Kotlin 脚本里后置声明的 top-level val 在更早的
+ * 配置块中读到的还是默认值 false，会让 lint 开关永远失效（踩过）。
+ *
+ * 只影响出包速度：跳过 release lint vital（实测 9 分钟）与 Compose 编译映射；
+ * 产物功能不变。CI 与发版默认不带该开关。
+ */
+val fastBuild = providers.gradleProperty("fast").isPresent
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.google.devtools.ksp)
@@ -224,15 +235,20 @@ android {
  * - 跳过 Compose 编译映射（produce/mergeComposeMapping，实测约 1m40s）。
  * CI 与正式发布不带这个开关，检查项保持完整。
  */
-val fastBuild = providers.gradleProperty("fast").isPresent
 if (fastBuild) {
-    // Compose 编译映射（约 1m40s）只在做 Compose 工具链分析时需要
-    tasks.matching { it.name.contains("ComposeMapping") }.configureEach {
-        enabled = false
+    // 注意：不能用 tasks.matching{}.configureEach{} —— AGP 会在更晚的时候把 enabled 重新置回 true，
+    // 实测（--dry-run）lintVital 任务依旧被调度。改在任务图就绪后统一关掉。
+    gradle.taskGraph.whenReady {
+        allTasks.forEach { task ->
+            val name = task.name
+            val drop = name.contains("ComposeMapping") ||
+                name.startsWith("lintVital") ||
+                name.startsWith("lintAnalyze")
+            if (drop && task.enabled) {
+                task.enabled = false
+            }
+        }
     }
-    // release 的 lint vital 分析（实测 9 分钟）：直接禁任务，比 lint.checkReleaseBuilds 可靠
-    tasks.matching { it.name.startsWith("lintVital") || it.name.startsWith("lintAnalyze") }
-        .configureEach { enabled = false }
 }
 
 tasks.withType<KotlinCompile> {

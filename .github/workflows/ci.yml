@@ -305,10 +305,17 @@ jobs:
       - name: Collect mappings
         run: |
           mkdir -p dist/mapping
-          for m in app/build/outputs/mapping/*/mapping.txt; do
+          # R8 mapping 是可选产物（fast 构建/某些 AGP 配置下可能不生成），找不到不该让 CI 挂
+          found=0
+          while IFS= read -r -d '' m; do
             flavorDir=$(basename "$(dirname "$m")")
             cp -v "$m" "dist/mapping/mapping-${flavorDir}.txt"
-          done
+            found=$((found + 1))
+          done < <(find app/build/outputs/mapping -name 'mapping.txt' -print0 2>/dev/null)
+          if [ "$found" -eq 0 ]; then
+            echo "::warning::没有找到 R8 mapping.txt（不致命）。outputs/mapping 内容："
+            find app/build/outputs/mapping -maxdepth 3 2>/dev/null | head -20 || true
+          fi
           ls -1 dist/mapping || echo "(no mappings)"
 
       # 四个 APK 分开上传（不再打成一个 50MB 的 artifact zip）
