@@ -66,7 +66,11 @@ object HchatBootstrap {
         if (ctx == null || !apiReady) {
             // 两边顺序不固定：主模块解析出 wrapper 时，Hchat 引导可能还没跑完。
             // 这里延后重试，最多 ~30s（引导正常几秒内完成）。
-            if (pendingWrapperRetries.addAndGet(1) > MAX_WRAPPER_RETRIES) return
+            val n = pendingWrapperRetries.addAndGet(1)
+            if (n > MAX_WRAPPER_RETRIES) {
+                WeLogger.w(TAG, "Hchat 监听补装放弃：重试 $MAX_WRAPPER_RETRIES 次仍未就绪（ctx=${ctx != null} api=$apiReady）")
+                return
+            }
             android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
                 applyHostSqliteDbWrapper(wrapperClass)
             }, WRAPPER_RETRY_DELAY_MS)
@@ -81,8 +85,16 @@ object HchatBootstrap {
                 finder.sqliteDbWrapperClass = wrapperClass
                 WeLogger.i(TAG, "补装 Hchat 数据库监听：wrapper=${wrapperClass.name}")
             }
-            runCatching { h.Hchat.hooks.api.core.WeChatApis.databaseChanges()?.install() }
-            runCatching { h.Hchat.hooks.api.core.WeChatApis.messageChanges()?.install() }
+            val dbChanges = h.Hchat.hooks.api.core.WeChatApis.databaseChanges()
+            val msgChanges = h.Hchat.hooks.api.core.WeChatApis.messageChanges()
+            runCatching { dbChanges?.install() }
+            runCatching { msgChanges?.install() }
+            WeLogger.i(
+                TAG,
+                "Hchat 监听状态：wrapper=${wrapperClass.name} " +
+                    "dbOperational=${dbChanges?.isOperational()} " +
+                    "msgReady=${msgChanges?.isAvailable()} msgInstalled=${msgChanges?.isInstalled()}",
+            )
         }.onFailure { WeLogger.w(TAG, "补装 Hchat 数据库监听失败", it) }
     }
 
