@@ -268,6 +268,14 @@ public final class WeChatDatabaseApi {
         Object storage = getCoreStorage();
         if (storage == null) return null;
 
+        // 8.0.80 起会话存储挂在 CoreStorage 的 getter 后面（字段图里够不到），
+        // 先直接用「返回类型正好是目标类」的无参 getter 取，拿不到再退回字段 BFS。
+        Object direct = findStorageViaGetter(storage, owner);
+        if (direct != null) {
+            storageObjectCache.put(cacheKey, direct);
+            return direct;
+        }
+
         Set<Object> visited = Collections.newSetFromMap(new IdentityHashMap<>());
         ArrayDeque<Object> queue = new ArrayDeque<>();
         queue.add(storage);
@@ -281,7 +289,36 @@ public final class WeChatDatabaseApi {
             }
             enqueueNestedObjects(current, queue, visited);
         }
+        diagnoseStorageLookup(owner, storage, visited.size());
         return null;
+    }
+
+    private final java.util.Set<String> storageLookupDiagnosed = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    /** 找不到目标 storage 时，把 CoreStorage 的形态打一次，便于对齐新版本。 */
+    private void diagnoseStorageLookup(Class<?> owner, Object storage, int visited) {
+        if (!storageLookupDiagnosed.add(owner.getName())) return;
+        // 只打一行 W（进用户日志），详细 getter 列表仅在 debug.wcx.enable_all=1 时输出。
+        com.Johnny.wcx.utils.WeLogger.INSTANCE.w("WeChatDatabaseApi", "storage 定位失败: owner=" + owner.getName()
+                + " core=" + storage.getClass().getName() + " 遍历对象=" + visited
+                + "（字段图里不存在该类实例，需换访问路径）");
+        if (!com.Johnny.wcx.utils.DebugFlags.INSTANCE.getEnableAllFeatures()) return;
+        Class<?> cur = storage.getClass();
+        int shown = 0;
+        while (cur != null && cur != Object.class && shown < 30) {
+            for (Method method : KavaReflector.declaredMethods(cur)) {
+                try {
+                    if (KavaReflector.isStatic(method)) continue;
+                    if (method.getParameterTypes().length != 0) continue;
+                    Class<?> rt = method.getReturnType();
+                    if (rt == null || rt.isPrimitive() || rt == String.class) continue;
+                    log("  getter: " + method.getName() + "() -> " + rt.getName());
+                    if (++shown >= 30) break;
+                } catch (Throwable ignored) {
+                }
+            }
+            cur = cur.getSuperclass();
+        }
     }
 
     public List<String> messageTables() {
@@ -602,6 +639,56 @@ public final class WeChatDatabaseApi {
             }
 
             enqueueNestedObjects(current, queue, visited);
+        }
+        return null;
+    }
+
+    /**
+     * 8.0.80 起会话存储既不在 CoreStorage 的字段图里，也没有「返回类型正好是它」的 getter。
+     * 这里放宽成：对 CoreStorage 及其直接字段对象，逐个调用无参 getter，看返回值是不是目标类型。
+     * 只在字段 BFS 失败后调用，且守卫了异常与返回值判空。
+     */
+    private Object findStorageViaGetter(Object storage, Class<?> owner) {
+        Object hit = findStorageViaGetterOn(storage, owner);
+        if (hit != null) return hit;
+        Class<?> cur = storage.getClass();
+        while (cur != null && cur != Object.class) {
+            for (Field field : KavaReflector.declaredFields(cur)) {
+                try {
+                    if (KavaReflector.isStatic(field)) continue;
+                    Class<?> type = field.getType();
+                    if (type.isPrimitive() || type == String.class) continue;
+                    Object value = KavaReflector.readField(field, storage);
+                    if (value == null) continue;
+                    if (owner.isInstance(value)) return value;
+                    hit = findStorageViaGetterOn(value, owner);
+                    if (hit != null) return hit;
+                } catch (Throwable ignored) {
+                }
+            }
+            cur = cur.getSuperclass();
+        }
+        return null;
+    }
+
+    private Object findStorageViaGetterOn(Object target, Class<?> owner) {
+        Class<?> cur = target.getClass();
+        while (cur != null && cur != Object.class) {
+            for (Method method : KavaReflector.declaredMethods(cur)) {
+                try {
+                    if (KavaReflector.isStatic(method)) continue;
+                    if (method.getParameterTypes().length != 0) continue;
+                    Class<?> returnType = method.getReturnType();
+                    if (returnType == null || returnType.isPrimitive() || returnType == String.class
+                            || returnType == Class.class) continue;
+                    String name = method.getName();
+                    if ("toString".equals(name) || "hashCode".equals(name) || "clone".equals(name)) continue;
+                    Object value = KavaReflector.invokeOrThrow(method, target);
+                    if (value != null && owner.isInstance(value)) return value;
+                } catch (Throwable ignored) {
+                }
+            }
+            cur = cur.getSuperclass();
         }
         return null;
     }

@@ -125,7 +125,10 @@ internal class FinderFeedDetailResolver private constructor(
                 DexMethodCache.clear(prefs, runtimeKey, CACHE_CONSTRUCTOR)
                 DexMethodCache.clear(prefs, runtimeKey, CACHE_CALLBACK)
                 constructor = locateRequestConstructor(context) ?: return null
-                callback = locateCallbackMethod(constructor.declaringClass) ?: return null
+                callback = locateCallbackMethod(constructor.declaringClass) ?: run {
+                    dumpCallbackCandidates(constructor.declaringClass)
+                    return null
+                }
             }
             val resolvedConstructor = constructor ?: return null
             val resolvedCallback = callback ?: return null
@@ -138,6 +141,15 @@ internal class FinderFeedDetailResolver private constructor(
         private fun locateCallbackMethod(owner: Class<*>): Method? {
             return KavaReflector.declaredMethods(owner)
                 .singleOrNull { isCallbackMethod(it, owner) }
+        }
+
+        /** 8.0.80 起回调方法签名变了，把候选签名打出来以便对齐。 */
+        private fun dumpCallbackCandidates(owner: Class<*>) {
+            val methods = KavaReflector.declaredMethods(owner)
+            WeLogger.w(TAG, "视频号详情回调未定位: owner=${owner.name} 方法数=${methods.size}")
+            methods.take(24).forEach { method ->
+                WeLogger.w(TAG, "  候选: ${method.toGenericString()}")
+            }
         }
 
         private fun locateRequestConstructor(context: FeatureContext): Constructor<*>? {
@@ -193,15 +205,37 @@ internal class FinderFeedDetailResolver private constructor(
 
         private fun isCallbackMethod(method: Method, owner: Class<*>): Boolean {
             val types = method.parameterTypes
-            return method.declaringClass == owner &&
-                method.returnType == Void.TYPE &&
-                types.size == 6 &&
-                types[0] == java.lang.Integer.TYPE &&
-                types[1] == java.lang.Integer.TYPE &&
-                types[2] == java.lang.Integer.TYPE &&
-                types[3] == String::class.java &&
-                !types[4].isPrimitive &&
-                types[5] == ByteArray::class.java
+            if (method.declaringClass != owner || method.returnType != Void.TYPE) return false
+            // 8.0.79 及以前: (int, int, int, String, resp, byte[])  —— 6 参
+            // 8.0.80 起:      (int, int, String, resp, ResponseWrap) —— 5 参
+            // 统一按「两个前导 int + String + 紧随其后的响应对象」识别。
+            if (types.size < 5 || types.size > 6) return false
+            if (types[0] != java.lang.Integer.TYPE || types[1] != java.lang.Integer.TYPE) return false
+            val stringIndex = types.indices.firstOrNull { types[it] == String::class.java } ?: return false
+            if (stringIndex < 2 || stringIndex >= types.size - 1) return false
+            if (types[stringIndex + 1].isPrimitive) return false
+            return true
+        }
+
+        /** 老形态直接给 byte[]；8.0.80 给的是包装对象，尝试从里面掏出 byte[]。 */
+        private fun responseBytes(value: Any?): ByteArray? {
+            if (value == null) return null
+            (value as? ByteArray)?.let { return it }
+            val clazz = value.javaClass
+            KavaReflector.declaredFields(clazz).firstOrNull {
+                !KavaReflector.isStatic(it) && it.type == ByteArray::class.java
+            }?.let { field ->
+                (runCatching { KavaReflector.readField(field, value) }.getOrNull() as? ByteArray)
+                    ?.let { return it }
+            }
+            KavaReflector.declaredMethods(clazz).firstOrNull {
+                !KavaReflector.isStatic(it) && it.parameterTypes.isEmpty() &&
+                    it.returnType == ByteArray::class.java
+            }?.let { method ->
+                (runCatching { KavaReflector.invokeOrThrow(method, value) }.getOrNull() as? ByteArray)
+                    ?.let { return it }
+            }
+            return null
         }
 
         private fun installCallbackHook(method: Method): Boolean {
@@ -211,13 +245,18 @@ internal class FinderFeedDetailResolver private constructor(
                     override fun afterHookedMethod(param: MethodHookParam) {
                         val scene = param.thisObject ?: return
                         val request = pending.remove(scene) ?: return
-                        val errType = (param.args.getOrNull(1) as? Number)?.toInt() ?: -1
-                        val errCode = (param.args.getOrNull(2) as? Number)?.toInt() ?: -1
+                        // 参数位置随微信版本变化：以 String 入参为锚点反推。
+                        val types = method.parameterTypes
+                        val stringIndex = types.indices.firstOrNull {
+                            types[it] == String::class.java
+                        } ?: 3
+                        val errType = (param.args.getOrNull(stringIndex - 2) as? Number)?.toInt() ?: -1
+                        val errCode = (param.args.getOrNull(stringIndex - 1) as? Number)?.toInt() ?: -1
                         if (errType == 0 && errCode == 0) {
                             request.finderObject = extractFinderObject(
                                 scene,
-                                param.args.getOrNull(4),
-                                param.args.getOrNull(5) as? ByteArray,
+                                param.args.getOrNull(stringIndex + 1),
+                                responseBytes(param.args.lastOrNull()),
                                 request.feedId
                             )
                             if (request.finderObject == null) {

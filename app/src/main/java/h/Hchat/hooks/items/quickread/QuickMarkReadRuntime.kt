@@ -347,9 +347,24 @@ object QuickMarkReadRuntime {
     }
 
     private fun prepareNativeMarkRead(context: FeatureContext, allowDexSearch: Boolean): Boolean {
-        val method = locateNativeMarkReadMethod(context, allowDexSearch) ?: return false
-        val database = WeChatApis.database() ?: return false
-        return nativeMarkReadStorage(database, method) != null
+        val method = locateNativeMarkReadMethod(context, allowDexSearch)
+        if (method == null) {
+            if (allowDexSearch) {
+                com.Johnny.wcx.utils.WeLogger.w(TAG, "原生已读入口未定位（DexKit 搜索已开启，见上一条候选数日志）")
+            }
+            return false
+        }
+        val database = WeChatApis.database()
+        if (database == null) {
+            com.Johnny.wcx.utils.WeLogger.w(TAG, "原生已读入口定位成功但数据库 API 未就绪: ${method.toGenericString()}")
+            return false
+        }
+        val storage = nativeMarkReadStorage(database, method)
+        if (storage == null) {
+            com.Johnny.wcx.utils.WeLogger.w(TAG, "原生已读入口定位成功但 storage 未就绪: ${method.toGenericString()}")
+            return false
+        }
+        return true
     }
 
     private fun nativeMarkReadStorage(database: WeChatDatabaseApi, method: Method): Any? {
@@ -385,6 +400,7 @@ object QuickMarkReadRuntime {
         val located = findNativeMarkReadMethods(context)
             .filter { isNativeMarkReadMethod(it) }
             .distinctBy { it.toGenericString() }
+        com.Johnny.wcx.utils.WeLogger.d(TAG, "原生已读入口候选数=${located.size}")
         val method = located.singleOrNull()
         if (method != null) {
             nativeMarkReadMethod = method
