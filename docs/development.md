@@ -120,3 +120,20 @@ cargo xtask run --release --flavor legacy
 # 可选: 应用基准配置 (Baseline Profile)
 adb shell cmd package compile -m speed-profile com.Johnny.wcx
 ```
+
+## 5. Zygisk 模块的刷入与更新
+
+产物在 ，**改后缀为 ** 即可在
+Magisk / KernelSU / APatch 里刷入。刷入脚本会把 APK 里的东西摊到模块目录：
+
+
+
+> **更新时容易踩的坑**：只替换 （）**不会**更新
+> 。注入器（，含 、payload 发布与
+> 清理、dex 加载策略）改动后必须同步这个文件，否则设备上跑的还是刷入那天的旧逻辑
+> （现象：改了 Rust 却「没生效」）。手工更新：
+
+
+
+（Zygisk 在开机时缓存模块列表，**换注入器 .so 后要重启手机**；只换 
+时杀掉微信进程重开即可。）
