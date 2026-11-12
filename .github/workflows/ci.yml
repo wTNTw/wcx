@@ -33,6 +33,10 @@ on:
         description: '仅测试用：无固定签名 keystore 时跳过签名（产物为 unsigned，不发版）'
         type: boolean
         default: false
+      fast:
+        description: '测速用：跳过 release lint vital 与 Compose 编译映射（产物功能不变）'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -66,6 +70,23 @@ jobs:
           distribution: temurin
           java-version: 21
           cache: gradle
+
+      - name: Apply CI memory profile
+        run: |
+          # 仓库 gradle.properties 里放的是「本地快速构建」的默认值（parallel / Kotlin daemon 等）。
+          # CI runner 内存紧张，必须换回省内存的配置：Gradle 属性优先级是
+          # 命令行 > $GRADLE_USER_HOME/gradle.properties > 仓库 gradle.properties，
+          # 所以写进用户目录就能覆盖仓库默认值（本地开发不受影响）。
+          GUH="${GRADLE_USER_HOME:-$HOME/.gradle}"
+          mkdir -p "$GUH"
+          cat >> "$GUH/gradle.properties" <<'EOF'
+          org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g -Xss512k -Dfile.encoding=UTF-8 -XX:+UseParallelGC -XX:ReservedCodeCacheSize=512m
+          org.gradle.parallel=false
+          kotlin.compiler.execution.strategy=daemon
+          kotlin.daemon.jvmargs=-Xmx3g -XX:MaxMetaspaceSize=768m
+          android.r8.maxWorkers=1
+          EOF
+          echo "CI gradle profile:"; cat "$GUH/gradle.properties"
 
       - name: Grant execute permission
         run: chmod +x gradlew
@@ -216,13 +237,13 @@ jobs:
           export WEKIT_KEYSTORE_PASSWORD="$KS_PASS"
           export WEKIT_KEY_ALIAS="$KEY_ALIAS"
           export WEKIT_KEY_PASSWORD="$KEY_PASS"
-          ./gradlew assembleRelease --warning-mode all --stacktrace
+          ./gradlew assembleRelease --warning-mode all --stacktrace ${{ (github.event_name == 'workflow_dispatch' && inputs.fast) && '-Pfast' || '' }}
 
       - name: Build Release (Unsigned)
         if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.skip_signing)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: ./gradlew assembleRelease --warning-mode all --stacktrace
+        run: ./gradlew assembleRelease --warning-mode all --stacktrace ${{ (github.event_name == 'workflow_dispatch' && inputs.fast) && '-Pfast' || '' }}
 
       - name: Collect APKs
         run: |
