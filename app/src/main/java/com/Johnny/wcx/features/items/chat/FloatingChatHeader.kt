@@ -73,6 +73,7 @@ import com.Johnny.wcx.ui.utils.findViewWhich
 import com.Johnny.wcx.ui.utils.findViewsWhich
 import com.Johnny.wcx.ui.utils.showComposeDialog
 import com.Johnny.wcx.utils.WeLogger
+import com.Johnny.wcx.utils.hookAfterDirectly
 import com.Johnny.wcx.utils.android.isDarkMode
 import com.Johnny.wcx.utils.reflection.int
 import java.lang.reflect.Field
@@ -663,12 +664,21 @@ object FloatingChatHeader : ClickableFeature(), IResolveDex {
             onTipsAnimationFrame(group)
         }
 
-        ChattingUILayout::class.reflekt().firstConstructorOrNull {
-            parameters(Context::class, AttributeSet::class)
-        }?.hookAfter {
-            val layout = thisObject as? ChattingUILayout ?: return@hookAfter
-            ensureLayoutAttachListener(layout)
-        } ?: WeLogger.w(TAG, "ChattingUILayout constructor hook target not found")
+        // 8.0.80 起 ChattingUILayout 的构造器不再是 (Context, AttributeSet)（实测找不到），
+        // 改成「挂所有声明的构造器」，只要实例化就登记，不依赖具体签名。
+        val layoutCtors = runCatching { ChattingUILayout::class.java.declaredConstructors }.getOrDefault(emptyArray())
+        if (layoutCtors.isEmpty()) {
+            WeLogger.w(TAG, "ChattingUILayout 没有任何构造器，跳过布局 attach 监听")
+        }
+        layoutCtors.forEach { ctor ->
+            runCatching {
+                ctor.isAccessible = true
+                ctor.hookAfterDirectly {
+                    val layout = thisObject as? ChattingUILayout ?: return@hookAfterDirectly
+                    ensureLayoutAttachListener(layout)
+                }
+            }.onFailure { WeLogger.w(TAG, "ChattingUILayout 构造器 hook 失败: $ctor", it) }
+        }
 
         // 通知半屏/全屏路径下 ChatFooter 一定存在且稳定 attach, 借它兜底追踪 ChattingUILayout:
         // 这些路径的 ChattingUILayout 可能由微信布局预取线程提前 inflate, 构造 hook/attach 监听会漏。
@@ -771,12 +781,22 @@ object FloatingChatHeader : ClickableFeature(), IResolveDex {
 
         // ChatTipsBarGroup 在树里的实际父容器不猜了: 构造时拿到实例, attach 后反查所属
         // ChattingUILayout 登记。悬浮与 dim 压制都直接走这份登记, 版本差异也能兜住。
-        "com.tencent.mm.ui.tipsbar.ChatTipsBarGroup".toClass().reflekt().firstConstructorOrNull {
-            parameters(Context::class, AttributeSet::class)
-        }?.hookAfter {
-            val group = thisObject as? View ?: return@hookAfter
-            ensureTipsGroupAttachListener(group)
-        } ?: WeLogger.w(TAG, "ChatTipsBarGroup constructor hook target not found")
+        // 同上：不再写死 (Context, AttributeSet)，把所有声明的构造器都挂上。
+        val tipsBarCtors = runCatching {
+            "com.tencent.mm.ui.tipsbar.ChatTipsBarGroup".toClass().declaredConstructors
+        }.getOrDefault(emptyArray())
+        if (tipsBarCtors.isEmpty()) {
+            WeLogger.w(TAG, "ChatTipsBarGroup 类或构造器不存在，跳过提示条追踪")
+        }
+        tipsBarCtors.forEach { ctor ->
+            runCatching {
+                ctor.isAccessible = true
+                ctor.hookAfterDirectly {
+                    val group = thisObject as? View ?: return@hookAfterDirectly
+                    ensureTipsGroupAttachListener(group)
+                }
+            }.onFailure { WeLogger.w(TAG, "ChatTipsBarGroup 构造器 hook 失败: $ctor", it) }
+        }
 
     }
 

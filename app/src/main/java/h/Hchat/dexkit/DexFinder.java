@@ -2622,6 +2622,21 @@ public class DexFinder {
                     "MicroMsg.SqliteDB",
                     "sql is null ");
 
+            // 8.0.80 起上面两个字符串已经不存在，锚点必然拿不到。
+            // 本模块（WeDatabaseApi）会用「CoreStorage 字段/方法 + 无参访问器返回 *SQLiteDatabase*」
+            // 的形状匹配找到同一个 wrapper，这里直接复用，脚本子系统的「消息变更监听」才能就绪。
+            if (sqliteDbWrapperClass == null) {
+                try {
+                    Class<?> fromHost = com.Johnny.wcx.features.api.core.WeDatabaseApi.INSTANCE
+                            .getSqliteDbWrapperClass();
+                    if (fromHost != null) {
+                        sqliteDbWrapperClass = fromHost;
+                        logDetail("数据库API: sqliteDbWrapper 复用主模块解析结果 " + fromHost.getName());
+                    }
+                } catch (Throwable ignored) {
+                }
+            }
+
             logDetail("数据库API: kernel="
                     + (mmKernelClass != null ? mmKernelClass.getName() : "null")
                     + " storageGetter=" + (coreStorageGetter != null ? coreStorageGetter.getName() : "null")

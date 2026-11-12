@@ -303,14 +303,25 @@ object WeConversationApi : ApiFeature(), IResolveDex {
         }
     }
 
+    /** 同一个进程里 notify 失败只报一次 W，避免每刷一次列表就喷一条（实测 72 次/天）。 */
+    private val notifyFailureLogged = java.util.concurrent.atomic.AtomicBoolean(false)
+
     private fun notifyConversationChanged(talker: String, eventType: Int = 3) {
         // isPlaceholder 已把「尚未解析」算作不可用；这里再包一层，防 descriptor 解析
         // 在守卫之后失效（解析未完成/特征漂移）时抛 Method not found 打断调用方。
         if (methodNotifyConversationChanged.isPlaceholder) return
+        // 8.0.80 上这个方法拿空 talker 调用会在内部对 null 解引用（日志里 72 次 NPE）。
+        // 空 talker 只用于「整表刷新」，交给 reloadConversations 的其它路径，这里直接不调。
+        if (talker.isBlank()) return
         runCatching {
             methodNotifyConversationChanged.method.invoke(conversationStorage, eventType, conversationStorage, talker)
-        }.onFailure {
-            WeLogger.w(TAG, "notifyConversationChanged 跳过（${it.javaClass.simpleName}）: ${it.message}")
+        }.onFailure { error ->
+            val once = notifyFailureLogged.compareAndSet(false, true)
+            if (once) {
+                WeLogger.w(TAG, "notifyConversationChanged 跳过（${error.javaClass.simpleName}）: ${error.message}")
+            } else {
+                WeLogger.d(TAG, "notifyConversationChanged 跳过（同类错误后续只记 D 级）")
+            }
         }
     }
 

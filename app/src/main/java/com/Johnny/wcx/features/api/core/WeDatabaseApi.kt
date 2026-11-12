@@ -416,21 +416,45 @@ object WeDatabaseApi : ApiFeature(), IResolveDex {
                 }?.get()
         }.getOrNull()
 
-        val wrapperObj = byType ?: byShape
+        // 3) 更宽的兜底（8.0.80）：访问器可能返回 com.tencent.wcdb.compat.* 或其它包里的
+        //    SQLiteDatabase，也可能挂在 CoreStorage 自己的无参方法上而不是字段里。
+        val byLooseShape = if (byType != null || byShape != null) null else runCatching {
+            allFieldsOf(storageObj.javaClass).firstNotNullOfOrNull { field ->
+                val value = runCatching { field.get(storageObj) }.getOrNull() ?: return@firstNotNullOfOrNull null
+                if (value is String || value is Number || value is Boolean) return@firstNotNullOfOrNull null
+                val dbAccessor = value.javaClass.declaredMethods.firstOrNull { m ->
+                    m.parameterCount == 0 && m.returnType.name.contains("SQLiteDatabase")
+                }
+                if (dbAccessor != null) value else null
+            }
+        }.getOrNull()
+
+        val byStorageGetter = if (byType != null || byShape != null || byLooseShape != null) null else runCatching {
+            storageObj.javaClass.declaredMethods.firstNotNullOfOrNull { m ->
+                if (m.parameterCount != 0) return@firstNotNullOfOrNull null
+                val value = runCatching { m.invoke(storageObj) }.getOrNull() ?: return@firstNotNullOfOrNull null
+                if (value is String || value is Number || value is Boolean) return@firstNotNullOfOrNull null
+                val hasDbAccessor = value.javaClass.declaredMethods.any { a ->
+                    a.parameterCount == 0 && a.returnType.name.contains("SQLiteDatabase")
+                }
+                if (hasDbAccessor) value else null
+            }
+        }.getOrNull()
+
+        val wrapperObj = byType ?: byShape ?: byLooseShape ?: byStorageGetter
         if (wrapperObj == null) {
-            WeLogger.w(
-                TAG,
-                "initializeDatabase: CoreStorage(${storageObj.javaClass.name}) 中未找到 SqliteDB wrapper，本次跳过"
-            )
+            if (wrapperDiagLogged.compareAndSet(false, true)) {
+                dumpStorageShape(storageObj)
+            }
             return
         }
+        sqliteDbWrapperClass = wrapperObj.javaClass
 
         val database = runCatching {
-            wrapperObj.reflekt()
-                .firstMethodOrNull {
-                    parameterCount = 0
-                    returnType = "com.tencent.wcdb.database.SQLiteDatabase"
-                }?.invoke() as? SQLiteDatabase
+            wrapperObj.javaClass.declaredMethods
+                .firstOrNull { it.parameterCount == 0 && it.returnType.name.contains("SQLiteDatabase") }
+                ?.apply { isAccessible = true }
+                ?.invoke(wrapperObj) as? SQLiteDatabase
         }.getOrNull()
 
         if (database == null) {
@@ -440,6 +464,51 @@ object WeDatabaseApi : ApiFeature(), IResolveDex {
 
         db = database
         WeLogger.i(TAG, "数据库服务就绪：${storageObj.javaClass.name} -> ${wrapperObj.javaClass.name}")
+    }
+
+    /**
+     * 本模块自己解析出来的 SqliteDB wrapper 类。
+     *
+     * 8.0.80 起 h/Hchat 的 DexFinder 靠 "MicroMsg.SqliteDB" / "sql is null " 两个字符串已经找不到它，
+     * 于是 Hchat 的「消息变更监听」永远未就绪。这里把我们的结果暴露出去，由 Hchat 侧兜底读取。
+     */
+    @Volatile
+    var sqliteDbWrapperClass: Class<*>? = null
+        private set
+
+    /** 沿继承链收集所有字段（含私有），先置 isAccessible，供兜底匹配使用。 */
+    private fun allFieldsOf(clazz: Class<*>): List<java.lang.reflect.Field> {
+        val out = mutableListOf<java.lang.reflect.Field>()
+        var cur: Class<*>? = clazz
+        while (cur != null && cur != Any::class.java) {
+            for (f in cur.declaredFields) {
+                runCatching { f.isAccessible = true }
+                out += f
+            }
+            cur = cur.superclass
+        }
+        return out
+    }
+
+    private val wrapperDiagLogged = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /** 找不到 wrapper 时打印 CoreStorage 的结构（只打一次），用于下个版本精确适配。 */
+    private fun dumpStorageShape(storageObj: Any) {
+        runCatching {
+            val cls = storageObj.javaClass
+            val fields = cls.declaredFields.take(40).joinToString("; ") { f ->
+                val v = runCatching { f.also { it.isAccessible = true }.get(storageObj) }.getOrNull()
+                f.name + ":" + f.type.simpleName + "=" + (v?.javaClass?.simpleName ?: "null")
+            }
+            val methods = cls.declaredMethods.filter { it.parameterCount == 0 }.take(40).joinToString("; ") { m ->
+                m.name + "():" + m.returnType.simpleName
+            }
+            WeLogger.w(
+                TAG,
+                "initializeDatabase: CoreStorage(${cls.name}) 中未找到 SqliteDB wrapper，本次跳过。" +
+                    "\n  字段: " + fields + "\n  无参方法: " + methods,
+            )
+        }.onFailure { WeLogger.w(TAG, "dumpStorageShape 失败", it) }
     }
 
     @Suppress("NOTHING_TO_INLINE")
