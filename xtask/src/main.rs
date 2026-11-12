@@ -130,6 +130,28 @@ struct BuildArgs {
     #[arg(long)]
     release: bool,
 
+    /// Skip the Rust native build and run Gradle only (useful when only Kotlin/Java changed).
+    #[arg(long)]
+    skip_native: bool,
+
+    /// Also build the Zygisk injector (libwcx_zygisk.so).
+    ///
+    /// Default: only built for --release and --native-only. The injector is irrelevant for
+    /// day-to-day hook development, and its CMake build (LSPlant/Dobby/xz) is the slowest
+    /// native step, so debug builds skip it unless this flag is given.
+    #[arg(long)]
+    zygisk: bool,
+
+    /// Build every ABI. Debug builds default to arm64-v8a only — a single ABI halves the
+    /// packaging/signing work and is all a real device needs for a local test loop.
+    #[arg(long)]
+    all_abis: bool,
+
+    /// Compile the native library with cargo's `dev` profile (fast to build, slower at
+    /// runtime and much bigger .so). Handy while iterating on Rust code.
+    #[arg(long)]
+    dev_native: bool,
+
     #[command(flatten)]
     native: NativeArgs,
 }
@@ -145,12 +167,34 @@ struct RunArgs {
     /// Install the release build instead of debug.
     #[arg(long)]
     release: bool,
+
+    /// Skip the Rust native build and run Gradle only.
+    #[arg(long)]
+    skip_native: bool,
+
+    /// Also build the Zygisk injector (default: never for `run`).
+    #[arg(long)]
+    zygisk: bool,
+
+    /// Build every ABI (default: arm64-v8a only, which is what a real device needs).
+    #[arg(long)]
+    all_abis: bool,
+
+    /// Compile the native library with cargo's `dev` profile.
+    #[arg(long)]
+    dev_native: bool,
+
+    #[command(flatten)]
+    native: NativeArgs,
 }
 
 /// Arguments shared by --native-only builds, `check`, and `clippy`.
 #[derive(Args)]
 struct NativeArgs {
-    /// Target ABI(s) to build.  May be repeated.  Defaults to arm64-v8a and armeabi-v7a.
+    /// Target ABI(s) to build.  May be repeated.
+    ///
+    /// Default: arm64-v8a for debug builds; arm64-v8a + armeabi-v7a for release, --all-abis
+    /// and --native-only.
     ///
     /// Valid values: arm64-v8a, armeabi-v7a, x86_64, x86
     #[arg(long = "abi", value_name = "ABI")]
@@ -404,6 +448,12 @@ fn task_configure() -> Result<()> {
 
     let config_path = native_crate_dir(&root).join(".cargo/config.toml");
     fs::create_dir_all(config_path.parent().unwrap())?;
+    // Only touch the file when it actually changes: rewriting it on every build needlessly
+    // invalidates Cargo's fingerprint inputs and hides real diffs from the developer.
+    if fs::read_to_string(&config_path).map(|old| old == out).unwrap_or(false) {
+        println!("configure: unchanged {}", config_path.display());
+        return Ok(());
+    }
     fs::write(&config_path, &out)
         .with_context(|| format!("failed to write {}", config_path.display()))?;
 
@@ -415,7 +465,8 @@ fn task_configure() -> Result<()> {
 
 fn task_build(args: BuildArgs) -> Result<()> {
     if args.native_only {
-        task_build_native(&args.native.abis)
+        let abis = resolve_abi_names(&args.native.abis, true, true);
+        task_build_native(&abis, true, true)
     } else {
         task_build_android(&args)
     }
@@ -433,31 +484,89 @@ fn gradle_variant_task(verb: &str, flavor: Option<&Flavor>, release: bool) -> St
     }
 }
 
+/// Decide which ABIs this invocation builds.
+///
+/// Explicit `--abi` always wins. Otherwise release/native-only builds need every ABI shipped
+/// in the APK, while a debug build only needs the ABI of the device we are testing on —
+/// arm64-v8a by default (every relevant WeChat install) — which halves native + packaging work.
+fn resolve_abi_names(explicit: &[String], release: bool, all_abis: bool) -> Vec<String> {
+    if !explicit.is_empty() {
+        return explicit.to_vec();
+    }
+    if release || all_abis {
+        RELEASE_ABIS.iter().map(|s| s.to_string()).collect()
+    } else {
+        vec!["arm64-v8a".to_string()]
+    }
+}
+
+/// Gradle flags that only make sense on a developer machine.
+///
+/// The repository `gradle.properties` already carries the fast local defaults; these are the
+/// things that still need a command-line opt-in. CI keeps calling `./gradlew` with its own
+/// memory-friendly profile (see .github/workflows/ci.yml), so nothing here leaks into CI.
+///
+/// Configuration cache is deliberately not forced here: `signingConfigs` decides at
+/// configuration time whether a keystore exists (an untracked file lookup), so a cached entry
+/// could silently keep producing unsigned/stale-signed release APKs.
+fn local_gradle_args(abis: &[String]) -> Vec<String> {
+    let mut args = vec!["--parallel".to_string(), "--build-cache".to_string()];
+    // Restrict ABI splits so packaging only produces the APK we are going to install.
+    if !abis.is_empty() {
+        args.push(format!("-Pwekit.abi={}", abis.join(",")));
+    }
+    args
+}
+
 /// Full Android build via the Gradle wrapper (native lib compiled first).
 fn task_build_android(args: &BuildArgs) -> Result<()> {
     task_configure()?;
-    task_build_native(&args.native.abis)?;
+    let abis = resolve_abi_names(&args.native.abis, args.release, args.all_abis);
+    if !args.skip_native {
+        task_build_native(&abis, args.zygisk || args.release, !args.dev_native)?;
+    }
     let root = workspace_root();
     let gradle_task = gradle_variant_task("assemble", args.flavor.as_ref(), args.release);
-    println!("build: ./gradlew {gradle_task}");
-    run_gradlew(&[&gradle_task], &root)
+
+    let mut gradle_args = vec![gradle_task.clone()];
+    if !is_ci() {
+        gradle_args.extend(local_gradle_args(&abis));
+    }
+    let refs: Vec<&str> = gradle_args.iter().map(String::as_str).collect();
+    println!("build: ./gradlew {}", refs.join(" "));
+    run_gradlew(&refs, &root)
 }
 
 /// Install the app on a connected device or emulator via the Gradle wrapper (native lib compiled first).
 fn task_run(args: RunArgs) -> Result<()> {
     task_configure()?;
-    task_build_native(&[])?;
+    let abis = resolve_abi_names(&args.native.abis, args.release, args.all_abis);
+    if !args.skip_native {
+        task_build_native(&abis, args.zygisk, !args.dev_native)?;
+    }
     let root = workspace_root();
     let gradle_task = gradle_variant_task("install", Some(&args.flavor), args.release);
-    println!("run: ./gradlew {gradle_task}");
-    run_gradlew(&[&gradle_task], &root)
+
+    let mut gradle_args = vec![gradle_task.clone()];
+    if !is_ci() {
+        gradle_args.extend(local_gradle_args(&abis));
+    }
+    let refs: Vec<&str> = gradle_args.iter().map(String::as_str).collect();
+    println!("run: ./gradlew {}", refs.join(" "));
+    run_gradlew(&refs, &root)
+}
+
+/// True when running under CI (GitHub Actions sets `CI=true`).
+fn is_ci() -> bool {
+    env::var("CI").map(|v| !v.is_empty() && v != "false").unwrap_or(false)
 }
 
 /// Native-only build: cargo build + copy .so to jniLibs/.
-fn task_build_native(abi_args: &[String]) -> Result<()> {
+fn task_build_native(abi_names: &[String], build_zygisk: bool, release: bool) -> Result<()> {
     let root = workspace_root();
     let native_dir = native_crate_dir(&root);
-    let abis = resolve_abis(abi_args)?;
+    let abis = resolve_abis(abi_names)?;
+    let profile_dir = if release { "release" } else { "dev" };
 
     for spec in &abis {
         println!(
@@ -465,15 +574,21 @@ fn task_build_native(abi_args: &[String]) -> Result<()> {
             spec.android_name, spec.cargo_triple
         );
 
-        run_cargo(
-            &["build", "--release", "--target", spec.cargo_triple],
-            &native_dir,
-        )?;
+        let mut cargo_args = vec!["build"];
+        if release {
+            cargo_args.push("--release");
+        } else {
+            // `dev` profile keeps debug info and skips optimisation: much faster to compile.
+            cargo_args.extend_from_slice(&["--profile", "dev"]);
+        }
+        cargo_args.extend_from_slice(&["--target", spec.cargo_triple]);
+        run_cargo(&cargo_args, &native_dir)?;
 
         let so_src = root
             .join("target")
             .join(spec.cargo_triple)
-            .join("release/libwekit_native.so");
+            .join(profile_dir)
+            .join("libwekit_native.so");
         let so_dst_dir = jni_libs_dir(&root).join(spec.android_name);
         let so_dst = so_dst_dir.join("libwekit_native.so");
 
@@ -492,7 +607,7 @@ fn task_build_native(abi_args: &[String]) -> Result<()> {
 
     // Zygisk 注入器（libwcx_zygisk.so）也要随 APK 打包（packageZygiskApk 会把它搬到模块的
     // zygisk/<abi>.so）。只支持 arm64-v8a，且需要 WCX_ANDROID_NDK / WCX_ANDROID_API。
-    if abis.iter().any(|s| s.android_name == "arm64-v8a") {
+    if build_zygisk && abis.iter().any(|s| s.android_name == "arm64-v8a") {
         println!("build(native): zygisk injector (arm64-v8a)");
         // wcx-zygisk 的 build.rs 需要 NDK 路径来驱动 CMake（编 LSPlant / Dobby / xz），
         // cargo 最终链接也要用 NDK 的 clang，否则会用宿主 cc 找不到 -ldobby 等。
