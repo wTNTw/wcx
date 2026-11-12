@@ -336,38 +336,6 @@ tasks.matching { it.name == "assembleRelease" }.configureEach {
     finalizedBy(packageZygiskApk)
 }
 
-/**
- * 开发用快速出包：`./gradlew packageZygiskApkDebug`
- *
- * 用 debug 变体打包（**不做 R8 混淆/压缩**，release 里 R8 实测要 4 分半），
- * 适合「改代码 → 推设备验证」的迭代；正式包仍用 `packageZygiskApk -Pfast`（或 CI）。
- * 注意 debug 包体积更大、且默认可调试，别拿它当发布包。
- */
-val packageZygiskApkDebug = tasks.register<PackageZygiskApkTask>("packageZygiskApkDebug") {
-    description = "开发用：用 debug 变体打一体包（不做 R8，快很多）"
-    group = "wekit"
-
-    dependsOn("assembleStandardDebug")
-
-    apkDir.set(layout.buildDirectory.dir("outputs/apk/standard/debug"))
-    templateDir.set(rootProject.layout.projectDirectory.dir("wcx-zygisk"))
-    outputDir.set(layout.buildDirectory.dir("outputs/zygisk-debug"))
-    rootProjectDir.set(rootProject.projectDir.absolutePath)
-    versionName.set((android.defaultConfig.versionName ?: "v0") + "-debug")
-    versionCode.set(android.defaultConfig.versionCode ?: 0)
-    moduleAuthor.set("wcx-dev")
-    abi.set("arm64-v8a")
-}
-
-// --- end tasks ---
-
-
-ksp {
-    // Room schema export for migration diffing
-    arg("room.schemaLocation", "$projectDir/schemas")
-    arg("room.generateKotlin", "true")
-}
-
 dependencies {
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.core.ktx)
