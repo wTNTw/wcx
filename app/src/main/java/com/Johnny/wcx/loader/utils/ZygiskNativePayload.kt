@@ -68,11 +68,18 @@ class ZygiskNativePayload(val apk: File, private val dataDir: File) {
         libraries
     }
 
-    /** 只保留当前 payload 的解包目录，其它版本的目录 / 残留 .tmp 一并清掉（尽力而为）。 */
+    /**
+     * 只保留当前 payload 的解包目录，其它版本的目录 / 残留 .tmp 一并清掉（尽力而为）。
+     *
+     * 注意宽限期：同一个微信里主进程和子进程启动时间不同步，刚解出来的目录可能
+     * 还在被别的进程使用（它的 .so 可能还没 dlopen），删早了那个进程会失败。
+     */
     private fun pruneNativeExtractionDirs(root: File, keepName: String) {
+        val now = System.currentTimeMillis()
         runCatching {
             root.listFiles()?.forEach { entry ->
                 if (entry.name == keepName) return@forEach
+                if (now - entry.lastModified() < EXTRACTION_GRACE_MS) return@forEach
                 // 只处理我们自己生成的目录：wcx-payload-* / .wcx-bootstrap-*
                 val managed = entry.name.startsWith("wcx-payload-") ||
                     entry.name.startsWith(".wcx-bootstrap-")
@@ -80,6 +87,10 @@ class ZygiskNativePayload(val apk: File, private val dataDir: File) {
                 if (entry.isDirectory) entry.deleteRecursively() else entry.delete()
             }
         }
+    }
+
+    private companion object {
+        const val EXTRACTION_GRACE_MS = 10 * 60 * 1000L
     }
 
     private fun currentProcessAbi(archive: ZipFile): String {

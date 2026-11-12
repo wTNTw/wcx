@@ -96,6 +96,11 @@ pub fn publish_apk(mut source: File, data_dir: &str) -> Result<PathBuf> {
     Ok(destination)
 }
 
+/// 旧 payload 的保留时长：别的进程可能还在用它（主进程/子进程启动时间不同步，
+/// 模块升级瞬间更是如此）。实测删掉正在使用的文件会让那个进程
+/// `StartupAgent failed: NoSuchFileException: wcx-payload-*.apk` → 整个模块不生效。
+const STALE_GRACE: std::time::Duration = std::time::Duration::from_secs(600);
+
 /// 删除其它版本的 `.wcx-bootstrap-*.apk` / 残留 `.tmp`（尽力而为，失败忽略）。
 fn cleanup_stale_copies(directory: &Path, keep: &Path) {
     let Ok(entries) = fs::read_dir(directory) else {
@@ -110,6 +115,16 @@ fn cleanup_stale_copies(directory: &Path, keep: &Path) {
             continue;
         }
         if path == keep {
+            continue;
+        }
+        // 刚生成的文件可能是别的进程正在用的 payload / 正在写的临时文件，先放过。
+        let fresh = fs::metadata(&path)
+            .and_then(|meta| meta.modified())
+            .ok()
+            .and_then(|modified| modified.elapsed().ok())
+            .map(|age| age < STALE_GRACE)
+            .unwrap_or(false);
+        if fresh {
             continue;
         }
         let is_tmp = name.ends_with(".tmp");
