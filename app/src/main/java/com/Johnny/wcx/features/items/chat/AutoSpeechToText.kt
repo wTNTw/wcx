@@ -42,6 +42,39 @@ object AutoSpeechToText : SwitchFeature(),
             .onFailure { com.Johnny.wcx.utils.WeLogger.e(TAG, "自动语音转文字失败（本条消息跳过）：${it.message}", it) }
     }
 
+    /**
+     * 取「消息 → 视图项」的 transform 结果。
+     *
+     * 8.0.80 起这个方法的返回类型不再落在 `com.tencent.mm.ui.chatting.viewitems` 包里，
+     * 严格匹配会抛 `No method matching conditions in com.tencent.mm.ui.chatting.component.gp`
+     * （日志里的「自动语音转文字失败」就是这么来的）。这里保留严格匹配做快路径，
+     * 失败再退化为「一个 long 参数 + 非 void 返回」并按名字偏好挑选。
+     */
+    private fun transformItem(api: Any, id: Long): Any {
+        val clazz = api.javaClass
+        val strict = clazz.methods.firstOrNull { method ->
+            method.parameterCount == 1 &&
+                method.parameterTypes[0] == java.lang.Long.TYPE &&
+                method.returnType.name.startsWith("com.tencent.mm.ui.chatting.viewitems")
+        }
+        if (strict != null) return strict.invoke(api, id)
+
+        val candidates = clazz.methods.filter { method ->
+            method.parameterCount == 1 &&
+                method.parameterTypes[0] == java.lang.Long.TYPE &&
+                method.returnType != Void.TYPE
+        }
+        com.Johnny.wcx.utils.WeLogger.i(
+            TAG,
+            "transform 严格匹配未命中，放宽候选 ${candidates.size} 个：" +
+                candidates.joinToString { it.name + "():" + it.returnType.simpleName },
+        )
+        val picked = candidates.firstOrNull { it.name.contains("transform", ignoreCase = true) }
+            ?: candidates.firstOrNull()
+            ?: error("no transform candidate in ${clazz.name}")
+        return picked.invoke(api, id)
+    }
+
     private fun handleCreateView(
         param: HookParam,
         view: View
@@ -61,14 +94,7 @@ object AutoSpeechToText : SwitchFeature(),
             }
             .get()!!
         val api = WeServiceApi.getApiByClass(apiMan, WeMessageApi.classTransformChattingComponent.clazz)
-        val chatViewItem = api.reflekt()
-            .firstMethod {
-                parameters(Long::class)
-                returnType { clazz ->
-                    clazz.name.startsWith("com.tencent.mm.ui.chatting.viewitems")
-                }
-            }
-            .invoke(id)
+        val chatViewItem = transformItem(api, id)
 
         if (chatViewItem.toString() != "NoTransform") return
 

@@ -147,12 +147,25 @@ object DisplayDetails : ClickableFeature(), IResolveDex {
         }
     }
 
+    /** 已经挂过 layout 监听器的 root（同一 root 重复挂会让每个 item 被处理多次）。 */
+    private val attachedRoots = java.util.Collections.newSetFromMap(
+        java.util.WeakHashMap<View, Boolean>()
+    )
+
     private fun scheduleAttach(activity: Activity) {
         val root = activity.rootView
-        intArrayOf(0, 200, 800, 2000).forEach { delay ->
+        val delays = intArrayOf(0, 200, 800, 2000)
+        delays.forEach { delay ->
             root.postDelayed({
+                if (root in attachedRoots) return@postDelayed
                 runCatching { attachToLists(root) }
-                    .onFailure { WeLogger.w(TAG, "attach failed, delay=${delay}ms") }
+                    .onSuccess { attachedRoots.add(root) }
+                    .onFailure {
+                        // 前几次失败是正常的（列表还没建好），只在最后一次重试时才报。
+                        if (delay == delays.last()) {
+                            WeLogger.w(TAG, "attach failed, delay=${delay}ms（最后一次重试）", it)
+                        }
+                    }
             }, delay.toLong())
         }
     }
