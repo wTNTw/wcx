@@ -73,6 +73,9 @@ public final class WeChatMessageChangeApi {
     private final Logger logger;
     private final CopyOnWriteArrayList<Listener> listeners = new CopyOnWriteArrayList<>();
     private volatile boolean installed;
+    /** 首次 install 时 wrapper 可能还没就绪，这里静默延后重试（见 install()）。 */
+    private int retriesLeft = 10;
+    private boolean retryPending;
 
     public WeChatMessageChangeApi(WeChatDatabaseListenerApi databaseListenerApi,
                                   WeChatMessageStoreApi messageStoreApi,
@@ -112,14 +115,35 @@ public final class WeChatMessageChangeApi {
         if (installed || databaseListenerApi == null) return;
         databaseListenerApi.install();
         if (!databaseListenerApi.isOperational()) {
-            log("消息变更监听未就绪: databaseHooks="
-                    + databaseListenerApi.hookedMethodCount()
-                    + " wrapperHooks="
-                    + databaseListenerApi.hookedWrapperMutationMethodCount()
-                    + " wrapperInserts="
-                    + databaseListenerApi.hookedWrapperInsertMethodCount());
+            // 首次 install 通常早于主模块把 SqliteDB wrapper 推过来（8.0.80 起 DexFinder 锚点失效），
+            // 以前这里直接 log() → HLog.e → 用户日志每个进程留一条 E
+            // 「消息变更监听未就绪: databaseHooks=31 wrapperHooks=0 wrapperInserts=0」，
+            // 而紧接着补装就会成功，属于纯噪音。现在改成静默延后重试。
+            if (retriesLeft > 0 && !retryPending) {
+                retriesLeft--;
+                retryPending = true;
+                new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
+                    synchronized (WeChatMessageChangeApi.this) {
+                        retryPending = false;
+                    }
+                    install();
+                }, 3000L);
+                return;
+            }
+            if (!retryPending) {
+                // 重试也拿不到：这才算真的不可用，降级为 W（不是 E）。
+                com.Johnny.wcx.utils.WeLogger.INSTANCE.w(
+                        "[Hchat:WechatApi]",
+                        "消息变更监听不可用: databaseHooks="
+                                + databaseListenerApi.hookedMethodCount()
+                                + " wrapperHooks="
+                                + databaseListenerApi.hookedWrapperMutationMethodCount()
+                                + " wrapperInserts="
+                                + databaseListenerApi.hookedWrapperInsertMethodCount());
+            }
             return;
         }
+        retriesLeft = 10;
         databaseListenerApi.subscribe(this::onDatabaseChanged);
         installed = true;
         log("消息变更监听已安装");
