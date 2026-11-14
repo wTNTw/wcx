@@ -24,17 +24,7 @@ object UnifiedEntryPoint {
     ) {
         StartupInfo.hookBridge = hookBridge
 
-        val self = ClassLoaders.MODULE
-        val selfParent = self.parent
-        if (self is BaseDexClassLoader) {
-            // The Zygisk payload's parent is the system loader. Keep the payload loader
-            // separately so HybridClassLoader can search its DEX without parent delegation.
-            HybridClassLoader.moduleClassLoader = self
-        }
-        HybridClassLoader.moduleParentClassLoader = selfParent
-        self.reflekt()
-            .firstField { name = "parent"; superclass() }
-            .set(HybridClassLoader)
+        prepareClassLoaderBridge()
 
         WeLogger.d(TAG, "hooking Application.attachBaseContext")
 
@@ -56,5 +46,24 @@ object UnifiedEntryPoint {
                         }.onFailure { WeLogger.e(TAG, "StartupAgent failed", it) }
                     }
             }
+    }
+
+    /**
+     * 模块 classloader 桥接：让模块自己的 DEX 在解析宿主类时能经 [HybridClassLoader]
+     * 转发到宿主 classloader。早期入口（attachBaseContext hook）和延迟入口（主进程等
+     * libaff_biz 加载后再启动）共用这一段。
+     */
+    fun prepareClassLoaderBridge() {
+        val self = ClassLoaders.MODULE
+        val selfParent = self.parent
+        if (self is BaseDexClassLoader) {
+            // The Zygisk payload's parent is the system loader. Keep the payload loader
+            // separately so HybridClassLoader can search its DEX without parent delegation.
+            HybridClassLoader.moduleClassLoader = self
+        }
+        HybridClassLoader.moduleParentClassLoader = selfParent
+        self.reflekt()
+            .firstField { name = "parent"; superclass() }
+            .set(HybridClassLoader)
     }
 }

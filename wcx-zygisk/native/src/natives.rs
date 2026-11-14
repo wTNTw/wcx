@@ -107,10 +107,8 @@ unsafe fn get_class_loader(env: *mut RawJNIEnv, entry_class: jclass) -> jobject 
 
 extern "C" fn jni_native_initialize(env: *mut RawJNIEnv, entry: jclass) -> jboolean {
     unsafe {
-        if !crate::art::is_initialized() {
-            loge!("Zygisk: ZygiskEntry.nativeInitialize: LSPlant bootstrap did not complete");
-            return JNI_FALSE;
-        }
+        // 延迟模式：LSPlant 可能尚未初始化（主进程会等 libaff_biz 加载后再初始化）。
+        // 这里只负责把 ArtHookBridge 的 natives 注册好，不要求 art::is_initialized()。
         let loader = get_class_loader(env, entry);
         if loader.is_null() {
             return JNI_FALSE;
@@ -121,6 +119,30 @@ extern "C" fn jni_native_initialize(env: *mut RawJNIEnv, entry: jclass) -> jbool
         }
         ((*(*env)).v1_6.DeleteLocalRef)(env, loader);
         if ok { JNI_TRUE } else { JNI_FALSE }
+    }
+}
+
+/// 主进程延迟初始化：等 libaff_biz 加载完后由 Java 后台线程调用。
+/// 从 Java 帧里初始化 LSPlant 可能被 hidden API 限制挡住，实测结果见
+/// docs/work-items/wechat-8.0.80-startup-abort.md。
+extern "C" fn jni_native_deferred_initialize(env: *mut RawJNIEnv, entry: jclass) -> jboolean {
+    unsafe {
+        if crate::art::is_initialized() {
+            return JNI_TRUE;
+        }
+        let loader = get_class_loader(env, entry);
+        if loader.is_null() {
+            return JNI_FALSE;
+        }
+        let ok = crate::art::init(env) && crate::art::trust_class_loader(env, loader);
+        ((*(*env)).v1_6.DeleteLocalRef)(env, loader);
+        if ok {
+            logi!("Zygisk: ZygiskEntry.nativeDeferredInitialize: LSPlant 初始化完成");
+            JNI_TRUE
+        } else {
+            loge!("Zygisk: ZygiskEntry.nativeDeferredInitialize: LSPlant 初始化失败");
+            JNI_FALSE
+        }
     }
 }
 
@@ -432,14 +454,21 @@ pub unsafe fn register_entry_natives(env: *mut RawJNIEnv, class_loader: jobject)
         return false;
     }
 
-    let mut methods: [JNINativeMethod; 1] = [JNINativeMethod {
-        name: c"nativeInitialize".as_ptr() as *mut c_char,
-        signature: c"()Z".as_ptr() as *mut c_char,
-        fnPtr: jni_native_initialize as *mut c_void,
-    }];
+    let methods: [JNINativeMethod; 2] = [
+        JNINativeMethod {
+            name: c"nativeInitialize".as_ptr() as *mut c_char,
+            signature: c"()Z".as_ptr() as *mut c_char,
+            fnPtr: jni_native_initialize as *mut c_void,
+        },
+        JNINativeMethod {
+            name: c"nativeDeferredInitialize".as_ptr() as *mut c_char,
+            signature: c"()Z".as_ptr() as *mut c_char,
+            fnPtr: jni_native_deferred_initialize as *mut c_void,
+        },
+    ];
 
     let fns = *env;
-    let ret = ((*fns).v1_6.RegisterNatives)(env, class, methods.as_mut_ptr(), 1);
+    let ret = ((*fns).v1_6.RegisterNatives)(env, class, methods.as_ptr(), methods.len() as jint);
     if ret == 0 {
         logi!("Zygisk: ZygiskEntry natives registered");
         true

@@ -3,15 +3,21 @@
 package com.Johnny.wcx.loader.entry.zygisk
 
 import android.annotation.SuppressLint
+import android.app.Application
 import android.content.pm.ApplicationInfo
+import android.os.Handler
+import android.os.Looper
 import androidx.annotation.Keep
 import dev.ujhhgtg.reflekt.utils.makeAccessible
 import com.Johnny.wcx.BuildConfig
 import com.Johnny.wcx.constants.PackageNames
 import com.Johnny.wcx.loader.abc.IHookBridge
 import com.Johnny.wcx.loader.entry.common.ModuleLoader
+import com.Johnny.wcx.loader.startup.StartupAgent
+import com.Johnny.wcx.loader.startup.UnifiedEntryPoint
 import com.Johnny.wcx.loader.utils.NativeLoader
 import com.Johnny.wcx.utils.WeLogger
+import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -20,13 +26,14 @@ import java.util.concurrent.atomic.AtomicBoolean
  * Called from native postAppSpecialize:
  *   ZygiskEntry.init(processName, dataDir, copiedApkPath)
  *
- * The native side has only:
- *   1. Copied the active module's APK into
- *      this app's data directory during postAppSpecialize.
+ * The native side has:
+ *   1. Copied the active module's APK into this app's data directory.
  *   2. Read DEX directly from that APK through InMemoryDexClassLoader.
- *   3. Initialized LSPlant and trusted the loader before calling this entry point.
+ *   3. 子进程：初始化 LSPlant 并 trust loader；主进程：把 LSPlant 初始化推迟到
+ *      libaff_biz 加载之后（见 nativeDeferredInitialize）。
  *
- * This Java entry registers the hook bridge's native methods and installs lifecycle hooks.
+ * 主进程走延迟启动：后台线程轮询 /proc/self/maps 里出现 libaff_biz.so 后，
+ * 再初始化 LSPlant 并直接启动模块；子进程保持原有 createAppFactory 钩子链。
  */
 @Keep
 object ZygiskEntry {
@@ -73,27 +80,15 @@ object ZygiskEntry {
                 loaderService = service
                 hookBridge = bridge
 
-                // Waits at LoadedApk.createAppFactory. The ClassLoader
-                // parameter here is only AOSP's default loader; the final
-                // mClassLoader is selected by AppComponentFactory below.
-                val loadedApk = Class.forName("android.app.LoadedApk")
-                val createAppFactory = loadedApk.getDeclaredMethod(
-                    "createAppFactory",
-                    ApplicationInfo::class.java,
-                    ClassLoader::class.java,
-                ).makeAccessible()
-
-                bridge.hookMethod(createAppFactory, object : IHookBridge.IMemberHookCallback {
-                    override fun beforeHookedMember(param: IHookBridge.IMemberHookParam) = Unit
-
-                    override fun afterHookedMember(param: IHookBridge.IMemberHookParam) {
-                        if (param.throwable != null) return
-                        val appInfo = param.args.getOrNull(0) as? ApplicationInfo ?: return
-                        if (appInfo.packageName != targetPackage) return
-                        val factory = param.result ?: return
-                        installFinalClassLoaderHook(bridge, factory, targetPackage)
-                    }
-                }, priority = 10000)
+                if (processName.contains(':')) {
+                    // 子进程不加载 libaff_biz，原生侧已在 postAppSpecialize 早期初始化
+                    // LSPlant，这里沿用原来的 createAppFactory 钩子链。
+                    installEarlyStartupHooks(bridge, targetPackage)
+                } else {
+                    // 主进程：原生侧已推迟 LSPlant 初始化，等微信把 libaff_biz.so 加载完
+                    // 再初始化 LSPlant 并直接启动模块（避开 libowl 与 LSPlant 的冲突）。
+                    startDeferredStartup(service, bridge, apkPath)
+                }
             } catch (t: Throwable) {
                 // All fields are published before the hook can become reachable;
                 // roll them back when installation itself fails so init can retry.
@@ -110,6 +105,117 @@ object ZygiskEntry {
 
     @JvmStatic
     private external fun nativeInitialize(): Boolean
+
+    @JvmStatic
+    private external fun nativeDeferredInitialize(): Boolean
+
+    /**
+     * 子进程早期入口：原生侧已在 postAppSpecialize 初始化 LSPlant，这里直接挂
+     * LoadedApk.createAppFactory → AppComponentFactory.instantiateClassLoader → 启动模块。
+     */
+    private fun installEarlyStartupHooks(bridge: ArtHookBridge, targetPackage: String) {
+        // Waits at LoadedApk.createAppFactory. The ClassLoader
+        // parameter here is only AOSP's default loader; the final
+        // mClassLoader is selected by AppComponentFactory below.
+        val loadedApk = Class.forName("android.app.LoadedApk")
+        val createAppFactory = loadedApk.getDeclaredMethod(
+            "createAppFactory",
+            ApplicationInfo::class.java,
+            ClassLoader::class.java,
+        ).makeAccessible()
+
+        bridge.hookMethod(createAppFactory, object : IHookBridge.IMemberHookCallback {
+            override fun beforeHookedMember(param: IHookBridge.IMemberHookParam) = Unit
+
+            override fun afterHookedMember(param: IHookBridge.IMemberHookParam) {
+                if (param.throwable != null) return
+                val appInfo = param.args.getOrNull(0) as? ApplicationInfo ?: return
+                if (appInfo.packageName != targetPackage) return
+                val factory = param.result ?: return
+                installFinalClassLoaderHook(bridge, factory, targetPackage)
+            }
+        }, priority = 10000)
+    }
+
+    /**
+     * 主进程延迟启动：等微信把 libaff_biz.so 加载完（它与 LSPlant/Dobby 的 ART hook
+     * 冲突，见 docs/work-items/wechat-8.0.80-startup-abort.md），再初始化 LSPlant 并启动
+     * 模块。失败只打日志，不影响微信。
+     */
+    private fun startDeferredStartup(
+        service: ZygiskLoaderService,
+        bridge: ArtHookBridge,
+        apkPath: String,
+    ) {
+        Thread({
+            try {
+                val loaded = waitForLibaffBiz()
+                WeLogger.i(
+                    TAG,
+                    "deferred startup: libaff_biz ${if (loaded) "loaded" else "timeout"} after polling",
+                )
+                if (!nativeDeferredInitialize()) {
+                    WeLogger.e(TAG, "deferred startup: LSPlant init failed; module not started in main process")
+                    return@Thread
+                }
+                WeLogger.i(TAG, "deferred startup: LSPlant initialized, acquiring Application")
+                val app = acquireApplication()
+                if (app == null) {
+                    WeLogger.e(TAG, "deferred startup: could not acquire Application; module not started")
+                    return@Thread
+                }
+                // 模块启动（ActivityProxy 替换 Instrumentation、HostInfo/MMKV 初始化、功能 hook）
+                // 必须在主线程跑，与原来的 callApplicationOnCreate 时序保持一致，避免后台线程
+                // 替换 Instrumentation 与主线程首帧渲染抢跑。
+                WeLogger.i(TAG, "deferred startup: posting module start to main thread")
+                Handler(Looper.getMainLooper()).post {
+                    try {
+                        UnifiedEntryPoint.prepareClassLoaderBridge()
+                        StartupAgent.startup(service, bridge, apkPath, app)
+                    } catch (t: Throwable) {
+                        WeLogger.e(TAG, "deferred startup: module start on main thread failed", t)
+                    }
+                }
+            } catch (t: Throwable) {
+                WeLogger.e(TAG, "deferred startup failed", t)
+            }
+        }, "WCX-DeferredStartup").apply { isDaemon = true }.start()
+    }
+
+    private fun waitForLibaffBiz(timeoutMs: Long = 15_000L): Boolean {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            if (isLibaffBizLoaded()) return true
+            Thread.sleep(100L)
+        }
+        return isLibaffBizLoaded()
+    }
+
+    private fun isLibaffBizLoaded(): Boolean = try {
+        File("/proc/self/maps").useLines { lines ->
+            lines.any { it.contains("libaff_biz.so") }
+        }
+    } catch (_: Throwable) {
+        false
+    }
+
+    private fun acquireApplication(): Application? {
+        var app = getHostApplication()
+        // 万一还没走到 Application.onCreate，重试一小段时间。
+        var attempts = 0
+        while (app == null && attempts < 20) {
+            Thread.sleep(250L)
+            app = getHostApplication()
+            attempts++
+        }
+        return app
+    }
+
+    private fun getHostApplication(): Application? = try {
+        android.app.ActivityThread.currentApplication()
+    } catch (_: Throwable) {
+        null
+    }
 
     private fun installFinalClassLoaderHook(
         bridge: ArtHookBridge,

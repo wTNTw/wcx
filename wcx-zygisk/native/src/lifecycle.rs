@@ -21,8 +21,6 @@ use std::{
     },
 };
 
-const WCX_RUN_JAVA_ENTRY: bool = true;
-
 pub struct WcxZygiskModule {
     pub api: *mut ApiTable,
     pub env: *mut RawJNIEnv,
@@ -332,12 +330,16 @@ pub unsafe fn do_post_app_specialize(module: &mut WcxZygiskModule, _args: *const
     }
     let loader_ms = t_loader.elapsed().as_millis();
 
-    // LSPlant needs unrestricted hidden-API JNI access during initialization.
-    // Do this while still in the native Zygote callback, before a module Java
-    // frame becomes the caller. Keep the loader resident after any partial ART
-    // initialization: LSPlant's runtime inline hooks live until process exit.
-    let t_art = std::time::Instant::now();
-    if !crate::art::init(module.env) || !crate::art::trust_class_loader(module.env, cl) {
+    // 主进程推迟 LSPlant/Dobby 初始化：微信 8.0.80 的 libaff_biz.so 在 JNI_OnLoad
+    // 里经 libowl 钩过 GetMethodID，若此时 ART 已被 LSPlant/Dobby 改过会触发 ART
+    // 断言并 abort（卡启动页 + SIGABRT）。主进程改由 Java 侧后台线程等 libaff_biz
+    // 加载完成后再调用 ZygiskEntry.nativeDeferredInitialize() 完成 art::init + trust。
+    // 子进程不加载 libaff_biz，保持早期初始化：LSPlant 的初始化契约要求在 native
+    // Zygisk 回调里、成为 Java 帧调用者之前执行，子进程照旧。
+    let is_main_process = !module.process_name.contains(':');
+    if is_main_process {
+        logi!("Zygisk: 主进程推迟 LSPlant 初始化，等待 libaff_biz 加载完成");
+    } else if !crate::art::init(module.env) || !crate::art::trust_class_loader(module.env, cl) {
         if ((*fns).v1_6.ExceptionCheck)(module.env) != jni::sys::JNI_FALSE {
             ((*fns).v1_6.ExceptionDescribe)(module.env);
             ((*fns).v1_6.ExceptionClear)(module.env);
@@ -365,8 +367,7 @@ pub unsafe fn do_post_app_specialize(module: &mut WcxZygiskModule, _args: *const
     }
 
     logi!(
-        "Zygisk: 冷启动耗时 publish={publish_ms}ms loader={loader_ms}ms({loader_kind}) art={}ms total={}ms ({})",
-        t_art.elapsed().as_millis(),
+        "Zygisk: 冷启动耗时 publish={publish_ms}ms loader={loader_ms}ms({loader_kind}) total={}ms ({})",
         started.elapsed().as_millis(),
         module.process_name
     );
@@ -405,11 +406,7 @@ pub unsafe fn do_post_app_specialize(module: &mut WcxZygiskModule, _args: *const
         ((*fns).v1_6.DeleteGlobalRef)(module.env, cl);
         return;
     }
-    // 临时诊断开关：只做原生 LSPlant 初始化，不进入 Kotlin 入口
-    // 诊断模式：跳过 Kotlin 入口（验证仅原生 LSPlant 是否会崩）
-    if WCX_RUN_JAVA_ENTRY {
-        ((*fns).v1_6.CallStaticVoidMethod)(module.env, entry_cls, init_mid, j_process, j_data, j_apk);
-    }
+    ((*fns).v1_6.CallStaticVoidMethod)(module.env, entry_cls, init_mid, j_process, j_data, j_apk);
     let failed = ((*fns).v1_6.ExceptionCheck)(module.env) != jni::sys::JNI_FALSE;
     if failed {
         ((*fns).v1_6.ExceptionDescribe)(module.env);
