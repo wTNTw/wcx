@@ -9,12 +9,26 @@ package com.Johnny.wcx.utils
 object DebugFlags {
 
     private const val TAG = "DebugFlags"
+    private const val KEY_NO_HOOKS = "debug.wcx.no_hooks"
 
     private fun prop(key: String): String? = runCatching {
         val clazz = Class.forName("android.os.SystemProperties")
         val get = clazz.getMethod("get", String::class.java)
         (get.invoke(null, key) as? String)?.trim()
     }.getOrNull()
+
+    /**
+     * `debug.wcx.no_hooks=1`：**临时排错开关**，只加载 payload（dex / 原生库），
+     * 不装任何 hook、不跑 DexKit、不引导 Hchat。用于区分「模块是否参与」某个问题
+     * （例如微信自身 libowl / libaff_biz 的 SIGABRT 崩在启动页）。
+     *
+     * 用完要连同 WeLauncher 里的调用一起删掉。
+     */
+    val noHooks: Boolean by lazy {
+        val on = prop(KEY_NO_HOOKS) == "1"
+        if (on) WeLogger.w(TAG, "no_hooks=1 → 只加载 payload，不装任何 hook（排错模式）")
+        on
+    }
 
     /** `debug.wcx.enable_all=1`：忽略功能开关，全部启用（排错用）。 */
     val enableAllFeatures: Boolean by lazy {

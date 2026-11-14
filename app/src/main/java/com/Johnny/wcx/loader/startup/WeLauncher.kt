@@ -52,6 +52,13 @@ object WeLauncher {
             }, "WCX-ExitReason").apply { isDaemon = true }.start()
         }
 
+        // 临时排错开关：只走到这里（payload 已加载、崩溃处理器已装），之后一律不装 hook。
+        // 用途：判断某个崩溃/卡顿是否由本模块的 hook 引起。验证完连同 DebugFlags.noHooks 一起删。
+        if (com.Johnny.wcx.utils.DebugFlags.noHooks) {
+            WeLogger.w(TAG, "no_hooks 模式：跳过 ParcelableFixer / DexCache / FeaturesLoader / Hchat")
+            return
+        }
+
         ParcelableFixer.init()
 
         // 兜底：「资源表里有 ID、APK 里没有文件」的 res/raw/*.svg 会让微信自己 inflate 时闪退，
