@@ -75,6 +75,48 @@ object AutoSpeechToText : SwitchFeature(),
         return picked.invoke(api, id)
     }
 
+    /**
+     * 找「标记为已转文字」的方法：优先严格签名
+     * `(MsgInfo, boolean, int, int) -> void`，其次 `(MsgInfo, boolean...) -> void`，
+     * 最后退化为「首参是 MsgInfo 且返回 void」。失败打一次候选列表，便于对齐新版。
+     */
+    private fun findMarkTransformed(api: Any): java.lang.reflect.Method? {
+        val msgInfoClass = WeMessageApi.classMsgInfo.clazz
+        val methods = api.javaClass.methods.filter { it.parameterCount >= 2 && it.parameterTypes[0] == msgInfoClass }
+        methods.firstOrNull { method ->
+            method.returnType == Void.TYPE &&
+                method.parameterTypes[1] == java.lang.Boolean.TYPE &&
+                method.parameterTypes.drop(2).all { it == java.lang.Integer.TYPE }
+        }?.let { return it }
+        methods.firstOrNull { method ->
+            method.returnType == Void.TYPE && method.parameterTypes[1] == java.lang.Boolean.TYPE
+        }?.let { return it }
+        methods.firstOrNull { it.returnType == Void.TYPE }?.let { return it }
+        com.Johnny.wcx.utils.WeLogger.w(
+            TAG,
+            "标记已转文字候选 " + methods.size + " 个：" +
+                methods.take(8).joinToString { it.name + "(" + it.parameterTypes.joinToString { p -> p.simpleName } + ")" },
+        )
+        return null
+    }
+
+    /** 按方法声明补齐参数：boolean 传 false，int 传 -1/0，其它传 null。 */
+    private fun invokeMarkTransformed(
+        method: java.lang.reflect.Method,
+        api: Any,
+        msgInfo: Any,
+    ) {
+        val args = method.parameterTypes.mapIndexed { index, type ->
+            when {
+                index == 0 -> msgInfo
+                type == java.lang.Boolean.TYPE -> false
+                type == java.lang.Integer.TYPE -> if (index == 2) -1 else 0
+                else -> null
+            }
+        }.toTypedArray()
+        method.invoke(api, *args)
+    }
+
     private fun handleCreateView(
         param: HookParam,
         view: View
@@ -105,18 +147,17 @@ object AutoSpeechToText : SwitchFeature(),
         runCatching { WeMessageApi.markVoicePlayed(msgInfo) }
 
         if (WeMessageApi.methodGetIsTransformed.method.invoke(msgInfo.instance) as Boolean) return
+        // 8.0.80 起这个「标记为已转文字」的方法签名变了，严格匹配会抛
+        // `No method matching conditions in com.tencent.mm.ui.chatting.component.gp`，
+        // 于是整条消息的处理被外层 runCatching 打断 → 功能表现为完全失效。
+        // 这里改成宽度匹配（首参是 MsgInfo），并且失败只记一条日志、不打断后续。
         try {
-            api.reflekt()
-                .firstMethod {
-                    parameters(
-                        WeMessageApi.classMsgInfo.clazz,
-                        Boolean::class,
-                        Int::class,
-                        Int::class
-                    )
-                    returnType = Void::class.javaPrimitiveType
-                }
-                .invoke(msgInfo.instance, false, -1, 0)
+            val markTransformed = findMarkTransformed(api)
+            if (markTransformed == null) {
+                com.Johnny.wcx.utils.WeLogger.w(TAG, "标记已转文字的方法未找到，本条消息跳过标记")
+            } else {
+                invokeMarkTransformed(markTransformed, api, msgInfo.instance)
+            }
         } catch (_: InvocationTargetException) {
             // WeChat throws `java.lang.NullPointerException: getImgPath(...) must not be null`,
             // but that's not what we should care about and doesn't affect functionality
