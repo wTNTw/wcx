@@ -59,6 +59,9 @@ bionic abort
 3. **Java 侧（`ZygiskEntry.kt`）**
    - 主进程走「延迟启动」路径：起后台线程 `WCX-DeferredStartup`，轮询 `/proc/self/maps`
      里是否出现 `libaff_biz.so`（每 100ms，超时 15s 兜底），然后调 `nativeDeferredInitialize()`。
+   - **命中后再等 1s 稳定宽限才初始化**（`LIBAFF_BIZ_GRACE_MS`）：maps 里出现 libaff_biz
+     只说明 ELF 被映射了，而 libowl 的 GetMethodID 钩子是映射之后在 `JNI_OnLoad` 里才装的；
+     连续稳定存在 1s 确保 `JNI_OnLoad` 已同步返回，避开「已映射、JNI_OnLoad 未跑完」窗口。
    - 成功后用 `ActivityThread.currentApplication()` 拿 Application，**post 回主线程**执行
      `UnifiedEntryPoint.prepareClassLoaderBridge()` + `StartupAgent.startup()`（即 `WeLauncher.init`）。
      —— 必须回主线程：`ActivityProxy` 要在主线程替换 `Instrumentation`，与原来
@@ -76,6 +79,7 @@ LSPlant 文档要求「在 native Zygisk 回调里、成为 Java 帧调用者之
 
 ```
 Zygisk: 主进程推迟 LSPlant 初始化，等待 libaff_biz 加载完成      ← postAppSpecialize
+ZygiskEntry: 等 libaff_biz 稳定后才初始化：映射已连续存在 1000ms ← 稳定宽限
 ZygiskEntry: deferred startup: libaff_biz loaded after polling    ← 后台线程轮询命中
 Zygisk: LSPlant initialized                                       ← 此时才初始化，晚于 libaff_biz
 Zygisk: trusted 1 DexFile(s) for class loader ...
@@ -85,6 +89,25 @@ WeLauncher: loading in process name=com.tencent.mm, type=1        ← 主线程
 
 `LSPlant initialized` 不再早于 libaff_biz 出现；功能（侧边栏、WCX 设置入口、Hchat 脚本子系统
 引导）照常安装，`Hchat 脚本子系统引导完成` 正常出现。
+
+## 通宵实测 + 竞态修复（2026-11-15）
+
+昨晚 22:57 重启后跑 10 小时：
+
+- 主进程连续存活 9h59m、不重启；崩溃从 4-8 次/天降到 **1 次**（`crash_20261114_230145.log`，
+  重启后 4 分钟，仍是 libowl/libaff_biz 老签名）；
+- FunBox `/storage/emulated/0/Android/media/com.tencent.mm/fun_stable/log/crash_report/` **0 个 zip**；
+- `wcx-2026-11-15.log`（00:06→08:50，485 行）E=0、W=1（`NotificationsEvolved` 正则兜底，老提示）；
+- 功能正常：设置入口 `ActivityProxy: hijacked startActivity`、`ProxyInstrumentation`、
+  `FeaturesLoader: enabling all hook items` 均正常。
+
+那 1 次漏网的根因：轮询 `/proc/self/maps` 看到 `libaff_biz.so` 只能说明**文件被映射**了，
+而 `JNI_OnLoad` 是映射**之后**才执行的。轮询一命中就立刻 `art::init`，会撞上一小段
+「已映射、JNI_OnLoad 尚未跑完」的窗口。
+
+修复：命中后再要求映射**连续稳定存在 1s**（每 100ms 复查一次，`LIBAFF_BIZ_GRACE_MS`）
+才初始化 LSPlant；`JNI_OnLoad` 是同步的、远在 1s 内返回，从而避开窗口。超时（15s）兜底
+保留：拿不到稳定观测照常走回退路径装功能，未引入任何排错开关。
 
 ## 残余观察（与本修复无直接因果关系，待继续跟踪）
 

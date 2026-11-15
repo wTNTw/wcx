@@ -39,6 +39,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 object ZygiskEntry {
 
     private const val TAG = "ZygiskEntry"
+    private const val LIBAFF_BIZ_GRACE_MS = 1_000L
     private val entryLock = Any()
     private val moduleStarted = AtomicBoolean(false)
     private val finalClassLoaderHookInstalled = AtomicBoolean(false)
@@ -182,12 +183,34 @@ object ZygiskEntry {
         }, "WCX-DeferredStartup").apply { isDaemon = true }.start()
     }
 
+    /**
+     * 轮询 /proc/self/maps 等 libaff_biz 映射稳定后才返回 true。
+     *
+     * 为什么不能「一命中就初始化」：maps 里出现 libaff_biz.so 只说明 ELF 被映射了，
+     * 真正和 LSPlant 冲突的是它 JNI_OnLoad 里 libowl 的 GetMethodID 钩子，那是映射之后
+     * 才执行的。若命中就立刻 art::init，会撞上「已映射、JNI_OnLoad 还没跑完」的窗口。
+     * 这里首次命中后再要求它连续稳定存在 1s（每 100ms 复查一次）；JNI_OnLoad 是同步的、
+     * 远在 1s 内返回，从而避开窗口。
+     *
+     * 超时（15s）仍拿不到稳定观测时按兜底返回，不因此不装功能。
+     */
     private fun waitForLibaffBiz(timeoutMs: Long = 15_000L): Boolean {
         val deadline = System.currentTimeMillis() + timeoutMs
+        var stableSince = -1L
         while (System.currentTimeMillis() < deadline) {
-            if (isLibaffBizLoaded()) return true
+            if (isLibaffBizLoaded()) {
+                val now = System.currentTimeMillis()
+                if (stableSince < 0) stableSince = now
+                if (now - stableSince >= LIBAFF_BIZ_GRACE_MS) {
+                    WeLogger.i(TAG, "等 libaff_biz 稳定后才初始化：映射已连续存在 ${now - stableSince}ms")
+                    return true
+                }
+            } else {
+                stableSince = -1L
+            }
             Thread.sleep(100L)
         }
+        WeLogger.w(TAG, "等 libaff_biz 稳定超时（${timeoutMs}ms），按兜底路径继续")
         return isLibaffBizLoaded()
     }
 
