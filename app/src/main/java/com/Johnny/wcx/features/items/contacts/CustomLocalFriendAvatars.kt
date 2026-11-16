@@ -256,7 +256,8 @@ object CustomLocalFriendAvatars : ClickableFeature(), IContactInfoProvider, IRes
 
         for ((name, delegate) in hookTargets) {
             if (delegate.isPlaceholder) {
-                WeLogger.w(TAG, "skipping hook $name: method not found (placeholder) in current WeChat version")
+                // 微信版本变更导致该方法已找不到：属预期内的适配差异，降为 I 避免每次启动刷 W。
+                WeLogger.i(TAG, "skipping hook $name: method not found (placeholder) in current WeChat version")
                 continue
             }
 
@@ -264,7 +265,7 @@ object CustomLocalFriendAvatars : ClickableFeature(), IContactInfoProvider, IRes
             // 统一遍历候选逐个 hook，避免只挂上第一个导致部分入口漏改头像。
             val targets = delegate.candidateMethods()
             if (targets.isEmpty()) {
-                WeLogger.w(TAG, "skipping hook $name: no candidate method resolved")
+                WeLogger.i(TAG, "skipping hook $name: no candidate method resolved")
                 continue
             }
             for (target in targets) {

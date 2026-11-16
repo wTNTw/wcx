@@ -291,7 +291,8 @@ fun HomePager(
                         if (message.contains("403") || message.contains("rate limit", true)) {
                             WeLogger.w("HomePager", "检查更新被 GitHub 限流（403），稍后再试")
                         } else {
-                            WeLogger.w(
+                            // 网络类失败不是模块故障（界面已提示「检查更新失败」），只记 I。
+                            WeLogger.i(
                                 "HomePager",
                                 "检查更新失败：" + message.ifBlank { cause?.javaClass?.simpleName ?: "未知原因" },
                             )
@@ -303,7 +304,7 @@ fun HomePager(
             }.onFailure {
                 // 网络类失败（connection closed / 超时）不是模块故障，界面已经提示「检查更新失败」，
                 // 这里降到 W，避免用户日志出现 E 级堆栈。
-                WeLogger.w("HomePager", "Update check exception", it)
+                WeLogger.i("HomePager", "Update check exception: " + (it.message ?: it.javaClass.simpleName))
                 latestVersion = null
                 isLatest = false
             }

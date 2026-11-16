@@ -91,7 +91,10 @@ object ReadReceipts : ClickableFeature(), WeChatMessageViewApi.ICreateViewListen
                 }
             }
         }.onFailure {
-            WeLogger.w(TAG, "failed to hook read receipt", it)
+            // 8.0.80 起 com.tencent.mm.storage.MsgInfo 已被混淆（按类名 Class.forName 必失败），
+            // 需要改成 DexKit 按字段（msgId/talker/isSend）定位才能恢复；在此之前只记 I，
+            // 不再当作「模块错误」每次启动刷 W。
+            WeLogger.i(TAG, "read receipt hook 跳过：MsgInfo 已改名（需 DexKit 重新定位）")
         }
 
         runCatching {
@@ -107,7 +110,7 @@ object ReadReceipts : ClickableFeature(), WeChatMessageViewApi.ICreateViewListen
                 }
             }
         }.onFailure {
-            WeLogger.w(TAG, "failed to hook updateReadStatus", it)
+            WeLogger.i(TAG, "updateReadStatus hook 跳过：MsgInfoStorage 已改名（需 DexKit 重新定位）")
         }
     }
 
