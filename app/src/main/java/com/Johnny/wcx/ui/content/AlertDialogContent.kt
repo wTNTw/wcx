@@ -19,11 +19,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.luminance
 import com.Johnny.wcx.ui.style.WxPalette
 
 @Composable
@@ -35,31 +31,31 @@ fun AlertDialogContent(
     confirmButton: (@Composable () -> Unit)? = null,
     dismissButton: (@Composable () -> Unit)? = null
 ) {
-    // 全局弹窗外壳：大圆角 + 渐变，所有功能弹窗共用一套观感。
-    // 颜色必须与弹窗内选项的容器色一致：M3 的 ListItem 默认容器色是 colorScheme.surface，
-    // 之前硬编码白色渐变（深色模式下是白底），后来又用 surfaceContainer 渐变，
-    // 都会造成「选项块比弹窗背景更深/更浅」。现在深色直接用 surface，选中块与背景完全融合；
-    // 浅色保持原来的白→薄荷渐变（那里的 ListItem 也是 surface=白，视觉效果一致）。
+    // 全局弹窗外壳：大圆角，底色与设置页「一级选项卡片」完全一致
+    // （BaseItemContainer 用的是 colorScheme.surfaceBright）。
+    // 注意两点：
+    // 1) 弹窗内的选项用的 M3 ListItem 默认容器色是 colorScheme.surface，
+    //    只改弹窗底色会让选项块比背景更深/更黑，所以这里把局部主题的 surface
+    //    也指向同一个颜色，两者才会真正「同色」。
+    // 2) 深浅色两种模式都用这个颜色：一级选项卡片本身就是靠 surfaceBright 与
+    //    页面底色拉开层次，弹窗跟着它走就不会出现纯黑底。
     val scheme = MaterialTheme.colorScheme
-    val darkDialog = scheme.surface.luminance() < 0.5f
-    val dialogBackground = if (darkDialog) {
-        Modifier.background(scheme.surface)
-    } else {
-        Modifier.background(Brush.verticalGradient(listOf(Color.White, Color(0xFFF4FAF7))))
-    }
+    val containerColor = scheme.surfaceBright
     Surface(
         shape = RoundedCornerShape(24.dp),
-        color = Color.Transparent,
+        color = containerColor,
         tonalElevation = 0.dp,
         modifier = modifier
             .fillMaxWidth()
             .wrapContentHeight()
     ) {
-        Column(
-            modifier = dialogBackground
-                .padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
+        MaterialTheme(colorScheme = scheme.copy(surface = containerColor)) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -114,6 +110,7 @@ fun AlertDialogContent(
                     dismissButton?.invoke()
                     confirmButton?.invoke()
                 }
+            }
             }
         }
     }
