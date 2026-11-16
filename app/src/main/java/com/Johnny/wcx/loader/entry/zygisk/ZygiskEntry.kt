@@ -7,6 +7,9 @@ import android.app.Application
 import android.content.pm.ApplicationInfo
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
+import android.system.Os
+import android.system.OsConstants
 import androidx.annotation.Keep
 import dev.ujhhgtg.reflekt.utils.makeAccessible
 import com.Johnny.wcx.BuildConfig
@@ -17,7 +20,8 @@ import com.Johnny.wcx.loader.startup.StartupAgent
 import com.Johnny.wcx.loader.startup.UnifiedEntryPoint
 import com.Johnny.wcx.loader.utils.NativeLoader
 import com.Johnny.wcx.utils.WeLogger
-import java.io.File
+import java.io.FileDescriptor
+import java.nio.charset.StandardCharsets
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -40,6 +44,18 @@ object ZygiskEntry {
 
     private const val TAG = "ZygiskEntry"
     private const val LIBAFF_BIZ_GRACE_MS = 1_000L
+    private const val LIBAFF_BIZ_POLL_INTERVAL_MS = 250L
+
+    /** libaff_biz 已命中时，等 Application 的宽容时间。 */
+    private const val APP_WAIT_MS = 5_000L
+
+    /** libaff_biz 超时（兑底路径）时，等 Application 的上限；池进程/被冻结时会一直等到这里。 */
+    private const val FALLBACK_APP_WAIT_MS = 60_000L
+
+    /** art::init（LSPlant）失败时的重试次数与退避。 */
+    private const val LSPLANT_INIT_ATTEMPTS = 3
+    private const val LSPLANT_RETRY_DELAY_MS = 3_000L
+    private val LIBAFF_BIZ_NEEDLE = "libaff_biz.so".toByteArray(StandardCharsets.US_ASCII)
     private val entryLock = Any()
     private val moduleStarted = AtomicBoolean(false)
     private val finalClassLoaderHookInstalled = AtomicBoolean(false)
@@ -155,14 +171,35 @@ object ZygiskEntry {
                     TAG,
                     "deferred startup: libaff_biz ${if (loaded) "loaded" else "timeout"} after polling",
                 )
-                if (!nativeDeferredInitialize()) {
-                    WeLogger.e(TAG, "deferred startup: LSPlant init failed; module not started in main process")
+                // 兜底路径（没观测到 libaff_biz）必须先确认宿主真的已经跑起来：进程可能还没被
+                // 特化（USAP 池进程），或正被系统 frozen 冻着。实测：息屏冷启动时 libaff_biz
+                // 15s 都看不到映射，此状态下 art::init 必失败，而且会把本进程的模块初始化
+                // 永久判死（表现为“微信正常但模块不生效”）。所以先等到 Application 出现。
+                val app = acquireApplication(if (loaded) APP_WAIT_MS else FALLBACK_APP_WAIT_MS)
+                if (app == null) {
+                    if (loaded) {
+                        WeLogger.e(TAG, "deferred startup: could not acquire Application; module not started")
+                    } else {
+                        WeLogger.w(
+                            TAG,
+                            "deferred startup: 宿主 Application 未就绪（疑似池进程或被冻结），本进程不启动模块",
+                        )
+                    }
                     return@Thread
                 }
-                WeLogger.i(TAG, "deferred startup: LSPlant initialized, acquiring Application")
-                val app = acquireApplication()
-                if (app == null) {
-                    WeLogger.e(TAG, "deferred startup: could not acquire Application; module not started")
+                if (!initializeLsPlant()) {
+                    // 两种失败要分开报告：
+                    //  - libaff_biz 已加载却仍初始化不了 → 是模块/ART 侧的真问题，用 E
+                    //  - libaff_biz 压根没出现（恢复模式 / 被冻结 / 池进程）→ 宿主环境问题，用 W
+                    if (loaded) {
+                        WeLogger.e(TAG, "deferred startup: LSPlant init failed after retries; module not started in main process")
+                    } else {
+                        WeLogger.w(
+                            TAG,
+                            "deferred startup: 宿主环境异常（libaff_biz 未加载，可能处于恢复模式/被冻结），" +
+                                "LSPlant 未初始化，本进程不启动模块",
+                        )
+                    }
                     return@Thread
                 }
                 // 模块启动（ActivityProxy 替换 Instrumentation、HostInfo/MMKV 初始化、功能 hook）
@@ -180,7 +217,30 @@ object ZygiskEntry {
             } catch (t: Throwable) {
                 WeLogger.e(TAG, "deferred startup failed", t)
             }
-        }, "WCX-DeferredStartup").apply { isDaemon = true }.start()
+        }, "WCX-Defer-${android.os.Process.myPid()}").apply { isDaemon = true }.start()
+    }
+
+    /**
+     * art::init + trust_class_loader，失败按退避重试。
+     *
+     * 单次失败就把本进程判死会导致“微信活着但模块不生效”，而重试代价极低；
+     * 实际上只要 libaff_biz 的 JNI_OnLoad 跑完，后续重试就能成功。
+     */
+    private fun initializeLsPlant(): Boolean {
+        for (attempt in 1..LSPLANT_INIT_ATTEMPTS) {
+            if (nativeDeferredInitialize()) {
+                WeLogger.i(TAG, "deferred startup: LSPlant initialized")
+                return true
+            }
+            if (attempt < LSPLANT_INIT_ATTEMPTS) {
+                WeLogger.w(
+                    TAG,
+                    "deferred startup: LSPlant init failed (attempt $attempt/$LSPLANT_INIT_ATTEMPTS)，" +
+                        "${LSPLANT_RETRY_DELAY_MS}ms 后重试",
+                )
+                Thread.sleep(LSPLANT_RETRY_DELAY_MS)
+            }        }
+        return false
     }
 
     /**
@@ -189,17 +249,20 @@ object ZygiskEntry {
      * 为什么不能「一命中就初始化」：maps 里出现 libaff_biz.so 只说明 ELF 被映射了，
      * 真正和 LSPlant 冲突的是它 JNI_OnLoad 里 libowl 的 GetMethodID 钩子，那是映射之后
      * 才执行的。若命中就立刻 art::init，会撞上「已映射、JNI_OnLoad 还没跑完」的窗口。
-     * 这里首次命中后再要求它连续稳定存在 1s（每 100ms 复查一次）；JNI_OnLoad 是同步的、
+     * 这里首次命中后再要求它连续稳定存在 1s（每 250ms 复查一次）；JNI_OnLoad 是同步的、
      * 远在 1s 内返回，从而避开窗口。
      *
      * 超时（15s）仍拿不到稳定观测时按兜底返回，不因此不装功能。
      */
     private fun waitForLibaffBiz(timeoutMs: Long = 15_000L): Boolean {
-        val deadline = System.currentTimeMillis() + timeoutMs
+        val deadline = SystemClock.elapsedRealtime() + timeoutMs
         var stableSince = -1L
-        while (System.currentTimeMillis() < deadline) {
+        // 用 elapsedRealtime 而不是 currentTimeMillis：进程被厂商 freezer 冻住再解冻时
+        // 时钟已经越过 deadline，循环会立刻退出，不会在解冻后接着读一次 maps（见
+        // docs/work-items/wechat-8.0.80-wake-deferred-startup-crash.md 里的崩溃栈）。
+        while (SystemClock.elapsedRealtime() < deadline) {
             if (isLibaffBizLoaded()) {
-                val now = System.currentTimeMillis()
+                val now = SystemClock.elapsedRealtime()
                 if (stableSince < 0) stableSince = now
                 if (now - stableSince >= LIBAFF_BIZ_GRACE_MS) {
                     WeLogger.i(TAG, "等 libaff_biz 稳定后才初始化：映射已连续存在 ${now - stableSince}ms")
@@ -208,30 +271,69 @@ object ZygiskEntry {
             } else {
                 stableSince = -1L
             }
-            Thread.sleep(100L)
+            Thread.sleep(LIBAFF_BIZ_POLL_INTERVAL_MS)
         }
         WeLogger.w(TAG, "等 libaff_biz 稳定超时（${timeoutMs}ms），按兜底路径继续")
         return isLibaffBizLoaded()
     }
 
+    /**
+     * 直接用 `Os.open/read` 扫 `/proc/self/maps`。
+     *
+     * 不能用 `File(...).useLines`：构造 `FileInputStream` 会走 `CloseGuard.openWithCallSite`
+     * → 构造 `Throwable` → `fillInStackTrace` → ART `StackVisitor::WalkStack`，在刚被解冻的
+     * USAP 池进程里这一步会踩到空函数指针（SIGSEGV，pc=0），直接把微信主进程带走。
+     * 轮询一次 maps 完全不需要异常栈。
+     */
     private fun isLibaffBizLoaded(): Boolean = try {
-        File("/proc/self/maps").useLines { lines ->
-            lines.any { it.contains("libaff_biz.so") }
+        val fd = Os.open("/proc/self/maps", OsConstants.O_RDONLY, 0)
+        try {
+            containsNeedle(fd, LIBAFF_BIZ_NEEDLE)
+        } finally {
+            runCatching { Os.close(fd) }
         }
     } catch (_: Throwable) {
         false
     }
 
-    private fun acquireApplication(): Application? {
-        var app = getHostApplication()
-        // 万一还没走到 Application.onCreate，重试一小段时间。
-        var attempts = 0
-        while (app == null && attempts < 20) {
-            Thread.sleep(250L)
-            app = getHostApplication()
-            attempts++
+    /** 分块读 fd，命中 needle 返回 true；跨块边界用 needle.size-1 字节的重叠兜住。 */
+    private fun containsNeedle(fd: FileDescriptor, needle: ByteArray): Boolean {
+        val chunk = ByteArray(64 * 1024)
+        val overlap = needle.size - 1
+        var carry = 0
+        while (true) {
+            val read = Os.read(fd, chunk, carry, chunk.size - carry)
+            if (read <= 0) return false
+            val length = carry + read
+            if (indexOfBytes(chunk, length, needle) >= 0) return true
+            carry = minOf(overlap, length)
+            System.arraycopy(chunk, length - carry, chunk, 0, carry)
         }
-        return app
+    }
+
+    private fun indexOfBytes(haystack: ByteArray, length: Int, needle: ByteArray): Int {
+        val limit = length - needle.size
+        if (limit < 0) return -1
+        outer@ for (start in 0..limit) {
+            for (offset in needle.indices) {
+                if (haystack[start + offset] != needle[offset]) continue@outer
+            }
+            return start
+        }
+        return -1
+    }
+
+    private fun acquireApplication(timeoutMs: Long = APP_WAIT_MS): Application? {
+        var app = getHostApplication()
+        if (app != null) return app
+        // 万一还没走到 Application.onCreate，重试一小段时间。
+        val deadline = SystemClock.elapsedRealtime() + timeoutMs
+        while (SystemClock.elapsedRealtime() < deadline) {
+            Thread.sleep(LIBAFF_BIZ_POLL_INTERVAL_MS)
+            app = getHostApplication()
+            if (app != null) return app
+        }
+        return null
     }
 
     private fun getHostApplication(): Application? = try {
