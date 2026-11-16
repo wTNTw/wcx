@@ -1,5 +1,6 @@
 package com.Johnny.wcx.features.items.beautify
 
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
@@ -441,12 +442,30 @@ object CenterProfileCard : ClickableFeature(), IResolveDex {
     }
 
     private fun openPersonalInfoSettings(context: Context) {
-        runCatching {
-            context.startActivity(Intent().setClassName(context, "com.tencent.mm.plugin.setting.ui.setting.SettingsPersonalInfoUI"))
-        }.onFailure {
-            WeLogger.e(TAG, "failed to open personal info settings", it)
+        // 8.0.80 起「个人信息」页由 SettingsPersonalInfoUI 换成 SettingsPersonalInfoPreviewUI
+        // （在 8.0.80 的 base.apk dex 里已搜不到旧类名）。按顺序尝试，兼容 8.0.69~8.0.79。
+        for (className in PERSONAL_INFO_SETTINGS_ACTIVITIES) {
+            try {
+                context.startActivity(Intent().setClassName(context, className))
+                return
+            } catch (_: ActivityNotFoundException) {
+                continue
+            } catch (t: Throwable) {
+                WeLogger.e(TAG, "failed to open personal info settings", t)
+                return
+            }
         }
+        WeLogger.w(
+            TAG,
+            "找不到个人信息设置页面（微信可能又改类名）：${PERSONAL_INFO_SETTINGS_ACTIVITIES.joinToString()}",
+        )
     }
+
+    /** 个人信息设置页候选类名，按微信版本从新到旧。 */
+    private val PERSONAL_INFO_SETTINGS_ACTIVITIES = listOf(
+        "com.tencent.mm.plugin.setting.ui.setting.SettingsPersonalInfoPreviewUI",
+        "com.tencent.mm.plugin.setting.ui.setting.SettingsPersonalInfoUI",
+    )
 
     private fun View.visibleArea(): Int {
         val width = width.takeIf { it > 0 } ?: layoutParams?.width?.takeIf { it > 0 } ?: 0

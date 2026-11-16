@@ -64,6 +64,11 @@ object DisplayGroupMemberRoles : ClickableFeature(), IResolveDex,
         WeChatMessageViewApi.removeListener(this)
     }
 
+    private const val ROLE_UNKNOWN = 0
+    private const val ROLE_OWNER = 1
+    private const val ROLE_ADMIN = 2
+    private const val ROLE_MEMBER = 3
+
     private const val DEFAULT_OWNER_BG = "#FFFFC107"
     private const val DEFAULT_ADMIN_BG = "#FF2196F3"
     private const val DEFAULT_MEMBER_BG = "#FF9E9E9E"
@@ -176,7 +181,12 @@ object DisplayGroupMemberRoles : ClickableFeature(), IResolveDex,
         val groupId = msgInfo.talker
 
         val role = resolvedRoles.getOrPut(groupId to sender) {
-            val group = WeConversationApi.getGroup(groupId)
+            // 群可能已解散/已退出，或者 chatroomStorage 还没就绪：微信侧拿群对象的方法会直接
+            // NPE（Attempt to invoke virtual method 'Class Object.getClass()' on a null object
+            // reference，见 2026-11-16 的日志）。这类消息不该让监听器抛异常，直接记成「未知」
+            // 并缓存，避免每条消息都重试一次。
+            val group = runCatching { WeConversationApi.getGroup(groupId) }.getOrNull()
+                ?: return@getOrPut ROLE_UNKNOWN
             val senderIsGroupOwner = group.reflekt()
                 .firstField {
                     name = "field_roomowner"
@@ -184,9 +194,10 @@ object DisplayGroupMemberRoles : ClickableFeature(), IResolveDex,
                 }
                 .get() as? String? == sender
 
-            if (senderIsGroupOwner) return@getOrPut 1
+            if (senderIsGroupOwner) return@getOrPut ROLE_OWNER
 
-            val memberData = methodGetChatroomData.method.invoke(group, sender) ?: return
+            val memberData = runCatching { methodGetChatroomData.method.invoke(group, sender) }
+                .getOrNull() ?: return@getOrPut ROLE_UNKNOWN
             val memberRoleFlags = memberData.reflekt()
                 .firstField {
                     type = Int::class
@@ -194,12 +205,14 @@ object DisplayGroupMemberRoles : ClickableFeature(), IResolveDex,
                 .get()!! as Int
             val senderIsGroupManager = memberRoleFlags and 2048 != 0
 
-            return@getOrPut if (senderIsGroupManager) 2 else 3
+            return@getOrPut if (senderIsGroupManager) ROLE_ADMIN else ROLE_MEMBER
         }
+
+        if (role == ROLE_UNKNOWN) return
 
         // "成员" badge is optional; when hidden, leave the name untouched so downstream
         // hooks (e.g. LimitGroupMemberNicknameLength) see no role ReplacementSpan prefix.
-        if (role == 3 && !showMember) return
+        if (role == ROLE_MEMBER && !showMember) return
 
         val tag = view.tag
         val textView = tag.reflekt()
@@ -212,9 +225,9 @@ object DisplayGroupMemberRoles : ClickableFeature(), IResolveDex,
         val displayName = textView.text
 
         val roleText = when (role) {
-            1 -> ownerText
-            2 -> adminText
-            3 -> memberText
+            ROLE_OWNER -> ownerText
+            ROLE_ADMIN -> adminText
+            ROLE_MEMBER -> memberText
             else -> unreachable()
         }
 
@@ -224,16 +237,16 @@ object DisplayGroupMemberRoles : ClickableFeature(), IResolveDex,
         sb.append(displayName)
 
         val bgColor = when (role) {
-            1 -> parseColor(ownerBg, DEFAULT_OWNER_BG)
-            2 -> parseColor(adminBg, DEFAULT_ADMIN_BG)
-            3 -> parseColor(memberBg, DEFAULT_MEMBER_BG)
+            ROLE_OWNER -> parseColor(ownerBg, DEFAULT_OWNER_BG)
+            ROLE_ADMIN -> parseColor(adminBg, DEFAULT_ADMIN_BG)
+            ROLE_MEMBER -> parseColor(memberBg, DEFAULT_MEMBER_BG)
             else -> unreachable()
         }
 
         val fgColor = when (role) {
-            1 -> parseColor(ownerFg, DEFAULT_OWNER_FG)
-            2 -> parseColor(adminFg, DEFAULT_ADMIN_FG)
-            3 -> parseColor(memberFg, DEFAULT_MEMBER_FG)
+            ROLE_OWNER -> parseColor(ownerFg, DEFAULT_OWNER_FG)
+            ROLE_ADMIN -> parseColor(adminFg, DEFAULT_ADMIN_FG)
+            ROLE_MEMBER -> parseColor(memberFg, DEFAULT_MEMBER_FG)
             else -> unreachable()
         }
 
