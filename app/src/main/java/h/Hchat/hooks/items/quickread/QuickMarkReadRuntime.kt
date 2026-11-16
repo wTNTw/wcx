@@ -379,6 +379,12 @@ object QuickMarkReadRuntime {
      */
     @Volatile private var capturedStorageClass: Class<*>? = null
 
+    /** 兑底捕获的等待上限；超过还没捕到才算异常（正常 ~2.6s 就捕到）。 */
+    private val CAPTURE_TIMEOUT_MS = 60_000L
+
+    /** 超时提醒只挂一次，避免每个进程/每个类都起一条线程。 */
+    @Volatile private var captureTimeoutScheduled = false
+
     private fun captureStorageInstance(clazz: Class<*>) {
         if (capturedStorageClass === clazz) return
         capturedStorageClass = clazz
@@ -401,7 +407,42 @@ object QuickMarkReadRuntime {
             }.getOrDefault(false)
             if (ok) hooked++
         }
-        com.Johnny.wcx.utils.WeLogger.i(TAG, "已挂 ${clazz.name} 的 $hooked 个实例方法用于捕获 storage")
+        // 构造器也挂：实例是懒创建的（8.0.80），可能在引导之后才 new 出来，
+        // 挂上构造器能比「等它被调用」早一步捕到。
+        var ctorHooked = 0
+        clazz.declaredConstructors.forEach { ctor ->
+            val ok = runCatching {
+                h.Hchat.hooks.core.HookRegistry.get().hook(ctor, capture) != null
+            }.getOrDefault(false)
+            if (ok) ctorHooked++
+        }
+        com.Johnny.wcx.utils.WeLogger.i(
+            TAG,
+            "已挂 ${clazz.name} 的 $hooked 个实例方法（+$ctorHooked 个构造器）用于捕获 storage",
+        )
+        scheduleCaptureTimeoutWarning(clazz)
+    }
+
+    /**
+     * 兜底捕获超时提醒：{@link #CAPTURE_TIMEOUT_MS} 内仍没捕到实例才报 W。
+     * 正常情况（实测 ~2.6s）会先捕到，不会触发这条。
+     */
+    private fun scheduleCaptureTimeoutWarning(clazz: Class<*>) {
+        // 子进程（appbrand / push / support…）根本不会去读会话列表，挂完钩子必然超时，
+        // 没有任何诊断价值，只会在各子进程里各刷一条 W，所以只在主进程监控。
+        if (!com.Johnny.wcx.utils.TargetProcesses.isInMain) return
+        if (captureTimeoutScheduled) return
+        captureTimeoutScheduled = true
+        Thread({
+            runCatching { Thread.sleep(CAPTURE_TIMEOUT_MS) }.onFailure { return@Thread }
+            if (nativeMarkReadStorage == null) {
+                com.Johnny.wcx.utils.WeLogger.w(
+                    TAG,
+                    "原生已读 storage 实例 ${CAPTURE_TIMEOUT_MS / 1000}s 内仍未捕获（${clazz.name}），" +
+                        "原生已读将走数据库回退路径",
+                )
+            }
+        }, "WCX-QuickReadCapture").apply { isDaemon = true }.start()
     }
 
     private fun nativeMarkReadStorage(database: WeChatDatabaseApi, method: Method): Any? {

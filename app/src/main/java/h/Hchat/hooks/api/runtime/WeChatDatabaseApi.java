@@ -280,6 +280,9 @@ public final class WeChatDatabaseApi {
         ArrayDeque<Object> queue = new ArrayDeque<>();
         queue.add(storage);
         while (!queue.isEmpty()) {
+            // 8.0.80 起会话存储是懒创建的，字段图再扫也找不到；这里设一个预算，
+            // 避免每个进程启动期在后台线程里白烧两万多次反射（实测 22453 个对象仍无命中）。
+            if (visited.size() > FIELD_GRAPH_BUDGET) break;
             Object current = queue.removeFirst();
             if (current == null || visited.contains(current)) continue;
             visited.add(current);
@@ -293,14 +296,34 @@ public final class WeChatDatabaseApi {
         return null;
     }
 
+    /** 字段图 BFS 的访问上限（见调用处注释）。 */
+    private static final int FIELD_GRAPH_BUDGET = 5_000;
+
+    /** 8.0.80（versionCode 3220）起会话存储为懒创建，字段图/ getter 都够不到，只差实例钩子。 */
+    private static boolean isLazyStorageVersion() {
+        try {
+            return com.Johnny.wcx.utils.HostInfo.INSTANCE.getVersionCode() >= 3220;
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
     private final java.util.Set<String> storageLookupDiagnosed = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     /** 找不到目标 storage 时，把 CoreStorage 的形态打一次，便于对齐新版本。 */
     private void diagnoseStorageLookup(Class<?> owner, Object storage, int visited) {
         if (!storageLookupDiagnosed.add(owner.getName())) return;
+        String detail = "owner=" + owner.getName() + " core=" + storage.getClass().getName()
+                + " 遍历对象=" + visited;
+        if (isLazyStorageVersion()) {
+            // 不是故障：8.0.80 起会话存储懒创建，等微信第一次读会话时由实例/构造器钩子补捕获。
+            // 若 60s 内仍捕不到，QuickMarkReadRuntime 会另打一条 W。
+            com.Johnny.wcx.utils.WeLogger.INSTANCE.i("WeChatDatabaseApi", "storage 暂未定位到（懒创建，等实例钩子捕获）: "
+                    + detail);
+            return;
+        }
         // 只打一行 W（进用户日志），详细 getter 列表仅在 debug.wcx.enable_all=1 时输出。
-        com.Johnny.wcx.utils.WeLogger.INSTANCE.w("WeChatDatabaseApi", "storage 定位失败: owner=" + owner.getName()
-                + " core=" + storage.getClass().getName() + " 遍历对象=" + visited
+        com.Johnny.wcx.utils.WeLogger.INSTANCE.w("WeChatDatabaseApi", "storage 定位失败: " + detail
                 + "（字段图里不存在该类实例，需换访问路径）");
         if (!com.Johnny.wcx.utils.DebugFlags.INSTANCE.getEnableAllFeatures()) return;
         Class<?> cur = storage.getClass();
