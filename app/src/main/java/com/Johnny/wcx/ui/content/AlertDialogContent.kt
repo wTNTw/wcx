@@ -35,15 +35,17 @@ fun AlertDialogContent(
     confirmButton: (@Composable () -> Unit)? = null,
     dismissButton: (@Composable () -> Unit)? = null
 ) {
-    // 全局弹窗外壳：大圆角 + 极浅渐变，所有功能弹窗共用一套观感。
-    // 渐变必须跟主题走：之前硬编码 Color.White → #F4FAF7，深色模式下整个弹窗是白底
-    // （字是浅色，直接看不见）。深色时改用 M3 的 surfaceContainer 层色，
-    // 这样也能跟随「自定义取色 / 动态壁纸取色」。
+    // 全局弹窗外壳：大圆角 + 渐变，所有功能弹窗共用一套观感。
+    // 颜色必须与弹窗内选项的容器色一致：M3 的 ListItem 默认容器色是 colorScheme.surface，
+    // 之前硬编码白色渐变（深色模式下是白底），后来又用 surfaceContainer 渐变，
+    // 都会造成「选项块比弹窗背景更深/更浅」。现在深色直接用 surface，选中块与背景完全融合；
+    // 浅色保持原来的白→薄荷渐变（那里的 ListItem 也是 surface=白，视觉效果一致）。
     val scheme = MaterialTheme.colorScheme
-    val dialogBackground = if (scheme.surface.luminance() < 0.5f) {
-        Brush.verticalGradient(listOf(scheme.surfaceContainerHigh, scheme.surfaceContainer))
+    val darkDialog = scheme.surface.luminance() < 0.5f
+    val dialogBackground = if (darkDialog) {
+        Modifier.background(scheme.surface)
     } else {
-        Brush.verticalGradient(listOf(Color.White, Color(0xFFF4FAF7)))
+        Modifier.background(Brush.verticalGradient(listOf(Color.White, Color(0xFFF4FAF7))))
     }
     Surface(
         shape = RoundedCornerShape(24.dp),
@@ -54,8 +56,7 @@ fun AlertDialogContent(
             .wrapContentHeight()
     ) {
         Column(
-            modifier = Modifier
-                .background(dialogBackground)
+            modifier = dialogBackground
                 .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
