@@ -48,6 +48,16 @@ object ReadReceipts : ClickableFeature(), WeChatMessageViewApi.ICreateViewListen
 
     private const val TAG = "ReadReceipts"
 
+    /**
+     * 8.0.80 起 `MsgInfo` / `MsgInfoStorage` 已被混淆，本功能依赖的两个读状态 hook 已无法定位，
+     * 而它本身就是废弃功能（群聊根本拿不到他人的真实已读回执），因此直接标为当前版本不支持：
+     * 启动时跳过挂 hook（少两次 Class.forName 失败），设置页也不再给用户「开了却没反应」的错觉。
+     */
+    override val unavailableReason: String?
+        get() = if (hostVersionAtLeast(8, 0, 80)) {
+            "当前微信版本已把消息存储类混淆，已读回执无法获取；且群聊本就不下发他人已读状态（功能已废弃）"
+        } else null
+
     private var prefix by prefOption("read_receipts_prefix", "#")
 
     private val mainHandler by lazy { Handler(Looper.getMainLooper()) }
