@@ -613,9 +613,11 @@ fn task_build_native(abi_names: &[String], build_zygisk: bool, release: bool) ->
         // cargo 最终链接也要用 NDK 的 clang，否则会用宿主 cc 找不到 -ldobby 等。
         let android_home = find_android_home(&root)?;
         let ndk_bin = find_ndk_bin_dir(&android_home)?;
+        // `find_ndk_bin_dir` 返回 `<ndk>/toolchains/llvm/prebuilt/<host>/bin`，
+        // 退 5 层才是 NDK 根（bin → <host> → prebuilt → llvm → toolchains → <ndk>）。
         let ndk_dir = Path::new(&ndk_bin)
             .ancestors()
-            .nth(4)
+            .nth(5)
             .map(|p| p.to_string_lossy().into_owned())
             .context("could not derive NDK root from clang bin dir")?;
         let linker = format!("{ndk_bin}/aarch64-linux-android{MIN_SDK}-clang");
