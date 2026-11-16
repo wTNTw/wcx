@@ -1191,8 +1191,11 @@ object ConversationAggregation : ClickableFeature(),
             }
         }
         hookConversationListDraw()
-        // FunBox 同款：hook RecyclerView.Adapter.bindViewHolder（framework 基类方法，微信 adapter 不 override，
-        // 一定触发，覆盖微信主列表与归拢内部列表的 RecyclerView 行渲染）
+        // FunBox 同款：hook RecyclerView.Adapter.bindViewHolder（基类方法，覆盖所有行的渲染）。
+        // 但 8.0.80 把自带的 androidx 库**整体混淆**了（RecyclerView$ViewHolder 变成 RecyclerView$b），
+        // 按类名 Class.forName 必然 ClassNotFoundException；而 support.v7 版本早就没了。
+        // 这两条只是「覆盖更全」的补充，主路径是上面两个 adapter 的 getView hook，
+        // 所以这里只记 I 并注明原因，不再刷 W。
         runCatching {
             val holderCls = Class.forName(
                 "androidx.recyclerview.widget.RecyclerView\$ViewHolder",
@@ -1203,33 +1206,14 @@ object ConversationAggregation : ClickableFeature(),
                 false, ClassLoaders.HOST
             )
             adapterCls.getMethod(
-                "bindViewHolder", holderCls, Int::class.javaPrimitiveType, java.util.List::class.java
+                "bindViewHolder", holderCls, Int::class.javaPrimitiveType
             ).hookAfterDirectly { tintHolder() }
-            runCatching {
-                adapterCls.getMethod(
-                    "bindViewHolder", holderCls, Int::class.javaPrimitiveType
-                ).hookAfterDirectly { tintHolder() }
-                WeLogger.i(TAG, "bindViewHolder(vh,int) androidx hook registered")
-                diagFile("bindViewHolder(vh,int) androidx registered")
-            }.onFailure { WeLogger.w(TAG, "hook androidx bindViewHolder(2-arg) failed", it) }
             WeLogger.i(TAG, "bindViewHolder androidx hook registered")
             diagFile("bindViewHolder androidx registered")
-        }.onFailure { WeLogger.w(TAG, "hook androidx bindViewHolder failed", it); diagFile("bindViewHolder androidx FAILED: $it") }
-        runCatching {
-            val holderCls = Class.forName(
-                "android.support.v7.widget.RecyclerView\$ViewHolder",
-                false, ClassLoaders.HOST
-            )
-            val adapterCls = Class.forName(
-                "android.support.v7.widget.RecyclerView\$Adapter",
-                false, ClassLoaders.HOST
-            )
-            adapterCls.getMethod(
-                "bindViewHolder", holderCls, Int::class.javaPrimitiveType, java.util.List::class.java
-            ).hookAfterDirectly { tintHolder() }
-            WeLogger.i(TAG, "bindViewHolder support hook registered")
-            diagFile("bindViewHolder support registered")
-        }.onFailure { WeLogger.w(TAG, "hook support bindViewHolder failed", it); diagFile("bindViewHolder support FAILED: $it") }
+        }.onFailure {
+            WeLogger.i(TAG, "bindViewHolder 兜底 hook 跳过：微信混淆了自带 androidx 基类，行渲染由 getView 路径覆盖")
+            diagFile("bindViewHolder androidx skipped: $it")
+        }
     }
 
 
@@ -1758,6 +1742,15 @@ object ConversationAggregation : ClickableFeature(),
     /** Global fallback: tint injected mention/chat-count text wherever a TextView renders it. */
     private fun hookTextViewSetText() {
         if (methodTextViewSetText.isPlaceholder) return
+        // DexKit 按 setText(CharSequence) 全局匹配时会命中接口/抽象声明
+        // （实测 8.0.80 命中 al1.h 的 abstract setText），抽象方法无法 hook（
+        // IllegalArgumentException: cannot hook abstract member），直接跳过：
+        // 扣到具体 TextView 的 tint 由 hookTextViewClass 里的 setText 注册负责。
+        val resolved = runCatching { methodTextViewSetText.method }.getOrNull()
+        if (resolved == null || java.lang.reflect.Modifier.isAbstract(resolved.modifiers)) {
+            WeLogger.i(TAG, "setText(CharSequence) 解析到抽象方法，跳过全局 tint hook：${resolved?.toGenericString()}")
+            return
+        }
         methodTextViewSetText.hookBefore {
             val a = args ?: return@hookBefore
             val text = a.getOrNull(0) as? CharSequence ?: return@hookBefore
