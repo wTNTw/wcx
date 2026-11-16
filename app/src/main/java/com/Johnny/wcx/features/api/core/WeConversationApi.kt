@@ -20,6 +20,8 @@ import java.nio.ByteOrder
 @Feature(name = "对话服务", categories = ["API"], description = "提供对话管理能力")
 object WeConversationApi : ApiFeature(), IResolveDex {
 
+    private val markReadNotReadyLogged = java.util.concurrent.atomic.AtomicBoolean(false)
+
     private const val TAG = "WeConversationApi"
 
     internal val classConversationStorage by dexClass {
@@ -169,10 +171,16 @@ object WeConversationApi : ApiFeature(), IResolveDex {
     }
 //    private var ecsGiftMsgService: Any? = null
 
+    /** 会话存储类是否已由 DexKit 解析出来（未解析时标记已读无法工作）。 */
+    private val conversationStorageClassReady: Boolean
+        get() = runCatching { classConversationStorage.clazz != null }.getOrDefault(false)
+
     val conversationStorage by lazy {
+        val clazz = classConversationStorage.clazz
+            ?: error("conversationStorage: 会话存储类尚未解析（DexKit 未完成或解析失败）")
         WeServiceApi.storageFeatureService.reflekt()
             .firstMethod {
-                returnType = classConversationStorage.clazz
+                returnType = clazz
             }
             .invoke()!!
     }
@@ -201,10 +209,9 @@ object WeConversationApi : ApiFeature(), IResolveDex {
         while (cursor.moveToNext()) {
             val talker = cursor.getString(0)
             try {
-                methodUpdateUnreadByTalker.method.invoke(conversationStorage, talker)
-                WeLogger.d(TAG, "marked $talker as read")
+                markOneAsRead(talker)
             } catch (ex: Exception) {
-                WeLogger.w(TAG, "exception while updating unread count for $talker", ex)
+                logMarkReadFailure(talker, ex)
             }
         }
         cursor.close()
@@ -212,11 +219,30 @@ object WeConversationApi : ApiFeature(), IResolveDex {
 
     fun markAsRead(talker: String) {
         try {
-            methodUpdateUnreadByTalker.method.invoke(conversationStorage, talker)
-            WeLogger.d(TAG, "marked $talker as read")
+            markOneAsRead(talker)
         } catch (ex: Exception) {
-            WeLogger.w(TAG, "exception while updating unread count for $talker", ex)
+            logMarkReadFailure(talker, ex)
         }
+    }
+
+    private fun markOneAsRead(talker: String) {
+        methodUpdateUnreadByTalker.method.invoke(conversationStorage, talker)
+        WeLogger.d(TAG, "marked $talker as read")
+    }
+
+    /**
+     * 标记已读失败时分级记录：
+     * - 会话存储类还没解析出来（DexKit 未完成）→ 启动早期时序问题，只记一次 I；
+     * - 其它异常 → 保留 W 与堆栈（那才是真的异常）。
+     */
+    private fun logMarkReadFailure(talker: String, ex: Exception) {
+        if (!conversationStorageClassReady) {
+            if (markReadNotReadyLogged.compareAndSet(false, true)) {
+                WeLogger.i(TAG, "会话存储尚未就绪（DexKit 未解析完），标记已读已跳过；后续会自动重试")
+            }
+            return
+        }
+        WeLogger.w(TAG, "exception while updating unread count for $talker", ex)
     }
 
     /**

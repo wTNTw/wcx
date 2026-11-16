@@ -112,18 +112,24 @@ object SelfHealingMonitor {
 
         // 检查页面是否空白
         if (isPageBlank(launcher)) {
-            val loadTime = pageLoadTimes.getOrPut(pageKey) { now }
-            val elapsed = now - loadTime
+            // 基准必须是「本次开始空白」的时刻：以前用 getOrPut 只在首次记录，页面正常时也从不清除，
+            // 于是 elapsed = now - 很久以前，会累积成十几分钟，触发假的
+            // "blank page detected for 897851ms"（实测约 15 分钟）。
+            val blankSince = pageLoadTimes.getOrPut(pageKey) { now }
+            val elapsed = now - blankSince
 
             if (elapsed > BLANK_PAGE_THRESHOLD_MS) {
                 WeLogger.w(TAG, "blank page detected for ${elapsed}ms, attempting heal")
                 healBlankPage(launcher, pageKey)
+                // 记录本次尝试时刻：同一段空白不会每轮轮询都重复触发
+                pageLoadTimes[pageKey] = now
             }
         } else {
-            // 页面正常，记录时间
-            if (!pageLoadTimes.containsKey(pageKey)) {
-                pageLoadTimes[pageKey] = now
-                WeLogger.d(TAG, "page loaded normally")
+            // 页面已正常渲染 → 清掉空白计时与重试计数，下次真空白时重新开始算
+            val hadTimer = pageLoadTimes.remove(pageKey) != null
+            retryCounts.remove(pageKey)
+            if (hadTimer) {
+                WeLogger.d(TAG, "page rendered, blank-page timer reset")
             }
         }
 

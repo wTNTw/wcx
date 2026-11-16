@@ -201,11 +201,20 @@ object WeServiceApi : ApiFeature(), IResolveDex {
                 type = methodChatroomStorageGetMemberCount.method.declaringClass
             }.get()!!
 
-    fun getServiceByClass(clazz: Class<*>): Any {
+    fun getServiceByClass(clazz: Class<*>?): Any {
+        // clazz 来自 DexKit 类委托：未解析/解析失败时为 null。直接 arg 传给 Method.invoke 会在
+        // 内部炸出一个毫无信息量的 NPE（Attempt to invoke virtual method 'Class Object.getClass()'
+        // on null），所以这里提前给出可定位的错误。
+        requireNotNull(clazz) {
+            "getServiceByClass: DexKit 类委托尚未解析（clazz=null），本次服务查询已跳过"
+        }
         return methodServiceManagerGetService.method.invoke(null, clazz)!!
     }
 
-    fun getServiceImplByClass(clazz: Class<*>): Any {
+    fun getServiceImplByClass(clazz: Class<*>?): Any {
+        requireNotNull(clazz) {
+            "getServiceImplByClass: DexKit 类委托尚未解析（clazz=null），本次服务查询已跳过"
+        }
         return methodMmKernelGetServiceImpl.method.invoke(null, clazz)!!
     }
 
