@@ -32,6 +32,18 @@ enum class AppThemeMode(val displayName: String) {
         DARK -> true
     }
 
+    /**
+     * 非 Composable 场景（例如 `AlertDialog` 的 window 主题、需要建 Dialog 的地方）的同一套判定：
+     * [SYSTEM] 时直接看宿主资源的 uiMode，避免「Compose 里是深色、Dialog 窗口还是浅色主题」。
+     */
+    fun resolve(context: android.content.Context): Boolean = when (this) {
+        SYSTEM -> (context.resources.configuration.uiMode and
+            android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
+            android.content.res.Configuration.UI_MODE_NIGHT_YES
+        LIGHT -> false
+        DARK -> true
+    }
+
     companion object {
         fun fromName(value: String?) = entries.find { it.name == value } ?: SYSTEM
     }

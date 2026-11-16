@@ -31,9 +31,13 @@ fun showComposeDialog(
 ) {
     val context = CommonContextWrapper(context)
 
+    // Dialog 的 window 主题也必须跟随明暗：之前固定用 Theme_DeviceDefault_Light_Dialog，
+    // 深色模式下输入框光标/选中背景/系统默认文字色都是浅色主题里的，跟圆角渐变外壳不搭。
+    val darkDialog = com.Johnny.wcx.ui.utils.theme.ThemeSettings.themeMode.resolve(context)
     val dialog = Dialog(
         context,
-        android.R.style.Theme_DeviceDefault_Light_Dialog_NoActionBar_MinWidth
+        if (darkDialog) android.R.style.Theme_DeviceDefault_Dialog_NoActionBar_MinWidth
+        else android.R.style.Theme_DeviceDefault_Light_Dialog_NoActionBar_MinWidth
     )
     val lifecycleOwner = XposedLifecycleOwner.create()
 
