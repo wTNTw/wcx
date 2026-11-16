@@ -24,13 +24,19 @@ import kotlin.time.measureTime
 
 object FeaturesLoader {
 
+    /** 并发读 feature 缓存的阈值与线程数。 */
+    private const val PARALLEL_CACHE_THRESHOLD = 8
+    private const val PARALLEL_CACHE_THREADS = 4
+
     private const val TAG = "FeaturesLoader"
 
     fun loadFeatures() {
         val allFeatures = FeaturesProvider.ALL_HOOK_ITEMS
         val allDexItems = allFeatures.filterIsInstance<IResolveDex>()
 
+        val t0 = android.os.SystemClock.elapsedRealtime()
         val outdatedItems = DexCacheManager.getOutdatedItems(allDexItems)
+        val t1 = android.os.SystemClock.elapsedRealtime()
         val validItems = allDexItems - outdatedItems.toSet()
 
         if (outdatedItems.isNotEmpty())
@@ -40,6 +46,7 @@ object FeaturesLoader {
         // 带着它启动会让 feature 里的 hook 拿到假方法/空数组（8.0.80 实测会 ArrayIndexOutOfBounds
         // 甚至把微信界面搞白）。跳过只是该功能不生效，安全得多。
         val (cacheFailedItems, partialItems) = loadDescriptorsFromCache(validItems)
+        val t2 = android.os.SystemClock.elapsedRealtime()
         val brokenFromCache = (cacheFailedItems + partialItems).distinct()
 
         // 当前微信版本已经确认「凑不齐」的功能：跳过但不再弹窗。
@@ -61,31 +68,36 @@ object FeaturesLoader {
         if (actionableBroken.isNotEmpty())
             handleBrokenItems(actionableBroken)
 
+        // 拆分两批：只保留少量「首屏必需」的现在装，其余全部等首帧渲染完后装。
+        // 实测：每个 feature 的 startup 只要 ~1.6ms，没有单点热点（208 个共 340ms），
+        // 所以能省的只能靠「少装一点」，靠不了「优化某个慢 feature」。
+        val (earlyFeatures, deferredFeatures) = allFeatures.partition { feature ->
+            val categories = (feature as? BaseFeature)?.categories.orEmpty()
+            // 实测最贵的几个（设置模块入口 101ms / 莫奈引擎 33ms / 视频号分享菜单 12ms）
+            // 都不影响首屏渲染，按名字单独推到首帧后。
+            val deferByName = (feature as? BaseFeature)?.name in DEFER_BY_NAME
+            // 没标注分类的按「必需」处理，宁可慢一点也不要漏装。
+            !deferByName && (categories.isEmpty() || categories.any { it in EARLY_CATEGORIES })
+        }
+
         val elapsed = measureTime {
-            allFeatures.forEach { feature ->
-                val isBroken = feature is IResolveDex && allBrokenItems.contains(feature)
+            startFeatureBatch(earlyFeatures, allBrokenItems)
+        }
+        WeLogger.i(TAG, "enabling all hook items took $elapsed（首屏必需 ${earlyFeatures.size} 个）")
 
-                // 当前微信版本已不支持的功能（微信把这部分实现删掉了）：完全不启动，
-                // 即便旧配置里开关仍是开着的。unavailableReason 必须是稳定判定（版本号），
-                // 不能用 DexKit 解析状态——解析未完成时同样为 true，会误跳过。
-                if (feature is SwitchFeature && feature.unavailableReason != null) {
-                    WeLogger.i(TAG, "skipping ${feature.name} — 当前微信版本不支持：${feature.unavailableReason}")
-                    return@forEach
+        if (deferredFeatures.isNotEmpty()) {
+            runAfterFirstFrame("延后批次 ${deferredFeatures.size} 个") {
+                val deferredElapsed = measureTime {
+                    startFeatureBatch(deferredFeatures, allBrokenItems)
                 }
-
-                if (isBroken && feature !is WeSettingsInjector) {
-                    WeLogger.w(TAG, "skipping ${feature.name} — incomplete cache, awaiting re-resolution")
-                    return@forEach
-                }
-
-                // 单个 feature 启动失败绝不能中断整轮加载：之前没有隔离，任何一个 feature
-                // 在 startup() 里抛异常，排在它后面的功能（含各类 API 服务）就全都不会启动，
-                // 表现成「开关是开的但功能没反应」。
-                runCatching { feature.startup() }
-                    .onFailure { WeLogger.e(TAG, "startup failed for ${feature.displayName}", it) }
+                WeLogger.i(TAG, "首帧后延后批次完成: ${deferredFeatures.size} 个, 耗时 ${deferredElapsed}ms")
             }
         }
-        WeLogger.i(TAG, "enabling all hook items took $elapsed")
+
+        WeLogger.i(
+            TAG,
+            "loadFeatures 耗时拆解: outdated=${t1 - t0}ms cache=${t2 - t1}ms startup=${elapsed}ms",
+        )
 
         // 功能全部加载完 → 30 秒后若进程仍存活就清零「连续启动失败」计数，
         // 避免 StartupCrashGuard 把偶发的一次崩溃也算成隐患。
@@ -119,41 +131,178 @@ object FeaturesLoader {
      * 「朋友圈服务」就卡在这个循环里（它的某些委托在这个版本匹配不到，缓存永远不完整）。
      */
     private fun loadDescriptorsFromCache(items: List<IResolveDex>): Pair<List<IResolveDex>, List<IResolveDex>> {
+        // 逐条读缓存文件 + 反序列化，条目数上百；各条互不依赖，多线程分摊能省下可观的主线程等待。
+        if (items.size >= PARALLEL_CACHE_THRESHOLD) {
+            return loadDescriptorsFromCacheParallel(items)
+        }
         val failedItems = mutableListOf<IResolveDex>()
         val partialItems = mutableListOf<IResolveDex>()
 
         for (item in items) {
-            val path = (item as BaseFeature).displayName
-            try {
-                val cache = DexCacheManager.loadItemCache(item)
-                if (cache == null) {
-                    WeLogger.w(TAG, "cache missing for $path")
-                    failedItems += item
-                    continue
-                }
-
-                // loadFromCache 逐委托加载；返回未命中的 key 集合
-                val missingKeys = item.loadFromCache(cache)
-                if (missingKeys.isNotEmpty()) {
-                    val total = item.dexDelegates.size
-                    val loaded = total - missingKeys.size
-                    WeLogger.w(TAG, "$path: loaded $loaded/$total delegates from cache, missing: $missingKeys")
-                    if (loaded > 0) {
-                        // 部分可用：按已解析的委托正常启动，不再反复弹 DEX 适配窗。
-                        partialItems += item
-                    } else {
-                        failedItems += item
-                    }
-                }
-            } catch (e: Exception) {
-                WeLogger.e(TAG, "cache load failed for $path", e)
-                runCatching { DexCacheManager.deleteCache(path) }
-                failedItems += item
-            }
+            loadSingleItemCache(item, failedItems, partialItems)
         }
-
         return failedItems to partialItems
     }
+
+    /** 并发版：[loadDescriptorsFromCache] 的同构实现，结果与串行版一致。 */
+    private fun loadDescriptorsFromCacheParallel(items: List<IResolveDex>): Pair<List<IResolveDex>, List<IResolveDex>> {
+        val failedItems = java.util.Collections.synchronizedList(mutableListOf<IResolveDex>())
+        val partialItems = java.util.Collections.synchronizedList(mutableListOf<IResolveDex>())
+        val threadCount = minOf(PARALLEL_CACHE_THREADS, items.size)
+        val pool = java.util.concurrent.Executors.newFixedThreadPool(threadCount) { r ->
+            Thread(r, "WCX-FeatureCache").apply { isDaemon = true }
+        }
+        try {
+            val futures = items.map { item -> pool.submit { loadSingleItemCache(item, failedItems, partialItems) } }
+            futures.forEach { future ->
+                runCatching { future.get() }
+                    .onFailure { WeLogger.w(TAG, "并发加载 feature 缓存失败: ${it.message}") }
+            }
+        } finally {
+            pool.shutdown()
+        }
+        return failedItems.toList() to partialItems.toList()
+    }
+
+    /** 单条：从缓存恢复委托，失败/不完整时记入对应列表。 */
+    private fun loadSingleItemCache(
+        item: IResolveDex,
+        failedItems: MutableList<IResolveDex>,
+        partialItems: MutableList<IResolveDex>,
+    ) {
+        val path = (item as BaseFeature).displayName
+        try {
+            val cache = DexCacheManager.loadItemCache(item)
+            if (cache == null) {
+                WeLogger.w(TAG, "cache missing for $path")
+                failedItems += item
+                return
+            }
+
+            // loadFromCache 逐委托加载；返回未命中的 key 集合
+            val missingKeys = item.loadFromCache(cache)
+            if (missingKeys.isNotEmpty()) {
+                val total = item.dexDelegates.size
+                val loaded = total - missingKeys.size
+                WeLogger.w(TAG, "$path: loaded $loaded/$total delegates from cache, missing: $missingKeys")
+                if (loaded > 0) {
+                    // 部分可用：按已解析的委托正常启动，不再反复弹 DEX 适配窗。
+                    partialItems += item
+                } else {
+                    failedItems += item
+                }
+            }
+        } catch (e: Exception) {
+            WeLogger.e(TAG, "cache load failed for $path", e)
+            runCatching { DexCacheManager.deleteCache(path) }
+            failedItems += item
+        }
+    }
+
+    /**
+     * 启动一批 feature（含跳过判定与逐个隔离）。
+     * 单个 feature 启动失败绝不能中断整批：任一 feature 在 startup() 里抛异常，
+     * 排在它后面的功能（含各类 API 服务）就全都不会启动，表现成「开关是开的但功能没反应」。
+     */
+    private fun startFeatureBatch(features: List<BaseFeature>, allBrokenItems: List<IResolveDex>) {
+        val costs = ArrayList<Pair<String, Long>>(features.size)
+        features.forEach { feature ->
+            val isBroken = feature is IResolveDex && allBrokenItems.contains(feature)
+
+            // 当前微信版本已不支持的功能（微信把这部分实现删掉了）：完全不启动，
+            // 即便旧配置里开关仍是开着的。unavailableReason 必须是稳定判定（版本号），
+            // 不能用 DexKit 解析状态——解析未完成时同样为 true，会误跳过。
+            if (feature is SwitchFeature && feature.unavailableReason != null) {
+                WeLogger.i(TAG, "skipping ${feature.name} — 当前微信版本不支持：${feature.unavailableReason}")
+                return@forEach
+            }
+
+            if (isBroken && feature !is WeSettingsInjector) {
+                WeLogger.w(TAG, "skipping ${feature.name} — incomplete cache, awaiting re-resolution")
+                return@forEach
+            }
+
+            val started = android.os.SystemClock.elapsedRealtime()
+            try {
+                runCatching { feature.startup() }
+                    .onFailure { WeLogger.e(TAG, "startup failed for ${feature.displayName}", it) }
+            } finally {
+                costs += feature.displayName to (android.os.SystemClock.elapsedRealtime() - started)
+            }
+        }
+        logSlowFeatures(costs)
+    }
+
+    /** 把本批最慢的 feature 打出来（只看 >= [SLOW_FEATURE_MS] 的，最多 15 条）。 */
+    private fun logSlowFeatures(costs: List<Pair<String, Long>>) {
+        val slow = costs.filter { it.second >= SLOW_FEATURE_MS }.sortedByDescending { it.second }
+        if (slow.isEmpty()) return
+        val top = slow.take(15)
+        WeLogger.i(
+            TAG,
+            "慢 feature（>=${SLOW_FEATURE_MS}ms，共 ${slow.size} 个）: " +
+                top.joinToString { "${it.first}=${it.second}ms" } +
+                if (slow.size > top.size) " …" else "",
+        )
+    }
+
+    /**
+     * 在「首帧已渲染」后执行（主线程）。
+     *
+     * 双保险：主线程消息队列空闲（IdleHandler）就立即跑；若一直不空闲，
+     * [FIRST_FRAME_FALLBACK_MS] 后强制跑，保证延后批次不会因为持续绘制而饿死。
+     */
+    private fun runAfterFirstFrame(reason: String, block: () -> Unit) {
+        val handler = android.os.Handler(android.os.Looper.getMainLooper())
+        val done = java.util.concurrent.atomic.AtomicBoolean(false)
+        val runOnce = {
+            if (done.compareAndSet(false, true)) {
+                runCatching { block() }
+                    .onFailure { WeLogger.e(TAG, "$reason 执行失败", it) }
+            }
+        }
+        handler.postDelayed({ runOnce() }, FIRST_FRAME_FALLBACK_MS)
+        handler.post {
+            runCatching {
+                android.os.Looper.myQueue().addIdleHandler { runOnce(); false }
+            }.onFailure { runOnce() }
+        }
+    }
+
+    /**
+     * 首帧前就要装上的分类白名单（其余全部延后到首帧后）。
+     *
+     * 只保留直接决定「首页长什么样」的：
+     * - `API`：各类服务基元，其它 feature 依赖，必须先生效；
+     * - `聊天`：用户点开微信很可能马上进会话，输入栏/消息菜单/防撤回依赖它；
+     * - `首页右上角菜单` / `界面美化` / `密友功能`：首页可见（菜单项、负一屏、会话列表过滤）。
+     *
+     * 剩下的（朋友圈/视频号/小程序/支付/通话/系统与隐私/联系人与群组…）都是要进到对应页面
+     * 才会用到，推到首帧后装（IdleHandler 命中约在首帧后 0–2s，且带 1.5s 兜底）。
+     */
+    private val EARLY_CATEGORIES = setOf(
+        "API",
+        "聊天",
+        "首页右上角菜单",
+        "界面美化",
+        "密友功能",
+    )
+
+    /**
+     * 即使分类属于「首屏必需」，也可以安全推到首帧后的单个 feature（按实测耗时挑选）。
+     * 这些都是模块自己的设置/配色/分享菜单钩子，不影响微信首页首帧渲染。
+     */
+    private val DEFER_BY_NAME = setOf(
+        "设置模块入口",
+        "莫奈引擎",
+        "视频号分享菜单扩展",
+    )
+
+    /** 延后批次的兜底延迟：首帧一直不空闲时也不能拖太久。 */
+    private const val FIRST_FRAME_FALLBACK_MS = 1_500L
+
+    /** 单个 feature 超过这个耗时才进「慢 feature」名单。 */
+    private const val SLOW_FEATURE_MS = 8L
 
     private fun handleBrokenItems(brokenItems: List<IResolveDex>) {
         if (Preferences.noDexResolve) return

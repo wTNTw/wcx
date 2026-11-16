@@ -30,6 +30,7 @@ import com.Johnny.wcx.utils.reflection.int
 object WeLauncher {
 
     fun init(context: Context) {
+        val initStart = android.os.SystemClock.elapsedRealtime()
         WeLogger.d(TAG, "loading in process name=${TargetProcesses.currentName}, type=${TargetProcesses.currentType}")
 
         // 尽早接管未捕获异常：模块后台线程/协程抛异常时只记录、不结束宿主进程，
@@ -52,29 +53,42 @@ object WeLauncher {
             }, "WCX-ExitReason").apply { isDaemon = true }.start()
         }
 
-        ParcelableFixer.init()
+        phase("ParcelableFixer") { ParcelableFixer.init() }
 
         // 兜底：「资源表里有 ID、APK 里没有文件」的 res/raw/*.svg 会让微信自己 inflate 时闪退，
         // 这里只对该类资源做降级（其它资源零开销），详见 ResourceFallbackGuard 注释。
-        com.Johnny.wcx.utils.fix.ResourceFallbackGuard.install()
+        phase("ResourceFallbackGuard") { com.Johnny.wcx.utils.fix.ResourceFallbackGuard.install() }
 
         // dex 缓存 key 只跟「微信版本 / 微信客户端版本」，不跟随模块构建指纹：
         // 缓存里存的是微信侧的类与方法描述符（com.tencent.mm.*），与模块自身 R8 混淆结果无关，
         // 所以同版本号的多次 dev 构建应当直接复用缓存（没有改动功能就不该整轮重新适配）。
         // 单个功能是否需要重新解析由 DexCacheManager 的 methodHash 决定：构建期生成器按
         // resolveDex 源码算哈希，只有该功能的定位实现变了、或缓存缺 key 时才重新解析。
-        DexCacheManager.init(
-            if (!Preferences.resetDexCacheOnHotUpdate) "${HostInfo.versionName}${HostInfo.versionCode}"
-            else "${BuildConfig.VERSION_NAME}${BuildConfig.VERSION_CODE}${BuildConfig.CLIENT_VERSION_ARM64}"
-        )
+        phase("DexCacheManager") {
+            DexCacheManager.init(
+                if (!Preferences.resetDexCacheOnHotUpdate) "${HostInfo.versionName}${HostInfo.versionCode}"
+                else "${BuildConfig.VERSION_NAME}${BuildConfig.VERSION_CODE}${BuildConfig.CLIENT_VERSION_ARM64}"
+            )
+        }
 
         if (TargetProcesses.isInMain) {
             val appContext = context.applicationContext ?: context
             // 连续启动失败自愈：先记一次尝试，稳定运行一段时间后由 service.sh 之外的逻辑清零
-            runCatching { StartupCrashGuard.onMainProcessStart() }
-            ActivityProxy.init(appContext)
-            LocalAdaptationEngine.init(appContext)
-            SelfHealingMonitor.init()
+            runCatching { phase("StartupCrashGuard") { StartupCrashGuard.onMainProcessStart() } }
+            // ActivityProxy 必须在主线程：它要替换 Instrumentation。
+            // 其余“看门狗/适配器”类初始化不需要主线程，统一丢到后台，给首帧让路。
+            phase("ActivityProxy") { ActivityProxy.init(appContext) }
+            Thread({
+                val bgStart = android.os.SystemClock.elapsedRealtime()
+                runCatching { LocalAdaptationEngine.init(appContext) }
+                    .onFailure { WeLogger.w(TAG, "LocalAdaptationEngine init 失败: ${it.message}") }
+                runCatching { SelfHealingMonitor.init() }
+                    .onFailure { WeLogger.w(TAG, "SelfHealingMonitor init 失败: ${it.message}") }
+                WeLogger.d(
+                    TAG,
+                    "后台初始化完成（本地适配/自愈监控）: ${android.os.SystemClock.elapsedRealtime() - bgStart}ms",
+                )
+            }, "WCX-BgInit").apply { isDaemon = true }.start()
 
             val prefs =
                 context.getSharedPreferences("${PackageNames.WECHAT}_preferences", Context.MODE_PRIVATE)
@@ -85,14 +99,16 @@ object WeLauncher {
             // 注意：这一句依赖 XposedBridge（de.robv），Zygisk 不装 APK 形态下没有它，
             // 失败不能拖垮整个启动链路（feature 层各自有隔离）。
             runCatching {
-                Resources::class.java.getDeclaredMethod("getString", int).hookBeforeDirectly {
-                    result = runCatching { invokeOriginal() }.getOrNull() ?: "null"
+                phase("ComposeResourcesHook") {
+                    Resources::class.java.getDeclaredMethod("getString", int).hookBeforeDirectly {
+                        result = runCatching { invokeOriginal() }.getOrNull() ?: "null"
+                    }
                 }
             }.onFailure { WeLogger.w(TAG, "Compose Resources.getString 修正失败（可忽略）: $it") }
         }
 
         runCatching {
-            FeaturesLoader.loadFeatures()
+            phase("FeaturesLoader") { FeaturesLoader.loadFeatures() }
         }.onFailure { WeLogger.e(TAG, "failed to load hooks", it) }
 
         // Hchat 脚本子系统（可插拔）：独立后台引导，失败不影响 WCX 既有功能。
@@ -101,6 +117,10 @@ object WeLauncher {
             com.Johnny.wcx.features.hchat.HchatBootstrap.install(context)
         }.onFailure { WeLogger.e(TAG, "hchat bootstrap failed", it) }
 
+        WeLogger.i(
+            TAG,
+            "主线程初始化完成: ${android.os.SystemClock.elapsedRealtime() - initStart}ms",
+        )
     }
 
     /**
@@ -138,4 +158,14 @@ object WeLauncher {
     }
 
     private const val TAG = "WeLauncher"
+
+    /** 测量单个初始化阶段的耗时（debug 日志）。 */
+    private inline fun <T> phase(name: String, block: () -> T): T {
+        val start = android.os.SystemClock.elapsedRealtime()
+        try {
+            return block()
+        } finally {
+            WeLogger.d(TAG, "phase $name: ${android.os.SystemClock.elapsedRealtime() - start}ms")
+        }
+    }
 }
