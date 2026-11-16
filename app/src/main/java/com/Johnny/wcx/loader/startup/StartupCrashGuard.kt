@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import com.Johnny.wcx.utils.WeLogger
+import com.Johnny.wcx.utils.crash.ExitReasonRecorder
 import com.Johnny.wcx.utils.fs.KnownPaths
 import java.io.File
 import kotlin.io.path.createDirectories
@@ -64,6 +65,17 @@ object StartupCrashGuard {
     /** 主进程启动时调用（每次进程启动一次）。 */
     fun onMainProcessStart() {
         runCatching {
+            // 只把「自身崩溃/初始化失败」算作启动失败。系统回收、ANR、冻结、用户强停、
+            // 包更新都会让计数永远凑不满，但也正是这些场景让用户误以为模块已经停用。
+            val lastReason = ExitReasonRecorder.lastMainProcessExitReason()
+            if (lastReason != null && !ExitReasonRecorder.isSelfCausedExit(lastReason)) {
+                WeLogger.i(
+                    TAG,
+                    "上次退出 reason=$lastReason(${ExitReasonRecorder.reasonName(lastReason)})，" +
+                        "属系统/用户行为，不计入启动失败计数",
+                )
+                return@runCatching
+            }
             selfHealDir.toPath().createDirectories()
             val attempts = readAttempts() + 1
             attemptsFile.writeText(attempts.toString())

@@ -4,6 +4,7 @@ import android.app.ActivityManager
 import android.app.ApplicationExitInfo
 import android.content.Context
 import android.os.Build
+import com.Johnny.wcx.utils.HostInfo
 import com.Johnny.wcx.utils.WeLogger
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -123,6 +124,42 @@ object ExitReasonRecorder {
 
     /** reason 码 → 简短中文名。 */
     fun reasonName(reason: Int): String = REASON_NAMES[reason] ?: "reason=$reason"
+
+    /**
+     * 这个退出原因是否应该算「应用/模块自身导致的启动失败」。
+     *
+     * 只认 Java/原生崩溃与初始化失败：系统回收（LOW_MEMORY / ANR / OTHER / FREEZER /
+     * EXCESSIVE_RESOURCE_USAGE）、用户强停、包更新等一概不算 —— 否则厂商反复冻结 +
+     * 唤醒 ANR 就能把自愈守卫推到停用阈值，用户会以为模块彻底坏了。
+     */
+    fun isSelfCausedExit(reason: Int): Boolean = when (reason) {
+        REASON_CRASH, REASON_CRASH_NATIVE, REASON_INITIALIZATION_FAILURE, REASON_UNKNOWN -> true
+        else -> false
+    }
+
+    /**
+     * 直接向 AMS 查「上一次主进程退出原因」。
+     *
+     * 不给 [recordOnStartup] 用，而是给启动守卫用：recordOnStartup 跑在后台线程，
+     * 与主线程的守卫是并发的，读 SharedPreferences 会读到上一轮的旧值。
+     */
+    fun lastMainProcessExitReason(): Int? = runCatching {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
+        val app = HostInfo.application
+        val am = app.getSystemService(ActivityManager::class.java) ?: return null
+        val list = am.getHistoricalProcessExitReasons(app.packageName, 0, 8) ?: return null
+        var picked: ApplicationExitInfo? = null
+        var pickedTime = 0L
+        for (info in list) {
+            if (info == null) continue
+            if (info.processName.orEmpty() != app.packageName) continue
+            if (info.timestamp > pickedTime) {
+                picked = info
+                pickedTime = info.timestamp
+            }
+        }
+        picked?.reason
+    }.getOrNull()
 
     /** 供诊断页展示的一行摘要；从未记录过时返回 null。 */
     fun summary(context: Context): String? {
