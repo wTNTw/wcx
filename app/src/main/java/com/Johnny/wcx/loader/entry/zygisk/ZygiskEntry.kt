@@ -57,27 +57,18 @@ object ZygiskEntry {
     private const val LSPLANT_RETRY_DELAY_MS = 3_000L
 
     /**
-     * 「迟到重试」：第一轮整轮失败后再排一轮，间隔 [DEFERRED_RETRY_DELAY_MS]。
-     *
-     * 微信主进程被 SIGABRT（libowl/libaff_biz 与 LSPlant 冲突）带走、进入恢复模式后，
-     * libaff_biz 往往要几十秒后才加载，第一轮的 15s 轮询必然超时 → 该进程模块被判死，
-     * 表现就是「冷启动 wcx 不加载」。实测 2026-11-17 10:14 那次就是这条路径。
-     */
-    private const val DEFERRED_MAX_ATTEMPTS = 2
-    private const val DEFERRED_RETRY_DELAY_MS = 30_000L
-
-    /**
-     * 等宿主界面可见再初始化 LSPlant 的上限与轮询间隔。
+     * 等宿主界面可见的轮询间隔。
      *
      * 参考 FunBox 的注入方式：它的原生回调只负责拷 APK + 建 ClassLoader + 调 Java 入口，
      * **完全不在 zygote 回调里碰 ART**，真正动 inline hook 引擎是在微信启动完成之后，
      * 所以它从不会撞上 8.0.80 的 libowl / libaff_biz 冲突窗口。
      *
      * LSPlant 的 art::init 没法推迟到「装 hook 时」——它本身就是装 hook 的前提，
-     * 但可以把时机从「libaff_biz 出现 +1s（此时微信还在启动）」推到「宿主界面已可见」，
-     * 尽量贴近 FunBox 实际动 ART 的时刻。超时则按兜底继续，绝不因此卡死。
+     * 但可以把时机从「libaff_biz 出现 +1s（此时微信还在启动）」推到「宿主界面已可见」。
+     *
+     * 这里不设超时兜底：30s 之后还没可见的话，微信自己早就崩了/被杀了，兜底只会在一个
+     * 已经异常或纯后台的进程里白跑一次 art::init。
      */
-    private const val HOST_VISIBLE_TIMEOUT_MS = 30_000L
     private const val HOST_VISIBLE_POLL_MS = 250L
     private val LIBAFF_BIZ_NEEDLE = "libaff_biz.so".toByteArray(StandardCharsets.US_ASCII)
     private val entryLock = Any()
@@ -189,67 +180,51 @@ object ZygiskEntry {
         apkPath: String,
     ) {
         Thread({
-            runDeferredStartupAttempt(service, bridge, apkPath, attempt = 1)
+            runDeferredStartup(service, bridge, apkPath)
         }, "WCX-Defer-${android.os.Process.myPid()}").apply { isDaemon = true }.start()
     }
 
-    /**
-     * 一轮延迟启动尝试。失败时（不是「已在别处启动成功」）排一轮迟到重试：
-     * 微信被 SIGABRT 拉起后进恢复模式时，libaff_biz 常要几十秒才加载，
-     * 只等 15s 会把该进程的模块永久判死。
-     */
-    private fun runDeferredStartupAttempt(
+    /** 主进程的延迟启动：等 libaff_biz → 等宿主界面可见 → 初始化 LSPlant → 主线程启动模块。 */
+    private fun runDeferredStartup(
         service: ZygiskLoaderService,
         bridge: ArtHookBridge,
         apkPath: String,
-        attempt: Int,
     ) {
         try {
             val loaded = waitForLibaffBiz()
             WeLogger.i(
                 TAG,
-                "deferred startup[#${attempt}]: libaff_biz ${if (loaded) "loaded" else "timeout"} after polling",
+                "deferred startup: libaff_biz ${if (loaded) "loaded" else "timeout"} after polling",
             )
             // 兜底路径（没观测到 libaff_biz）必须先确认宿主真的已经跑起来：进程可能还没被
-            // 特化（USAP 池进程），或正被系统 frozen 冻着。实测：息屏冷启动时 libaff_biz
-            // 15s 都看不到映射，此状态下 art::init 必失败。
+            // 特化（USAP 池进程），或正被系统 frozen 冻着。
             val app = acquireApplication(if (loaded) APP_WAIT_MS else FALLBACK_APP_WAIT_MS)
             if (app == null) {
                 if (loaded) {
-                    WeLogger.e(TAG, "deferred startup[#${attempt}]: could not acquire Application; module not started")
+                    WeLogger.e(TAG, "deferred startup: could not acquire Application; module not started")
                 } else {
                     WeLogger.w(
                         TAG,
-                        "deferred startup[#${attempt}]: 宿主 Application 未就绪（疑似池进程或被冻结），本进程暂不启动模块",
+                        "deferred startup: 宿主 Application 未就绪（疑似池进程或被冻结），本进程不启动模块",
                     )
                 }
-                scheduleDeferredRetry(service, bridge, apkPath, attempt)
                 return
             }
             // 等宿主界面真正可见再动 ART：把初始化时机挪出微信的启动窗口（理由见常量注释）。
-            val hostVisible = awaitHostForeground(app, HOST_VISIBLE_TIMEOUT_MS)
-            WeLogger.i(
-                TAG,
-                "deferred startup[#${attempt}]: 宿主界面" +
-                    if (hostVisible) "已可见" else "在 ${HOST_VISIBLE_TIMEOUT_MS}ms 内未可见（兜底继续）",
-            )
+            awaitHostForeground(app)
+            WeLogger.i(TAG, "deferred startup: 宿主界面已可见，开始初始化 LSPlant")
             if (!initializeLsPlant()) {
                 // 两种失败要分开报告：
                 //  - libaff_biz 已加载却仍初始化不了 → 是模块/ART 侧的真问题，用 E
-                //  - libaff_biz 压根没出现（恢复模式 / 被冻结 / 池进程）→ 宿主环境问题，用 W
+                //  - libaff_biz 压根没出现 → 宿主环境问题，用 W
                 if (loaded) {
-                    WeLogger.e(
-                        TAG,
-                        "deferred startup[#${attempt}]: LSPlant init failed after retries; module not started in main process",
-                    )
+                    WeLogger.e(TAG, "deferred startup: LSPlant init failed after retries; module not started in main process")
                 } else {
                     WeLogger.w(
                         TAG,
-                        "deferred startup[#${attempt}]: 宿主环境异常（libaff_biz 未加载，可能处于恢复模式/被冻结），" +
-                            "LSPlant 未初始化，本进程暂不启动模块",
+                        "deferred startup: 宿主环境异常（libaff_biz 未加载），LSPlant 未初始化，本进程不启动模块",
                     )
                 }
-                scheduleDeferredRetry(service, bridge, apkPath, attempt)
                 return
             }
             // 模块启动（ActivityProxy 替换 Instrumentation、HostInfo/MMKV 初始化、功能 hook）
@@ -265,20 +240,19 @@ object ZygiskEntry {
                 }
             }
         } catch (t: Throwable) {
-            WeLogger.e(TAG, "deferred startup[#${attempt}] failed", t)
-            scheduleDeferredRetry(service, bridge, apkPath, attempt)
+            WeLogger.e(TAG, "deferred startup failed", t)
         }
     }
 
     /**
-     * 等本进程进入可见状态（importance <= FOREGROUND），最多 [timeoutMs]。
+     * 等本进程进入可见状态（importance <= FOREGROUND）。
      *
      * 不依赖任何 hook（此时 LSPlant 还没初始化），只查 ActivityManager 的 importance。
-     * 后台冷启动（被 push 拉起）等不到就超时返回 false，由调用方按兜底继续。
+     * 不设超时兜底：线程是 daemon，进程如果一直不可见说明它已经异常或纯后台，白跑 art::init
+     * 没有意义；进程被回收时线程自然消失。
      */
-    private fun awaitHostForeground(app: Application, timeoutMs: Long): Boolean {
-        val deadline = SystemClock.elapsedRealtime() + timeoutMs
-        while (SystemClock.elapsedRealtime() < deadline) {
+    private fun awaitHostForeground(app: Application) {
+        while (true) {
             val importance = runCatching {
                 val am = app.getSystemService(android.content.Context.ACTIVITY_SERVICE)
                     as? android.app.ActivityManager ?: return@runCatching null
@@ -289,35 +263,10 @@ object ZygiskEntry {
             if (importance != null &&
                 importance <= android.app.ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND
             ) {
-                return true
+                return
             }
             Thread.sleep(HOST_VISIBLE_POLL_MS)
         }
-        return false
-    }
-
-    /** 排一轮迟到重试；已启动/已达上限则什么都不做。 */
-    private fun scheduleDeferredRetry(
-        service: ZygiskLoaderService,
-        bridge: ArtHookBridge,
-        apkPath: String,
-        attempt: Int,
-    ) {
-        if (moduleStarted.get() || StartupAgent.isStarted) {
-            WeLogger.i(TAG, "deferred startup: 模块已在别处启动，跳过迟到重试")
-            return
-        }
-        if (attempt >= DEFERRED_MAX_ATTEMPTS) {
-            WeLogger.w(TAG, "deferred startup: 已到迟到重试上限（${DEFERRED_MAX_ATTEMPTS} 轮），本进程放弃")
-            return
-        }
-        val next = attempt + 1
-        WeLogger.i(TAG, "deferred startup: ${DEFERRED_RETRY_DELAY_MS}ms 后开始第 ${next} 轮尝试（迟到重试）")
-        Handler(Looper.getMainLooper()).postDelayed({
-            Thread({
-                runDeferredStartupAttempt(service, bridge, apkPath, next)
-            }, "WCX-Defer-${android.os.Process.myPid()}-r${next}").apply { isDaemon = true }.start()
-        }, DEFERRED_RETRY_DELAY_MS)
     }
 
     /**
