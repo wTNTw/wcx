@@ -15,6 +15,14 @@ if(NOT EXISTS "${XZ_SOURCE}/linux/lib/xz/xz_dec_stream.c")
     message(FATAL_ERROR "Missing XZ sources; run git submodule update --init third_party/xz-embedded")
 endif()
 
+# Dobby：inline hook 引擎。上游自研的 Rust inline hook 在 Android 16 的 ART 函数上
+# 重定位会出错（SetStatus/MarkVisiblyInitialized 处 SIGILL），改用 LSPosed 生产环境用的 Dobby。
+set(DOBBY_GENERATE_SHARED OFF CACHE BOOL "" FORCE)
+set(Plugin.SymbolResolver OFF CACHE BOOL "" FORCE)
+set(BUILD_EXAMPLE OFF CACHE BOOL "" FORCE)
+set(BUILD_TEST OFF CACHE BOOL "" FORCE)
+add_subdirectory("${WCX_ROOT}/third_party/dobby" dobby)
+
 # Compile XZ into the loader; Android liblzma does not provide XZ Utils APIs.
 add_library(wcx_xz STATIC
     "${XZ_SOURCE}/linux/lib/xz/xz_crc32.c"
@@ -30,6 +38,7 @@ target_compile_definitions(wcx_xz PRIVATE
 target_compile_options(wcx_xz PRIVATE -Wall -Wextra -Werror)
 set_target_properties(wcx_xz PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
 install(FILES $<TARGET_FILE:wcx_xz> DESTINATION lib)
+install(FILES $<TARGET_FILE:dobby> DESTINATION lib)
 
 # Host tests need XZ, but neither Android nor LSPlant.
 if(NOT ANDROID)

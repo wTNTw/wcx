@@ -70,27 +70,6 @@ unsafe fn read_jstring(env: *mut RawJNIEnv, field_ptr: *mut jstring) -> Option<S
     Some(s)
 }
 
-/// 读 `debug.wcx.native_early_init`（A/B 试验用；默认关闭）。
-/// 开启时主进程在 postAppSpecialize 里同步初始化 LSPlant（上游 WeKit 的时序，
-/// 此时还没有 Java 帧、隐藏 API 访问不受限），用来验证「内联 hook 与 libowl
-/// 冲突导致 SIGABRT」是否成立。
-fn native_early_init_enabled() -> bool {
-    #[cfg(target_os = "android")]
-    unsafe {
-        let name = b"debug.wcx.native_early_init\0";
-        let mut value = [0 as libc::c_char; libc::PROP_VALUE_MAX as usize];
-        let len = libc::__system_property_get(name.as_ptr() as *const libc::c_char, value.as_mut_ptr());
-        if len <= 0 {
-            return false;
-        }
-        let bytes = std::slice::from_raw_parts(value.as_ptr() as *const u8, len as usize);
-        std::str::from_utf8(bytes).map_or(false, |s| s == "1")
-    }
-    #[cfg(not(target_os = "android"))]
-    {
-        false
-    }
-}
 
 /// 目标包名（进程名去掉 `:xxx` 后缀）
 fn target_package(process_name: &str) -> &str {
@@ -351,32 +330,23 @@ pub unsafe fn do_post_app_specialize(module: &mut WcxZygiskModule, _args: *const
     }
     let loader_ms = t_loader.elapsed().as_millis();
 
-    // 主进程推迟 LSPlant 初始化：微信 8.0.80 的 libaff_biz.so 在 JNI_OnLoad
-    // 里经 libowl 钩过 GetMethodID，若此时 ART 已被 LSPlant 改过会触发 ART
-    // 断言并 abort（卡启动页 + SIGABRT）。主进程默认改由 Java 侧后台线程等
-    // libaff_biz 加载完成后再调用 ZygiskEntry.nativeDeferredInitialize() 完成
-    // art::init + trust。
-    // A/B 开关 `debug.wcx.native_early_init=1` 时，主进程也在 postAppSpecialize
-    // 里同步初始化（上游 WeKit 时序），用来验证内联 hook 与 libowl 的冲突假设。
+    // 主进程推迟 LSPlant/Dobby 初始化：微信 8.0.80 的 libaff_biz.so 在 JNI_OnLoad
+    // 里经 libowl 钩过 GetMethodID，若此时 ART 已被 LSPlant/Dobby 改过会触发 ART
+    // 断言并 abort（卡启动页 + SIGABRT）。主进程改由 Java 侧后台线程等 libaff_biz
+    // 加载完成后再调用 ZygiskEntry.nativeDeferredInitialize() 完成 art::init + trust。
     // 子进程不加载 libaff_biz，保持早期初始化：LSPlant 的初始化契约要求在 native
     // Zygisk 回调里、成为 Java 帧调用者之前执行，子进程照旧。
     let is_main_process = !module.process_name.contains(':');
-    let native_early_init = native_early_init_enabled();
-    if is_main_process && !native_early_init {
+    if is_main_process {
         logi!("Zygisk: 主进程推迟 LSPlant 初始化，等待 libaff_biz 加载完成");
-    } else {
-        if is_main_process && native_early_init {
-            logw!("Zygisk: debug.wcx.native_early_init=1：主进程在 postAppSpecialize 里同步初始化 LSPlant（A/B 试验）");
+    } else if !crate::art::init(module.env) || !crate::art::trust_class_loader(module.env, cl) {
+        if ((*fns).v1_6.ExceptionCheck)(module.env) != jni::sys::JNI_FALSE {
+            ((*fns).v1_6.ExceptionDescribe)(module.env);
+            ((*fns).v1_6.ExceptionClear)(module.env);
         }
-        if !crate::art::init(module.env) || !crate::art::trust_class_loader(module.env, cl) {
-            if ((*fns).v1_6.ExceptionCheck)(module.env) != jni::sys::JNI_FALSE {
-                ((*fns).v1_6.ExceptionDescribe)(module.env);
-                ((*fns).v1_6.ExceptionClear)(module.env);
-            }
-            loge!("Zygisk: failed to initialize LSPlant or trust module DEX");
-            ((*fns).v1_6.DeleteGlobalRef)(module.env, cl);
-            return;
-        }
+        loge!("Zygisk: failed to initialize LSPlant or trust module DEX");
+        ((*fns).v1_6.DeleteGlobalRef)(module.env, cl);
+        return;
     }
 
     // Load ZygiskEntry class
