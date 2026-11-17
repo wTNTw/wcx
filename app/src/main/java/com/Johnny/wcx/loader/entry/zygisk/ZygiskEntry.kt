@@ -48,9 +48,9 @@ object ZygiskEntry {
      *
      * 8.0.80 的冲突来自 libaff_biz 的 JNI_OnLoad 里 libowl 安装的 GetMethodID 钩子：
      * 光等 libaff_biz 映射（1s 宽限）实测仍偶发 SIGABRT，所以这里要求
-     * **libaff_biz 与 libowl 都稳定映射 2s** 再 art::init。
+     * **libaff_biz 与 libowl 都稳定映射 1s** 再 art::init（2s 版本会把首屏 hook 推晚，实测白屏）。
      */
-    private const val LIBAFF_BIZ_GRACE_MS = 2_000L
+    private const val LIBAFF_BIZ_GRACE_MS = 1_000L
     private const val LIBAFF_BIZ_POLL_INTERVAL_MS = 250L
 
     /** libaff_biz 已命中时，等 Application 的宽容时间。 */
@@ -306,7 +306,7 @@ object ZygiskEntry {
      * 为什么不能「一命中就初始化」：maps 里出现 libaff_biz.so 只说明 ELF 被映射了，
      * 真正和 LSPlant 冲突的是它 JNI_OnLoad 里 libowl 的 GetMethodID 钩子，那是映射之后
      * 才执行的。若命中就立刻 art::init，会撞上「已映射、JNI_OnLoad 还没跑完」的窗口。
-     * 这里首次命中后再要求它连续稳定存在 2s（每 250ms 复查一次）；JNI_OnLoad 是同步的、
+     * 这里首次命中后再要求它连续稳定存在 1s（每 250ms 复查一次）；JNI_OnLoad 是同步的、
      * 远在 1s 内返回，从而避开窗口。
      *
      * 超时（15s）仍拿不到稳定观测时按兜底返回，不因此不装功能。
