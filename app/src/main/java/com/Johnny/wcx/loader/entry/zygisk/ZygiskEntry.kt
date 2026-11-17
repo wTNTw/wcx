@@ -184,6 +184,14 @@ object ZygiskEntry {
         }, "WCX-Defer-${android.os.Process.myPid()}").apply { isDaemon = true }.start()
     }
 
+    /** 读 `debug.wcx.early_lsplant`（A/B 试验用；默认关闭）。 */
+    private fun isEarlyLsplantEnabled(): Boolean = runCatching {
+        val cls = Class.forName("android.os.SystemProperties")
+        val get = cls.getMethod("get", String::class.java, String::class.java)
+        val value = get.invoke(null, "debug.wcx.early_lsplant", "") as? String
+        value != null && value.isNotBlank() && value != "0"
+    }.getOrDefault(false)
+
     /** 主进程的延迟启动：等 libaff_biz → 等宿主界面可见 → 初始化 LSPlant → 主线程启动模块。 */
     private fun runDeferredStartup(
         service: ZygiskLoaderService,
@@ -191,7 +199,13 @@ object ZygiskEntry {
         apkPath: String,
     ) {
         try {
-            val loaded = waitForLibaffBiz()
+            // A/B 开关：debug.wcx.early_lsplant=1 时按上游 WeKit 的时序「立即」初始化 LSPlant
+            // （不等 libaff_biz/libowl），用来复核「早期初始化必崩」是否只对本构建成立。
+            val earlyLsplant = isEarlyLsplantEnabled()
+            if (earlyLsplant) {
+                WeLogger.w(TAG, "debug.wcx.early_lsplant=1：跳过 libaff_biz 等待，按上游时序初始化 LSPlant")
+            }
+            val loaded = if (earlyLsplant) true else waitForLibaffBiz()
             WeLogger.i(
                 TAG,
                 "deferred startup: libaff_biz ${if (loaded) "loaded" else "timeout"} after polling",

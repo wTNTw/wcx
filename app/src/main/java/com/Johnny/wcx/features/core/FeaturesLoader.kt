@@ -283,6 +283,10 @@ object FeaturesLoader {
         // （典型就是宿主配置未就绪），这条日志是排查「白屏/不生效」的第一手证据。
         val active = features.count { it.isActive }
         WeLogger.i(TAG, "本批 ${features.size} 个：已启用 $active 个")
+        // 只有在「确实读到过真实开关」时才写快照：否则会把「全读成 false」也固化下来。
+        if (active > 0 && hostPrefsReady()) {
+            FeatureSwitchSnapshot.save(features.filter { it.isActive }.map { it.name })
+        }
     }
 
     /** 把本批最慢的 feature 打出来（只看 >= [SLOW_FEATURE_MS] 的，最多 15 条）。 */

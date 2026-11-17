@@ -40,6 +40,12 @@ abstract class SwitchFeature : BaseFeature() {
         if (CATEGORY_WITH_MASTER_SWITCH in categories && !Preferences.hiddenContactsMasterEnabled) return
         if (!com.Johnny.wcx.utils.DebugFlags.enableAllFeatures) {
             _isEnabled = WePrefs.getBoolOrDef(name, defaultEnabled)
+            if (!_isEnabled && FeatureSwitchSnapshot.isEnabled(name)) {
+                // 重启后首次启动时 MMKV 还没载入数据，开关会读成默认 false；
+                // 用上次「确实读到过」的纯文本快照兜底，避免整轮 feature 空转（首屏白屏）。
+                WeLogger.i(RECHECK_TAG, "MMKV 读到关闭但快照显示启用，按快照启用：" + name)
+                _isEnabled = true
+            }
         }
         if (shouldEnableOnStartup) {
             enable()
