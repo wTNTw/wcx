@@ -136,7 +136,14 @@ object NotificationsEvolved : SwitchFeature(), IResolveDex {
         }
     }
 
-    private val MESSAGE_REGEX = Regex("""^(\[\d+条])?(.+?)?: (.*)$""", RegexOption.DOT_MATCHES_ALL)
+    // 兼容半角/全角冒号：微信文案里两种都存在过，只认 ": " 会让整条通知落到兜底分支。
+    private val MESSAGE_REGEX = Regex("""^(\[\d+条])?(.+?)?[:：]\s?(.*)$""", RegexOption.DOT_MATCHES_ALL)
+
+    /**
+     * 纯媒体占位文案（单聊里微信只给 "[视频]" / "[图片]" / "[表情]" 这种，没有发送者前缀）。
+     * 这类通知结构上就没有「发送者: 内容」，属正常情况，不该记 W。
+     */
+    private val MEDIA_ONLY_REGEX = Regex("""^\[[^\]]{1,20}]$""")
 
     override fun onEnable() {
         CoroutineScope(Dispatchers.IO).launch {
@@ -217,10 +224,14 @@ object NotificationsEvolved : SwitchFeature(), IResolveDex {
                 var senderName: String
                 var text: String
                 if (match == null) {
-                    WeLogger.w(
-                        TAG,
-                        "failed to match message regex, using raw sender name & text content"
-                    )
+                    // 非文字消息（视频/图片/语音/表情…）在单聊通知里只有 "[视频]" 这种占位，
+                    // 本来就不带「发送者: 内容」结构；这不是解析失败，别用 W 刷日志。
+                    val trimmed = notifText.trim()
+                    if (MEDIA_ONLY_REGEX.matches(trimmed)) {
+                        WeLogger.d(TAG, "media-only notification content: $trimmed")
+                    } else {
+                        WeLogger.i(TAG, "notification content has no sender prefix, using raw text")
+                    }
                     senderName = notifTitle
                     text = notifText
                 } else {
