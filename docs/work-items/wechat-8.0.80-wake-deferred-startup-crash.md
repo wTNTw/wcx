@@ -210,7 +210,14 @@ logcat（`am_kill|ANR in|bg anr|SCREEN_ON|Start proc|HansManager|lmkd`）落盘�
 两条修复都生效；息屏冷启动再测一次（09:58）也正常走完 `libaff_biz loaded` 路径。
 **未观测到兜底路径本身**（需“启动瞬间被冻结且 libaff_biz 始终不出现”），该分支待自然场景覆盖。
 
-## 九、遗留
+## 九、后续（2026-11-17）：重试被移除、白屏另有真因
+
+本文里的「迟到重试」后来被删除（30s 之后微信早已崩溃/被杀，兜底无意义），
+而「冷启动后不加载 / 首页白屏」的真正主因是**开关存储（MMKV）在重启后首次启动时读成空**，
+以及**首屏窗口只有约 1s 余量**（晚 1 秒就白屏、晚到 LauncherUI 之后会崩）。
+完整数据与最终修复见 `docs/work-items/wechat-8.0.80-wcx-startup-white-screen.md`。
+
+## 十、遗留
 
 - 池进程/未完成特化的进程里，延迟启动 15s 兜底后仍会走 `nativeDeferredInitialize()`
   （提前 `art::init`）。虽然本次崩溃与之无关，但在池进程里提前初始化 LSPlant 仍有
