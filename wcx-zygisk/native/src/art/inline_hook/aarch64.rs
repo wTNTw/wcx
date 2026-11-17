@@ -293,6 +293,13 @@ pub fn relocate(
             )?;
             emit(&mut code, branch);
             jump(&mut code, destination, target, &mut relay)?;
+        } else if matches!(word, 0xd503_233f | 0xd503_237f) {
+            // PACIASP / PACIBSP sign LR with SP. The LSPlant replacement calls the
+            // backup through a function pointer; on this PAC ABI that call already
+            // signs LR, so re-executing the prologue's sign would double-sign LR and
+            // make the epilogue's AUTIASP fail (jump to a trap address -> SIGSEGV).
+            // Emit a NOP so the epilogue authenticates the caller's single signature.
+            emit(&mut code, NOP);
         } else {
             // The other A64 instruction classes have no immediate PC-relative
             // operand: arithmetic, register loads/stores, SIMD/SVE, system and
