@@ -43,7 +43,14 @@ import java.util.concurrent.atomic.AtomicBoolean
 object ZygiskEntry {
 
     private const val TAG = "ZygiskEntry"
-    private const val LIBAFF_BIZ_GRACE_MS = 1_000L
+    /**
+     * 冲突库的稳定宽限。
+     *
+     * 8.0.80 的冲突来自 libaff_biz 的 JNI_OnLoad 里 libowl 安装的 GetMethodID 钩子：
+     * 光等 libaff_biz 映射（1s 宽限）实测仍偶发 SIGABRT，所以这里要求
+     * **libaff_biz 与 libowl 都稳定映射 2s** 再 art::init。
+     */
+    private const val LIBAFF_BIZ_GRACE_MS = 2_000L
     private const val LIBAFF_BIZ_POLL_INTERVAL_MS = 250L
 
     /** libaff_biz 已命中时，等 Application 的宽容时间。 */
@@ -71,6 +78,7 @@ object ZygiskEntry {
      */
     private const val HOST_VISIBLE_POLL_MS = 250L
     private val LIBAFF_BIZ_NEEDLE = "libaff_biz.so".toByteArray(StandardCharsets.US_ASCII)
+    private val LIBOWL_NEEDLE = "libowl.so".toByteArray(StandardCharsets.US_ASCII)
     private val entryLock = Any()
     private val moduleStarted = AtomicBoolean(false)
     private val finalClassLoaderHookInstalled = AtomicBoolean(false)
@@ -293,12 +301,12 @@ object ZygiskEntry {
     }
 
     /**
-     * 轮询 /proc/self/maps 等 libaff_biz 映射稳定后才返回 true。
+     * 轮询 /proc/self/maps，等 libaff_biz 与 libowl 两个冲突库都稳定映射后才返回 true。
      *
      * 为什么不能「一命中就初始化」：maps 里出现 libaff_biz.so 只说明 ELF 被映射了，
      * 真正和 LSPlant 冲突的是它 JNI_OnLoad 里 libowl 的 GetMethodID 钩子，那是映射之后
      * 才执行的。若命中就立刻 art::init，会撞上「已映射、JNI_OnLoad 还没跑完」的窗口。
-     * 这里首次命中后再要求它连续稳定存在 1s（每 250ms 复查一次）；JNI_OnLoad 是同步的、
+     * 这里首次命中后再要求它连续稳定存在 2s（每 250ms 复查一次）；JNI_OnLoad 是同步的、
      * 远在 1s 内返回，从而避开窗口。
      *
      * 超时（15s）仍拿不到稳定观测时按兜底返回，不因此不装功能。
@@ -306,15 +314,23 @@ object ZygiskEntry {
     private fun waitForLibaffBiz(timeoutMs: Long = 15_000L): Boolean {
         val deadline = SystemClock.elapsedRealtime() + timeoutMs
         var stableSince = -1L
+        var sawAffBiz = false
+        var sawOwl = false
         // 用 elapsedRealtime 而不是 currentTimeMillis：进程被厂商 freezer 冻住再解冻时
-        // 时钟已经越过 deadline，循环会立刻退出，不会在解冻后接着读一次 maps（见
-        // docs/work-items/wechat-8.0.80-wake-deferred-startup-crash.md 里的崩溃栈）。
+        // 时钟已经越过 deadline，循环会立刻退出。
         while (SystemClock.elapsedRealtime() < deadline) {
-            if (isLibaffBizLoaded()) {
+            val affBiz = isLibLoaded(LIBAFF_BIZ_NEEDLE)
+            val owl = isLibLoaded(LIBOWL_NEEDLE)
+            sawAffBiz = sawAffBiz || affBiz
+            sawOwl = sawOwl || owl
+            if (affBiz && owl) {
                 val now = SystemClock.elapsedRealtime()
                 if (stableSince < 0) stableSince = now
                 if (now - stableSince >= LIBAFF_BIZ_GRACE_MS) {
-                    WeLogger.i(TAG, "等 libaff_biz 稳定后才初始化：映射已连续存在 ${now - stableSince}ms")
+                    WeLogger.i(
+                        TAG,
+                        "等 libaff_biz/libowl 稳定后才初始化：两库映射已连续存在 ${now - stableSince}ms",
+                    )
                     return true
                 }
             } else {
@@ -322,8 +338,12 @@ object ZygiskEntry {
             }
             Thread.sleep(LIBAFF_BIZ_POLL_INTERVAL_MS)
         }
-        WeLogger.w(TAG, "等 libaff_biz 稳定超时（${timeoutMs}ms），按兜底路径继续")
-        return isLibaffBizLoaded()
+        WeLogger.w(
+            TAG,
+            "等 libaff_biz/libowl 稳定超时（${timeoutMs}ms），按兜底路径继续 " +
+                "(aff_biz=$sawAffBiz, owl=$sawOwl)",
+        )
+        return sawAffBiz && sawOwl
     }
 
     /**
@@ -334,10 +354,10 @@ object ZygiskEntry {
      * USAP 池进程里这一步会踩到空函数指针（SIGSEGV，pc=0），直接把微信主进程带走。
      * 轮询一次 maps 完全不需要异常栈。
      */
-    private fun isLibaffBizLoaded(): Boolean = try {
+    private fun isLibLoaded(needle: ByteArray): Boolean = try {
         val fd = Os.open("/proc/self/maps", OsConstants.O_RDONLY, 0)
         try {
-            containsNeedle(fd, LIBAFF_BIZ_NEEDLE)
+            containsNeedle(fd, needle)
         } finally {
             runCatching { Os.close(fd) }
         }
