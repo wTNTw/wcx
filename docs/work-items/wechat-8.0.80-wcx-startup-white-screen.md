@@ -198,6 +198,37 @@ Dobby→自研 trampoline 的替换本身是干净的（默认路径 3× PASS、
 （例如回到 native Zygisk 回调里同步 `art::init`，或预解析 `DexFile.<init>` 等方法 ID），
 或整体换成不用 LSPlant 的 WeKite 那套。
 
+### native 早初始化 A/B（`debug.wcx.native_early_init`，2026-11-17 深夜）
+
+为了验证「回到 native Zygisk 回调里同步 `art::init` 是否可行」（此时无 Java 帧、
+`DexFile.<init>` 不再受限），新增开关 `debug.wcx.native_early_init`（默认 0）：置 1 时
+主进程在 `postAppSpecialize` 里、ClassLoader 之后、`ZygiskEntry.init` 之前同步
+`art::init` + `trust_class_loader`。
+
+实测结果（重启手机换新注入器）：
+
+| 路径 | 结果 |
+|---|---|
+| 默认延迟路径（native_early_init=0） | `LSPlant initialized` + `已启用 102`，主进程正常 |
+| 主进程 native 早初始化（native_early_init=1） | **SIGSEGV（status=11）崩溃**：`Class::SetStatus+16` ← `MarkVisiblyInitialized+236` ← `MakeInitializedClassesVisiblyInitialized+148`（tombstone_21） |
+| 子进程（`:push`/`:appbrand`，本就一直早期初始化） | **同样 SIGSEGV** 反复崩溃（`dumpsys activity exit-info` 里多条 `status=11`，tombstone_19/20） |
+
+关键发现：
+1. 崩溃不是 SIGABRT（status=6），而是 **SIGSEGV（status=11）**，fault addr
+   `0x808080808080813f`、`lr` 带 PAC 签名——是 `Class::SetStatus` 被 hook 后、在 ART
+   启动早期 `MakeInitializedClassesVisiblyInitialized → MarkVisiblyInitialized` 路径里
+   崩溃。与 Dobby 的 libowl `GetMethodID`→abort 是**不同的崩溃**。
+2. **子进程也崩**：子进程一直走 native 早期初始化（不加载 libaff_biz），所以这波 SIGSEGV
+   不只影响 A/B 主进程，还把 `:push`/`:appbrand` 都打崩——这是相对 Dobby 的**回归**
+   （Dobby 时期子进程早期初始化不崩）。
+3. 根因高度疑似自研 trampoline 对 `Class::SetStatus` 的 `paciasp` 序言的 PAC 处理有 bug
+   （fault addr `0x80808080…`、`lr` 带签名）；Dobby 的 relocator 能正确处理 PAC。
+
+结论：**延迟逻辑不能移除**。native 早初始化 + 自研 trampoline 会把主进程和子进程都打崩
+（SIGSEGV，非 libowl 冲突）；要把「延迟等待」标记为可移除，必须先修自研 trampoline 的
+PAC 处理（跳过备份蹦床里的 `paciasp`，或在 trampoline 里正确还原 PAC 状态），或改用
+WeKite 那套不碰 native 序言的方案。当前自研 trampoline 的替换**需要回退或修复**后才可保留。
+
 ## 排查手法备忘
 
 - **一定要有「每批已启用 N 个」这种量化日志**：否则「feature 被跳过」和「feature 装了但没生效」
