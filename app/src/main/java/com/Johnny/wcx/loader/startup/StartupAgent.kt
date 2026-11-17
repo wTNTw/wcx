@@ -22,6 +22,10 @@ object StartupAgent {
 
     private var initialized = false
 
+    /** 模块是否已在当前进程内启动过（供 Zygisk 延迟启动的「迟到重试」判断，避免重复初始化）。 */
+    val isStarted: Boolean
+        get() = initialized
+
     @OptIn(ExperimentalPathApi::class)
     fun startup(
         loaderService: ILoaderService,
