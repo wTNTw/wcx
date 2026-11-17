@@ -38,8 +38,20 @@ object FeatureSwitchSnapshot {
         return snapshot.contains(featureName)
     }
 
-    /** 用「本次真实读到的启用集合」覆盖快照。仅在开关存储可读时调用。 */
-    fun save(enabledNames: Collection<String>) {
+    /**
+     * 按批次增量更新快照。仅在开关存储可读时调用。
+     *
+     * 必须**按批合并**而不是整体覆盖：feature 是分两批（首屏 / 首帧后）启动的，
+     * 每批只知道自己那部分，整体覆盖会把另一批的结果冲掉（实测只剩延后批的 2 个）。
+     * 语义：本批的开关状态就是真值 → 先移除本批所有名字，再把本批启用的加回去。
+     */
+    fun save(batchNames: Collection<String>, enabledNames: Collection<String>) {
+        ensureLoaded()
+        val updated = (snapshot - batchNames.toSet() + enabledNames.toSet())
+        write(updated)
+    }
+
+    private fun write(enabledNames: Collection<String>) {
         val target = file ?: return
         runCatching {
             val text = enabledNames.filter { it.isNotBlank() }.sorted().joinToString("\n")

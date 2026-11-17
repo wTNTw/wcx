@@ -285,7 +285,7 @@ object FeaturesLoader {
         WeLogger.i(TAG, "本批 ${features.size} 个：已启用 $active 个")
         // 只有在「确实读到过真实开关」时才写快照：否则会把「全读成 false」也固化下来。
         if (active > 0 && hostPrefsReady()) {
-            FeatureSwitchSnapshot.save(features.filter { it.isActive }.map { it.name })
+            FeatureSwitchSnapshot.save(features.map { it.name }, features.filter { it.isActive }.map { it.name })
         }
     }
 
