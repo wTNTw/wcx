@@ -233,6 +233,16 @@ SIGABRT（换成 SIGSEGV），但「启动早期 `art::init`」目标仍未达�
 `Class::SetStatus` hook 与 `MarkVisiblyInitialized` 的冲突（属 LSPlant 层问题，非
 hook 后端问题），或改用 WeKite 那套不碰 `Class::SetStatus` 的方案。
 
+**回退记录（2026-11-17 深夜，提交 `074e6941`）**：自研 trampoline 在 native 早初始化时
+导致主/子进程 SIGSEGV（tombstone_21：`Class::SetStatus+16` ← `MarkVisiblyInitialized+236`
+← `MakeInitializedClassesVisiblyInitialized+148`，fault addr `0x808080808080813f`），
+功能部分已回退到 Dobby（`art/mod.rs` 恢复 `mod dobby`、`CMakeLists.txt` 恢复
+`add_subdirectory(dobby)`、`build.rs` 恢复 `"dobby"`、`lifecycle.rs` 移除 native 早初始化
+开关），trampoline 实现保留在 `fix/trampoline-pac` 分支。
+**下一步若要复活该实现**：必须先修 `paciasp/pacibsp` 的 PAC 处理（备份蹦床里跳过对 LR 的
+重复签名），并且**先在子进程路径（`:push`/`:appbrand`）上验证**——子进程是更敏感的信号，
+它们一直走 native 早期初始化、不加载 libaff_biz。
+
 ## 排查手法备忘
 
 - **一定要有「每批已启用 N 个」这种量化日志**：否则「feature 被跳过」和「feature 装了但没生效」
