@@ -71,10 +71,23 @@ extern "C" fn jni_allocate_instance(
 }
 
 extern "C" fn jni_hide_loaded_module_libraries(_env: *mut RawJNIEnv, _class: jclass) -> jboolean {
-    let ok = crate::so_hider::hide_path("libdexkit.so") >= 0
-        && crate::so_hider::hide_path("libwcx_native.so") >= 0
-        && crate::so_hider::hide_path("libmmkv.so") >= 0;
-    if ok { JNI_TRUE } else { JNI_FALSE }
+    // 主路径：payload 解包出来的所有 .so 都在  下，
+    // 直接按目录片段匹配一次搞定（libwekit_native / libdexkit / libsilk_codec /
+    // libandroidx.graphics.path / libmmkv …），不用逐个列举 soname —— 之前只写了
+    // libwcx_native.so，而实际库名是 libwekit_native.so，等于没隐藏。
+    let mut hidden = crate::so_hider::hide_path("/.wcx-native/");
+    // 兜底：有些 ROM/加载路径下库可能从 /data/app 或 payload APK 内映射，再按 soname 补一遍。
+    for needle in [
+        "libwekit_native.so",
+        "libwcx_native.so",
+        "libdexkit.so",
+        "libsilk_codec.so",
+        "libmmkv.so",
+    ] {
+        hidden += crate::so_hider::hide_path(needle);
+    }
+    logi!("Zygisk: hid {hidden} segment(s) for module libraries");
+    if hidden >= 0 { JNI_TRUE } else { JNI_FALSE }
 }
 
 // ── ZygiskEntry JNI implementations ──────────────────────────────────────────

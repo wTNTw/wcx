@@ -44,6 +44,15 @@ object StartupAgent {
 
         HostInfo.init(application)
         NativeLoader.init(application)
+
+        // 把模块加载过的原生库从 /proc/self/maps 里隐藏掉（memfd 重映射 + 路径隐藏）。
+        // 移植上游 wekit-zygisk 时只搬了 native 侧的 so_hider，Java 侧的调用漏了，
+        // 所以之前一直是死代码。必须在 NativeLoader.init 之后调用（要隐藏的库此时才全部映射好）。
+        (hookBridge as? com.Johnny.wcx.loader.entry.zygisk.ArtHookBridge)?.let { bridge ->
+            runCatching { bridge.hideLoadedModuleLibraries() }
+                .onSuccess { ok -> WeLogger.i(TAG, "hideLoadedModuleLibraries -> " + ok) }
+                .onFailure { WeLogger.w(TAG, "hideLoadedModuleLibraries failed: " + (it.message ?: it.javaClass.simpleName)) }
+        }
         // FIXME: some people have hiding on, which causes false positives in signature verifier
 //        SignatureVerifier.verify(application)
         WeLauncher.init(application)
