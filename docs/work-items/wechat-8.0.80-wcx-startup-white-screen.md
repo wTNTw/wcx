@@ -218,16 +218,20 @@ Dobby→自研 trampoline 的替换本身是干净的（默认路径 3× PASS、
    `0x808080808080813f`、`lr` 带 PAC 签名——是 `Class::SetStatus` 被 hook 后、在 ART
    启动早期 `MakeInitializedClassesVisiblyInitialized → MarkVisiblyInitialized` 路径里
    崩溃。与 Dobby 的 libowl `GetMethodID`→abort 是**不同的崩溃**。
-2. **子进程也崩**：子进程一直走 native 早期初始化（不加载 libaff_biz），所以这波 SIGSEGV
-   不只影响 A/B 主进程，还把 `:push`/`:appbrand` 都打崩——这是相对 Dobby 的**回归**
-   （Dobby 时期子进程早期初始化不崩）。
-3. 根因高度疑似自研 trampoline 对 `Class::SetStatus` 的 `paciasp` 序言的 PAC 处理有 bug
-   （fault addr `0x80808080…`、`lr` 带签名）；Dobby 的 relocator 能正确处理 PAC。
+2. **子进程也崩，但 Dobby 同样崩**：回退到 Dobby 后端后（`af6b4a15`），`:push` 子进程
+   在 23:13 仍以同样 `Class::SetStatus+16 ← MarkVisiblyInitialized+236` 栈 SIGSEGV
+   （tombstone_16）。因此这不是自研 trampoline 引入的回归，而是 **LSPlant 在 Android 16
+   上早期初始化（无论 Dobby 还是自研 hook）的通病**。
+3. 自研 trampoline 与 Dobby 的 relocator 都会把 `paciasp` 原样搬进备份蹦床，两者崩溃
+   路径一致，说明根因不在 hook 后端，而在 LSPlant 的 `Class::SetStatus` hook 本身（或其
+   replacement 在 `new_status==kVisiblyInitialized` 时跑的 `BackupClassMethods`）与 ART
+   早期 `MakeInitializedClassesVisiblyInitialized` 的相互作用。
 
-结论：**延迟逻辑不能移除**。native 早初始化 + 自研 trampoline 会把主进程和子进程都打崩
-（SIGSEGV，非 libowl 冲突）；要把「延迟等待」标记为可移除，必须先修自研 trampoline 的
-PAC 处理（跳过备份蹦床里的 `paciasp`，或在 trampoline 里正确还原 PAC 状态），或改用
-WeKite 那套不碰 native 序言的方案。当前自研 trampoline 的替换**需要回退或修复**后才可保留。
+结论：**延迟逻辑不能移除**。native 早初始化（无论自研 trampoline 还是 Dobby）都会把
+主/子进程打崩；自研 trampoline 相对 Dobby 不引入额外回归，且避免了 Dobby 与 libowl 的
+SIGABRT（换成 SIGSEGV），但「启动早期 `art::init`」目标仍未达成——需要先解决
+`Class::SetStatus` hook 与 `MarkVisiblyInitialized` 的冲突（属 LSPlant 层问题，非
+hook 后端问题），或改用 WeKite 那套不碰 `Class::SetStatus` 的方案。
 
 ## 排查手法备忘
 
