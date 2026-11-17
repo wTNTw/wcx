@@ -81,14 +81,14 @@ object FeaturesLoader {
         }
 
         val elapsed = measureTime {
-            startFeatureBatch(earlyFeatures, allBrokenItems)
+            startFeatureBatchWhenPrefsReady(earlyFeatures, allBrokenItems)
         }
         WeLogger.i(TAG, "enabling all hook items took $elapsed（首屏必需 ${earlyFeatures.size} 个）")
 
         if (deferredFeatures.isNotEmpty()) {
             runAfterFirstFrame("延后批次 ${deferredFeatures.size} 个") {
                 val deferredElapsed = measureTime {
-                    startFeatureBatch(deferredFeatures, allBrokenItems)
+                    startFeatureBatchWhenPrefsReady(deferredFeatures, allBrokenItems)
                 }
                 WeLogger.i(TAG, "首帧后延后批次完成: ${deferredFeatures.size} 个, 耗时 ${deferredElapsed}ms")
             }
@@ -200,6 +200,54 @@ object FeaturesLoader {
     }
 
     /**
+     * 宿主配置（SharedPreferences/MMKV）是否已经可读。
+     *
+     * 用微信自己的 key 探测：重启后首次启动时，宿主的 prefs 可能尚未加载完，
+     * 此时读开关会全部返回默认值 false。
+     */
+    private fun hostPrefsReady(): Boolean = runCatching {
+        // 探测模块自己的开关存储（WePrefs 用的是 MMKV，不是微信的 SharedPreferences）：
+        // 写一个探针 key 再读回来，能读到才算真的可用。MMKV 未初始化/文件异常时这里会抛或读回 false。
+        com.Johnny.wcx.preferences.WePrefs.putBool(PREFS_READY_PROBE_KEY, true)
+        com.Johnny.wcx.preferences.WePrefs.getBoolOrFalse(PREFS_READY_PROBE_KEY)
+    }.getOrDefault(false)
+
+    /**
+     * 等宿主配置就绪后再启动这一批；未就绪则短延迟重试，**绝不**把 feature 当成「用户关闭」。
+     * 重试到上限仍未就绪时按默认值启动，并打 W 说明可能有一批功能未生效。
+     */
+    private fun startFeatureBatchWhenPrefsReady(
+        features: List<BaseFeature>,
+        allBrokenItems: List<IResolveDex>,
+        attempt: Int = 1,
+    ) {
+        if (features.isEmpty()) return
+        if (hostPrefsReady()) {
+            if (attempt > 1) {
+                WeLogger.i(TAG, "开关配置已就绪（第 $attempt 次尝试），开始启动本批 ${features.size} 个")
+            }
+            startFeatureBatch(features, allBrokenItems)
+            return
+        }
+        if (attempt >= PREFS_READY_MAX_ATTEMPTS) {
+            WeLogger.w(
+                TAG,
+                "开关配置 ${attempt - 1} 次重试仍不可读，按默认值启动本批 ${features.size} 个" +
+                    "（其中被读成关闭的功能本次不会生效）",
+            )
+            startFeatureBatch(features, allBrokenItems)
+            return
+        }
+        WeLogger.i(
+            TAG,
+            "开关配置尚未就绪（第 $attempt 次），${PREFS_READY_RETRY_DELAY_MS}ms 后重试本批 ${features.size} 个",
+        )
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            startFeatureBatchWhenPrefsReady(features, allBrokenItems, attempt + 1)
+        }, PREFS_READY_RETRY_DELAY_MS)
+    }
+
+    /**
      * 启动一批 feature（含跳过判定与逐个隔离）。
      * 单个 feature 启动失败绝不能中断整批：任一 feature 在 startup() 里抛异常，
      * 排在它后面的功能（含各类 API 服务）就全都不会启动，表现成「开关是开的但功能没反应」。
@@ -231,6 +279,10 @@ object FeaturesLoader {
             }
         }
         logSlowFeatures(costs)
+        // 统计真正装上 hook 的数量：与总数量差距过大说明大部分 feature 的开关被读成关闭
+        // （典型就是宿主配置未就绪），这条日志是排查「白屏/不生效」的第一手证据。
+        val active = features.count { it.isActive }
+        WeLogger.i(TAG, "本批 ${features.size} 个：已启用 $active 个")
     }
 
     /** 把本批最慢的 feature 打出来（只看 >= [SLOW_FEATURE_MS] 的，最多 15 条）。 */
@@ -303,6 +355,20 @@ object FeaturesLoader {
 
     /** 单个 feature 超过这个耗时才进「慢 feature」名单。 */
     private const val SLOW_FEATURE_MS = 8L
+
+    /**
+     * 开关配置未就绪时的重试参数。
+     *
+     * 重启后第一次启动微信时，微信自己的 SharedPreferences/MMKV 可能还没加载完，
+     * 这时读开关会全部拿到默认值 false —— 于是 169 个 feature 集体空转（实测 5.59ms，
+     * 正常是 ~185ms），首屏直接白屏。所以「读不到配置」绝不能当成「用户关了」，
+     * 而是短暂重试等宿主把配置加载出来。
+     */
+    private const val PREFS_READY_MAX_ATTEMPTS = 8
+    private const val PREFS_READY_RETRY_DELAY_MS = 400L
+
+    /** 用来探测模块开关存储是否可用的探针 key（写后立即读回校验）。 */
+    private const val PREFS_READY_PROBE_KEY = "__wcx_prefs_ready_probe"
 
     private fun handleBrokenItems(brokenItems: List<IResolveDex>) {
         if (Preferences.noDexResolve) return
