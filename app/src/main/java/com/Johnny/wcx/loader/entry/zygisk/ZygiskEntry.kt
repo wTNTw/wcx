@@ -65,6 +65,20 @@ object ZygiskEntry {
      */
     private const val DEFERRED_MAX_ATTEMPTS = 2
     private const val DEFERRED_RETRY_DELAY_MS = 30_000L
+
+    /**
+     * 等宿主界面可见再初始化 LSPlant 的上限与轮询间隔。
+     *
+     * 参考 FunBox 的注入方式：它的原生回调只负责拷 APK + 建 ClassLoader + 调 Java 入口，
+     * **完全不在 zygote 回调里碰 ART**，真正动 inline hook 引擎是在微信启动完成之后，
+     * 所以它从不会撞上 8.0.80 的 libowl / libaff_biz 冲突窗口。
+     *
+     * LSPlant 的 art::init 没法推迟到「装 hook 时」——它本身就是装 hook 的前提，
+     * 但可以把时机从「libaff_biz 出现 +1s（此时微信还在启动）」推到「宿主界面已可见」，
+     * 尽量贴近 FunBox 实际动 ART 的时刻。超时则按兜底继续，绝不因此卡死。
+     */
+    private const val HOST_VISIBLE_TIMEOUT_MS = 30_000L
+    private const val HOST_VISIBLE_POLL_MS = 250L
     private val LIBAFF_BIZ_NEEDLE = "libaff_biz.so".toByteArray(StandardCharsets.US_ASCII)
     private val entryLock = Any()
     private val moduleStarted = AtomicBoolean(false)
@@ -212,6 +226,13 @@ object ZygiskEntry {
                 scheduleDeferredRetry(service, bridge, apkPath, attempt)
                 return
             }
+            // 等宿主界面真正可见再动 ART：把初始化时机挪出微信的启动窗口（理由见常量注释）。
+            val hostVisible = awaitHostForeground(app, HOST_VISIBLE_TIMEOUT_MS)
+            WeLogger.i(
+                TAG,
+                "deferred startup[#${attempt}]: 宿主界面" +
+                    if (hostVisible) "已可见" else "在 ${HOST_VISIBLE_TIMEOUT_MS}ms 内未可见（兜底继续）",
+            )
             if (!initializeLsPlant()) {
                 // 两种失败要分开报告：
                 //  - libaff_biz 已加载却仍初始化不了 → 是模块/ART 侧的真问题，用 E
@@ -247,6 +268,32 @@ object ZygiskEntry {
             WeLogger.e(TAG, "deferred startup[#${attempt}] failed", t)
             scheduleDeferredRetry(service, bridge, apkPath, attempt)
         }
+    }
+
+    /**
+     * 等本进程进入可见状态（importance <= FOREGROUND），最多 [timeoutMs]。
+     *
+     * 不依赖任何 hook（此时 LSPlant 还没初始化），只查 ActivityManager 的 importance。
+     * 后台冷启动（被 push 拉起）等不到就超时返回 false，由调用方按兜底继续。
+     */
+    private fun awaitHostForeground(app: Application, timeoutMs: Long): Boolean {
+        val deadline = SystemClock.elapsedRealtime() + timeoutMs
+        while (SystemClock.elapsedRealtime() < deadline) {
+            val importance = runCatching {
+                val am = app.getSystemService(android.content.Context.ACTIVITY_SERVICE)
+                    as? android.app.ActivityManager ?: return@runCatching null
+                am.runningAppProcesses
+                    ?.firstOrNull { it.pid == android.os.Process.myPid() }
+                    ?.importance
+            }.getOrNull()
+            if (importance != null &&
+                importance <= android.app.ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND
+            ) {
+                return true
+            }
+            Thread.sleep(HOST_VISIBLE_POLL_MS)
+        }
+        return false
     }
 
     /** 排一轮迟到重试；已启动/已达上限则什么都不做。 */
