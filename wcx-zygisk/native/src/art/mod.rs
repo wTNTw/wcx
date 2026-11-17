@@ -37,33 +37,6 @@ mod ffi {
     }
 }
 
-/// Dobby（third_party/dobby，静态链入）——替代上游自研 inline hook。
-#[cfg(target_os = "android")]
-mod dobby {
-    use std::ffi::c_void;
-
-    unsafe extern "C" {
-        fn DobbyHook(address: *mut c_void, replace: *mut c_void, origin: *mut *mut c_void) -> i32;
-        fn DobbyDestroy(address: *mut c_void) -> i32;
-    }
-
-    /// LSPlant 约定：返回 backup（原函数指针），失败返回 null
-    pub unsafe extern "C" fn hook(target: *mut c_void, replacement: *mut c_void) -> *mut c_void {
-        let mut backup: *mut c_void = std::ptr::null_mut();
-        let rc = unsafe { DobbyHook(target, replacement, &mut backup) };
-        if rc != 0 || backup.is_null() {
-            crate::loge!("Zygisk: DobbyHook 失败 rc={rc} target={target:p}");
-            return std::ptr::null_mut();
-        }
-        backup
-    }
-
-    /// LSPlant 取消 hook 时传入的是**原函数地址**
-    pub unsafe extern "C" fn unhook(target: *mut c_void) -> bool {
-        unsafe { DobbyDestroy(target) == 0 }
-    }
-}
-
 static INITIALIZED: OnceLock<bool> = OnceLock::new();
 #[cfg(target_os = "android")]
 static ART_SYMBOLS: OnceLock<elf::ArtSymbolResolver> = OnceLock::new();
@@ -112,7 +85,7 @@ pub fn init(env: *mut RawJNIEnv) -> bool {
             };
             let _ = ART_SYMBOLS.set(symbols);
             let ok = unsafe {
-                ffi::wcx_lsplant_init(env, resolve_symbol, dobby::hook, dobby::unhook)
+                ffi::wcx_lsplant_init(env, resolve_symbol, inline_hook::hook, inline_hook::unhook)
             };
             if ok {
                 logi!("Zygisk: LSPlant initialized");

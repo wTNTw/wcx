@@ -156,7 +156,8 @@ sh /data/local/tmp/wcx-coldstart-test.sh 45
    （`E ZygiskEntry: LSPlant init failed after retries`）；
    置回 0 后同一台机器立刻恢复（`本批 169 个：已启用 102 个` + 首屏 hook 命中）。
    **结论：上游「同步早初始化」在我们这份构建上不可行**，我们的延迟等待必须保留；
-   差异来源可能是 wcx 额外用了 Dobby、hook 面更大，或该 bootstrap 另有等待/重试策略。
+   差异来源当初猜测是「wcx 额外用了 Dobby、hook 面更大」，**后经排除 Dobby 验证已证伪**
+   （根因是 `Failed to find DexFile.<init>`，见下方「排除 Dobby 的验证」）。
 3. **so 隐藏**（已实现并验证）：`so_hider.rs`（memfd 重映射 + MAP_FIXED）在移植上游时
    就搬过来了，但 **Java 侧从没调用过** `ArtHookBridge.hideLoadedModuleLibraries()`，
    一直是死代码；而且隐藏列表写的是 `libwcx_native.so`，payload 里的库实际叫
@@ -169,6 +170,33 @@ sh /data/local/tmp/wcx-coldstart-test.sh 45
    主进程 `/proc/<pid>/maps` 里 `wcx-native|wekit_native|libdexkit|silk_codec` 命中数
    降为 **0**，并出现 36 个 memfd 映射；模块功能不受影响（`本批 169 个：已启用 102 个`、
    冷启动验收 PASS、`E: 0`）。
+
+### 排除 Dobby 的验证（inline hook 后端替换，2026-11-17 晚）
+
+为了验证「早初始化失败是否源于 Dobby 与 libowl 冲突」，把注入器的 inline hooker 从
+Dobby 换成上游 WeKit 自研的 Rust inline hook（`wcx-zygisk/native/src/art/inline_hook/`，
+从 `wekit-zygisk` 移植，含 ARM64 指令重定位 + memfd 双映射 trampoline；`resolve_symbol`
+继续跳过 `VisiblyInitializedCallback` 两个可选 hook）。Dobby 从 `CMakeLists.txt` /
+`build.rs` 移除，不再链接。
+
+实测（Android 16 / 微信 8.0.80，重启手机换新注入器）：
+
+| 路径 | 结果 |
+|---|---|
+| 默认延迟路径（等 libaff_biz 1s） | `LSPlant initialized` + `本批 169 个：已启用 102` + `E=0`，冷启动验收连续 3 次 PASS，无 SIGABRT |
+| 早初始化 A/B（`debug.wcx.early_lsplant=1`） | 仍失败：`E/LSPlant: Failed to find DexFile.<init>` → `LSPlant init failed (1/3→3/3)`，进程不崩 |
+
+关键发现：早初始化失败发生在 LSPlant 的 `InitJNI` 阶段（`JNI_GetMethodID` 找 `DexFile.<init>`
+隐藏构造器返回 null），**早于任何 inline hook 安装**（`InitNative` 在 `InitJNI` 之后）。
+因此早初始化失败与 hook 后端无关——既不是 Dobby 也不是自研 trampoline 造成的，而是
+「从 Java 帧里、在 libaff_biz 加载完成前调用 `art::init`」时拿不到隐藏 API 访问权。
+上文第 2 点猜测的「差异来源可能是 wcx 额外用了 Dobby」被证伪。
+
+结论：**排除 Dobby 后早初始化仍失败**（败在 `DexFile.<init>`，而非 hook 冲突）。
+Dobby→自研 trampoline 的替换本身是干净的（默认路径 3× PASS、无崩溃、去掉了 Dobby 依赖），
+但它不能单独达成「启动早期 `art::init`」目标——那需要先解决 `InitJNI` 的隐藏 API 访问
+（例如回到 native Zygisk 回调里同步 `art::init`，或预解析 `DexFile.<init>` 等方法 ID），
+或整体换成不用 LSPlant 的 WeKite 那套。
 
 ## 排查手法备忘
 
