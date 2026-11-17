@@ -134,29 +134,30 @@ sh /data/local/tmp/wcx-coldstart-test.sh 45
 
 ## 借鉴 WX-Augment / WeKit-bootstrap（2026-11-17 晚）
 
-反编译了  与它配套的 
-（ + ）：
+反编译了 `WX-Augment-v310.apk` 与它配套的 `bootstrap-release.apk`
+（`libwekit_zygisk.so` + `libwekit_loader.so`）：
 
 - **三层架构**：Zygisk 注入器（原生，LSPlant + dex 加载）→ bootstrap（libxposed API 实现层）
-  → 模块本体（只写 /，不碰 ART）；
-- **作用域配置在 root 侧**：，注入前就确定，
+  → 模块本体（只写 `XposedInterface` / `XposedModuleInterface`，不碰 ART）；
+- **作用域配置在 root 侧**：`/data/adb/wekit_zygisk/injection-targets.tsv`，注入前就确定，
   不依赖 app 内存储时序；
-- **反检测**：（memfd 重映射）、、
-  ，让模块 .so 不出现在 ；
+- **反检测**：`SoHider: remap`（memfd 重映射）、`nativeHideLoadedModuleLibraries`、
+  `hide_path(...)`，让模块 .so 不出现在 `/proc/self/maps`；
 - 它的注入器**同样没有 libaff_biz/libowl 处理**（strings 里 0 命中），即上游那种「同步早初始化」。
 
 ### 落地与 A/B 结论
 
-1. **开关快照**（已实现）： 把「确实读到的启用集合」按批增量落到
-   ，MMKV 读成关闭而快照是开着的就按快照启用 ——
+1. **开关快照**（已实现）：`FeatureSwitchSnapshot` 把「确实读到的启用集合」按批增量落到
+   `filesDir/wcx-enabled-features.txt`，MMKV 读成关闭而快照是开着的就按快照启用 ——
    直接治本文根因 3。实测：清空快照后冷启动，文件恢复 103 行；冷启动验收 PASS。
    （注意必须**按批合并**，整体覆盖会被后一批冲掉，实测只剩 2 行。）
-2. **早初始化 A/B**（已实现，开关 ）：置 1 后实测
-    ×3 → 该进程模块不启动
-   （）。
+2. **早初始化 A/B**（已实现，开关 `debug.wcx.early_lsplant`）：置 1 后实测
+   `LSPlant init failed (attempt 1/3 → 3/3)` ×3 → 该进程模块不启动
+   （`E ZygiskEntry: LSPlant init failed after retries`）；
+   置回 0 后同一台机器立刻恢复（`本批 169 个：已启用 102 个` + 首屏 hook 命中）。
    **结论：上游「同步早初始化」在我们这份构建上不可行**，我们的延迟等待必须保留；
    差异来源可能是 wcx 额外用了 Dobby、hook 面更大，或该 bootstrap 另有等待/重试策略。
-3. **so 隐藏**（未做）：需要在  的 Rust 侧实现 memfd 重映射 + 路径隐藏，
+3. **so 隐藏**（未做）：需要在 `wcx-zygisk` 的 Rust 侧实现 memfd 重映射 + 路径隐藏，
    属独立一轮工作量。
 
 ## 排查手法备忘
