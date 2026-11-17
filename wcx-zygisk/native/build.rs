@@ -84,6 +84,7 @@ fn main() {
         return;
     }
     for library in [
+        "dobby",
         "wcx_lsplant_bridge",
         "lsplant_static",
         "dex_builder_static",
