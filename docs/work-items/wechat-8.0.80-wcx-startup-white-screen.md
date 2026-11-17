@@ -157,8 +157,18 @@ sh /data/local/tmp/wcx-coldstart-test.sh 45
    置回 0 后同一台机器立刻恢复（`本批 169 个：已启用 102 个` + 首屏 hook 命中）。
    **结论：上游「同步早初始化」在我们这份构建上不可行**，我们的延迟等待必须保留；
    差异来源可能是 wcx 额外用了 Dobby、hook 面更大，或该 bootstrap 另有等待/重试策略。
-3. **so 隐藏**（未做）：需要在 `wcx-zygisk` 的 Rust 侧实现 memfd 重映射 + 路径隐藏，
-   属独立一轮工作量。
+3. **so 隐藏**（已实现并验证）：`so_hider.rs`（memfd 重映射 + MAP_FIXED）在移植上游时
+   就搬过来了，但 **Java 侧从没调用过** `ArtHookBridge.hideLoadedModuleLibraries()`，
+   一直是死代码；而且隐藏列表写的是 `libwcx_native.so`，payload 里的库实际叫
+   `libwekit_native.so`，等于没隐藏。现在：
+   - `StartupAgent.startup()` 在 `NativeLoader.init` 之后调用它（与上游同位置）；
+   - 隐藏主路径改为按目录片段 `/.wcx-native/` 匹配（一次覆盖 libwekit_native /
+     libdexkit / libsilk_codec / libandroidx.graphics.path / libmmkv），再按 soname 兜底。
+
+   实测（重启手机让新注入器生效后）：`hideLoadedModuleLibraries -> true`；
+   主进程 `/proc/<pid>/maps` 里 `wcx-native|wekit_native|libdexkit|silk_codec` 命中数
+   降为 **0**，并出现 36 个 memfd 映射；模块功能不受影响（`本批 169 个：已启用 102 个`、
+   冷启动验收 PASS、`E: 0`）。
 
 ## 排查手法备忘
 
