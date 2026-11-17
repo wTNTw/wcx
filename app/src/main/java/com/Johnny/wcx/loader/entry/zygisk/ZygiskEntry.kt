@@ -245,48 +245,29 @@ object ZygiskEntry {
     }
 
     /**
-     * 等宿主**窗口真正绘制出来**（首帧已出），再初始化 LSPlant。
+     * 等本进程进入可见状态（importance <= FOREGROUND）。
      *
-     * 为什么不用 ActivityManager 的 importance：实测进程刚绑上 top-activity 时
-     * importance 就已经是 FOREGROUND 了（libaff_biz 命中后 2ms 就"可见"），而首帧还要
-     * 好几秒才出来 —— 那个判据等于没挡，art::init 仍落在微信启动窗口里。
-     *
-     * 这里改用反射读 `WindowManagerGlobal.mViews`：只要有一个 root view 已经
-     * isShown 且有非零尺寸，说明窗口已 attach 并完成布局（≈首帧）。
-     * 全程只用反射、不依赖任何 hook（此时 LSPlant 还没初始化）。
-     *
-     * 不设超时兜底：线程是 daemon，进程被回收时自然消失。
+     * 不依赖任何 hook（此时 LSPlant 还没初始化），只查 ActivityManager 的 importance。
+     * 不设超时兜底：线程是 daemon，进程如果一直不可见说明它已经异常或纯后台，白跑 art::init
+     * 没有意义；进程被回收时线程自然消失。
      */
     private fun awaitHostForeground(app: Application) {
         while (true) {
-            if (isMainUiCreated()) return
+            val importance = runCatching {
+                val am = app.getSystemService(android.content.Context.ACTIVITY_SERVICE)
+                    as? android.app.ActivityManager ?: return@runCatching null
+                am.runningAppProcesses
+                    ?.firstOrNull { it.pid == android.os.Process.myPid() }
+                    ?.importance
+            }.getOrNull()
+            if (importance != null &&
+                importance <= android.app.ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND
+            ) {
+                return
+            }
             Thread.sleep(HOST_VISIBLE_POLL_MS)
         }
     }
-
-    /**
-     * 宿主主界面（LauncherUI）是否已经创建。
-     *
-     * 只用反射读 `ActivityThread.mActivities`（不影响任何状态、不需要 hook）：里面有
-     * ActivityClientRecord，record.activity 就是已创建的 Activity 实例。
-     *
-     * 为什么不用窗口/importance 判据：实测 WeChat 先显示 splash（自己的窗口已 attach、
-     * importance 也早就是 FOREGROUND），两者都会在启动早期就"满足"，等于没挡。
-     */
-    private fun isMainUiCreated(): Boolean = runCatching {
-        val atCls = Class.forName("android.app.ActivityThread")
-        val thread = atCls.getMethod("currentActivityThread").invoke(null)
-            ?: return@runCatching false
-        val field = atCls.getDeclaredField("mActivities").apply { isAccessible = true }
-        val activities = field.get(thread) as? Map<*, *> ?: return@runCatching false
-        activities.values.any { record ->
-            val activity = runCatching {
-                record!!.javaClass.getDeclaredField("activity").apply { isAccessible = true }
-                    .get(record) as? android.app.Activity
-            }.getOrNull()
-            activity != null && activity.javaClass.name.endsWith("LauncherUI")
-        }
-    }.getOrDefault(false)
 
     /**
      * art::init + trust_class_loader，失败按退避重试。
