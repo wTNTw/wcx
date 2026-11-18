@@ -247,7 +247,7 @@ internal object WeKiteHookBridgeRuntime {
                 // Match XposedBridge: log and swallow callback failures.  A hook
                 // callback must use param.throwable when it intentionally wants
                 // the host invocation to fail.
-                WeLogger.e(TAG, "before callback failed for ${entry.member}", t)
+                logCallbackFailure("before", entry.member, t)
                 param.resetAfterBeforeFailure()
             }
             beforeCount++
@@ -291,7 +291,7 @@ internal object WeKiteHookBridgeRuntime {
             } catch (t: Throwable) {
                 // Xposed restores the value visible on entry to this callback,
                 // then continues with the remaining after callbacks.
-                WeLogger.e(TAG, "after callback failed for ${entry.member}", t)
+                logCallbackFailure("after", entry.member, t)
                 param.restore(beforeAfter)
             }
         }
@@ -301,6 +301,14 @@ internal object WeKiteHookBridgeRuntime {
         param.clearCallbackState()
         finalThrowable?.let { throw it }
         return finalResult
+    }
+
+    private fun logCallbackFailure(phase: String, member: Member, failure: Throwable) {
+        if (WeKiteNativeSelfTest.isExpectedCallbackFault(member, failure)) {
+            WeLogger.i(TAG, "SELFTEST expected $phase callback fault restored")
+        } else {
+            WeLogger.e(TAG, "$phase callback failed for $member", failure)
+        }
     }
 
     // ── Invoke original (from IHookBridge.invokeOriginalMethod) ──────────────

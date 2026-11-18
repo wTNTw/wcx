@@ -485,6 +485,9 @@ class WeKiteHookBridge : IHookBridge {
         private const val TAG = "WeKiteHookBridge"
         private val bridgeCounter = AtomicLong(0L)
 
+        @JvmStatic private external fun nativeInitialize(): Boolean
+        internal fun initializeNativeBackend(): Boolean = nativeInitialize()
+
         @JvmStatic private external fun nativeGetArtMethod(executable: Executable): Long
         @JvmStatic private external fun nativeHookMethod(
             targetArt: Long, backupArt: Long, bridgeArt: Long, hookId: Long): Int
