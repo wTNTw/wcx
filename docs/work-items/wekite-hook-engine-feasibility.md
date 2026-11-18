@@ -245,9 +245,10 @@ M2b-0 JNI 导出与 ArtMethod 闭环；无需转向 LSPlant `BuildDex` 复制方
 
 ## M2b APK native 闭环实施与证据（2026-11-18）
 
-**状态：实现与最终完整矩阵通过，但暂不关闭 M2b 验收。** 较早的一轮 boot 测试发生过
-主进程 LSPlant 路径的 `LauncherUI.onResume` Java 崩溃，根因尚未闭环；后续成功不能作为
-把它归为 flaky 的依据。未添加吞异常补丁，也未修改主进程启动时序来掩盖此问题。
+**状态：实现与 19:08 的完整矩阵通过；本次窄化重试在 23:14 的稳定健康检查失败后已停止，
+不宣称全部验收完成。** 19:00 的主进程 LSPlant/宿主 `LauncherUI.onResume` 事件为单次、
+后续无法复现、因果未建立的未闭环残余观察，不称已修复或 flaky。没有添加吞异常补丁，
+也没有修改主进程启动时序来掩盖问题。最新失败与停止状态见本节末尾。
 
 ### 实施提交
 
@@ -345,9 +346,9 @@ rollback trap，每次恢复先删属性并原子发布稳定 APK，再收集诊
    **但这不能证明原崩溃已修复或与 M2b 无关**。保留完整堆栈、exit-info 与窗口；
    不把此问题标为 flaky，不以吞 NPE 或改变主进程 hook 契约消除失败。
 
-因此 native 功能闭环已有证据，**M2b 最终验收仍受第 2 项根因未明阻塞**。
-下一步应隔离该 LSPlant 主进程 Activity 恢复/初始化路径；未经定位，不安全扩大
-主进程时序或 UI 行为修改。子进程仍由稳定 resident 注入器初始化过 LSPlant，
+因此 native 功能闭环已有证据；第 2 项列为**未闭环残余观察**，不能将后续成功
+当成原事件已修复或与 M2b 无关的证据。同类 Java crash 在探针中仍是硬失败。
+未经定位，不安全扩大主进程时序或 UI 行为修改。子进程仍由稳定 resident 注入器初始化过 LSPlant，
 本轮不证明“完全移除 LSPlant”的运行模式，也不覆盖 native/interface/proxy hook 或 deoptimize。
 
 ### 回滚与最终健康检查
@@ -373,3 +374,84 @@ stable injector MD5=93dcbeea7a5ea0075c36c315696be62f
 - `device-full-a1d737c0-repro.txt`、`wcx-m2b-full-20261118-190842/`：最终 6/4/604 秒完整证据。
 - `stable-boot-repro.txt`、`stable-boot-controls.txt`、`stable-appbrand-boot-repro.txt`、
   `stable-final-health.txt`、`wcx-m2b-stable-final-window.txt`。
+
+### 最后一次窄化重试与停止状态（23:14）
+
+按父会话转达的“只重试一次，失败即停止”要求，本次只完成 property=0 对照、真实
+8.0.80 字节码和 ART method sharing 取证，没有再部署 property=1 或盲修主进程。
+重试前本地/远端均为 `7b42093ce490602ac483827ff2688f96ccb32e48`，工作区干净，
+设备 APK/注入器是上述稳定哈希，两个测试属性不存在。
+
+`7b42093c` 只修改探针的精确计数约束，没有改 APK 后端或推翻原构建/设备矩阵。
+对已保存的最终完整窗口重新核验：3 次 SELFTEST PASS，唯一预期 before 故障恢复
+**6** 次、after **6** 次，总计 **12**，unexpected WCX E **0**。
+新探针要求 before/after 各等于 PASS 数的两倍，任何 WCX E 仍直接失败，不用宽泛
+排除模式。该计数已在原始窗口核验，未把它描述成一次新的 property=1 真机运行。
+
+**对照结果：**
+
+- 稳定 APK 额外 boot **10/10** PASS（`stable-boot-controls-10.txt`）。
+- 同一已验证 test APK（SHA-256 `11e67039d58edfebda0380b2922a0bc432c6e9e27a3b399f800d0b583358f4cf`）
+  配 `debug.wcx.wekite_m2b=0`，boot **10/10** PASS；每轮 102 功能、LSPlant 与
+  LauncherUI proxy 均命中，无新增 Java/status6/status11/recovery，WCX E=0。
+- 对照全窗口 **2035** 行，无 WeKite/self-test 或 WCX E。期间主进程 PID 依次为
+  `21491,10486,12984,15497,18178,20267,22559,24782,29156,29295`；每轮 boot
+  前后 PID 相同，完整时间线保留，未把子进程“已启用 1 个”误当成主进程重入。
+- 对照结束时 trap 已恢复稳定 APK、删除属性，注入器 MD5 不变。
+
+**实际宿主字节码：** 从设备当前安装的 `base.apk` 取证，仅在 VM 用 SDK
+`apkanalyzer dex code` 反汇编，APK SHA-256：
+`024c53bfc192c463d56b66a676d9133f6d5b1cdcd435601d02d4f6632a333152`。
+
+- 空字段定位为 `com.tencent.mm.ui.HomeUI.c:Landroidx/appcompat/app/b;`。
+- `LauncherUI.onCreate` 将 `getSupportActionBar()` 返回值写入 `HomeUI.c`；该路径允许
+  返回 null，并捕获 getter 的 Exception。
+- `LauncherUI.onResume` 调 `HomeUI.o()`，其开头对 `c==null` 有日志与 return；返回后
+  LauncherUI 紧接着无条件调用 `HomeUI.c.L()`，与原堆栈的空 ActionBar 解引用一致。
+- `MMFragmentActivity.getSupportActionBar` 调 AppCompat delegate 的 `s()` 后读
+  `g0.i`，再交 `iu5.q0.N` 包装；`N(null)` 仍返回 null。delegate 是否建立 ActionBar
+  受自身状态/主题分支影响。本轮没有复现 getter 为 null 的现场，**尚不知其产生原因**。
+
+**ART method sharing：** 原 smoke 中两个 appbrand PID 的 native hook 日志含相同 target
+虚址，例如 `0xa9eec8d0`；相同虚址本身不说明写入跨进程传播。本次在主进程 **21077**
+与 push **30978** 的 `/proc/maps` 中，该地址所在区间均为：
+
+```text
+a9e58000-a9ff0000 rw-p [anon:dalvik-/system/framework/boot-core-icu4j.art]
+VmFlags: rd wr mr mw me ac
+```
+
+两份 smaps 均有 Shared_Dirty=1604kB，但 Private_Dirty 分别为 12kB/8kB；这是
+fork 后物理页共享与 MAP_PRIVATE/COW，并非 `rw-s` 可跨进程写共享。引擎在当前进程
+mprotect 后复制/写 target ArtMethod；新建 trampoline memfd 的双映射 MAP_SHARED 是
+本进程新建对象的 RW/RX alias，不能仅据此推断兄弟进程共享了该新对象。
+这支持“不应把同虚址当污染证据”，**并不证明 19:00 事件已排除全部间接因果**；
+未采得当时崩溃页的跨进程 PFN，也未据此作无因果结论。
+
+**重试收尾出现另一项硬失败，已停止：**
+
+```text
+adb.exe shell su -c 'sh /data/local/tmp/wcx-m2b-stable-health.sh'
+exit=1
+main=31778 push=10523 gate=1 trigger=0 lsplant=0 enabled_max=1 proxy=0
+E=0 new_java_crash=0 new_status6=0 new_status11=0
+stage=startup_gate_not_triggered
+ARTIFACT=/data/local/tmp/wcx-injection-2026-11-18_23-14-47-direct.log
+```
+
+该检查运行在已恢复的稳定 APK 上，不是 19:00 NPE 的重现；没有将“未触发首 Activity
+门”当作通过。失败后没有再拉起/杀进程、重新部署、自动修复或重试，只读核实哈希、
+属性并保存失败窗口。停止时稳定 APK SHA-256 仍为 `24de905d…ec1a32`，注入器 MD5
+仍为 `93dcbeea7a5ea0075c36c315696be62f`，两项测试属性均不存在。
+
+**后续复活条件：** 获得新的明确授权后，若同一 NPE/门未触发再次出现，保留该次
+PID 对齐的 onCreate/onPostCreate/onStart/onResume、ActionBar 字段状态、宿主主题与
+完整 exit-info，再作单变量 baseline/test/属性 A/B；不以本轮未复现宣称修复。
+
+补充证据位于同一证据根目录：`device-property0-control.txt`、
+`wcx-m2b-control-20261118-230501/control-full-wcx.txt`、`control-capture.txt`、
+`launcher-8080.smali`、`home-o-8080.smali`、`getactionbar-8080.smali`、
+`appcompat-bar-8080.smali`、`delegate-s-8080.smali`、`q0-N-8080.smali`、
+`wcx-m2b-art-sharing/`、`callback-count-verification.txt`、
+`stable-final-health-retry.txt`、`retry-failed-stable-direct-window.txt`、
+`retry-stopped-device-state.txt`。
