@@ -54,15 +54,16 @@ BASE=$(cat "$STATE/log-base")
 LINES=$(wc -l < "$LOG")
 if [ "$LINES" -lt "$BASE" ]; then echo 'RESULT=HARNESS_ERROR log_rotated'; exit 2; fi
 tail -n +$((BASE + 1)) "$LOG" > "$STATE/wcx.txt"
-# Early selector/self-test records precede HostInfo and file logging; logcat is
-# authoritative for these records, while feature/proxy evidence is file-backed.
+# The target ROM can suppress WCX app logcat records. WeLogger's file queue
+# retains early selector records too (verified against the real smoke capture).
+# Keep logcat separately for system/crash diagnostics, not backend acceptance.
 for NAME in com.tencent.mm:push "$AB_NAME"; do
-  grep -a "WeKiteNativeSelfTest.*SELFTEST PASS process=$NAME " "$STATE/logcat.txt" || OK=0
-  grep -a "WeKiteBackendSelector.*backend=WeKite process=$NAME " "$STATE/logcat.txt" || OK=0
-  grep -a "WeKiteBackendSelector.*native init PASS process=$NAME" "$STATE/logcat.txt" || OK=0
+  grep -a "WeKiteNativeSelfTest.*SELFTEST PASS process=$NAME " "$STATE/wcx.txt" || OK=0
+  grep -a "WeKiteBackendSelector.*backend=WeKite process=$NAME " "$STATE/wcx.txt" || OK=0
+  grep -a "WeKiteBackendSelector.*native init PASS process=$NAME" "$STATE/wcx.txt" || OK=0
 done
 if grep -aE 'SELFTEST FAIL|backend=LSPlant fallback| E/WCX|WCX +E ' "$STATE/logcat.txt"; then OK=0; fi
-if grep -a ' E/' "$STATE/wcx.txt"; then OK=0; fi
+if grep -aE 'SELFTEST FAIL|backend=LSPlant fallback| E/' "$STATE/wcx.txt"; then OK=0; fi
 if grep -aE 'FATAL EXCEPTION|SIGABRT|SIGSEGV|Fatal signal|>>> com.tencent.mm' "$STATE/crash.txt"; then OK=0; fi
 # Compare identities, not bounded-history counts: old records can roll off.
 awk '/timestamp=|reason=|status=|process=/' "$STATE/exit-before.txt" > "$STATE/exit-before-key.txt"
