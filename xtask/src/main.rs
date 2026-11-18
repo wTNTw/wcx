@@ -114,6 +114,10 @@ enum Cmd {
 
 #[derive(Args)]
 struct BuildArgs {
+    /// Include the experimental WeKite ART backend in the APK native library.
+    #[arg(long)]
+    wekite_hook: bool,
+
     /// Build only the Rust native library (.so) and copy it to jniLibs/.
     /// Skips the Gradle Android build entirely.
     #[arg(long)]
@@ -159,6 +163,10 @@ struct BuildArgs {
 /// Arguments for `run` (install + launch via Gradle).
 #[derive(Args)]
 struct RunArgs {
+    /// Include the experimental WeKite ART backend in the APK native library.
+    #[arg(long)]
+    wekite_hook: bool,
+
     /// App flavor to install (standard or legacy).
     /// Defaults to standard — both flavors cannot be installed side-by-side.
     #[arg(short, long, value_enum, default_value = "standard")]
@@ -466,7 +474,7 @@ fn task_configure() -> Result<()> {
 fn task_build(args: BuildArgs) -> Result<()> {
     if args.native_only {
         let abis = resolve_abi_names(&args.native.abis, true, true);
-        task_build_native(&abis, true, true)
+        task_build_native(&abis, true, true, args.wekite_hook)
     } else {
         task_build_android(&args)
     }
@@ -523,7 +531,7 @@ fn task_build_android(args: &BuildArgs) -> Result<()> {
     task_configure()?;
     let abis = resolve_abi_names(&args.native.abis, args.release, args.all_abis);
     if !args.skip_native {
-        task_build_native(&abis, args.zygisk || args.release, !args.dev_native)?;
+        task_build_native(&abis, args.zygisk || args.release, !args.dev_native, args.wekite_hook)?;
     }
     let root = workspace_root();
     let gradle_task = gradle_variant_task("assemble", args.flavor.as_ref(), args.release);
@@ -542,7 +550,7 @@ fn task_run(args: RunArgs) -> Result<()> {
     task_configure()?;
     let abis = resolve_abi_names(&args.native.abis, args.release, args.all_abis);
     if !args.skip_native {
-        task_build_native(&abis, args.zygisk, !args.dev_native)?;
+        task_build_native(&abis, args.zygisk, !args.dev_native, args.wekite_hook)?;
     }
     let root = workspace_root();
     let gradle_task = gradle_variant_task("install", Some(&args.flavor), args.release);
@@ -562,7 +570,7 @@ fn is_ci() -> bool {
 }
 
 /// Native-only build: cargo build + copy .so to jniLibs/.
-fn task_build_native(abi_names: &[String], build_zygisk: bool, release: bool) -> Result<()> {
+fn task_build_native(abi_names: &[String], build_zygisk: bool, release: bool, wekite_hook: bool) -> Result<()> {
     let root = workspace_root();
     let native_dir = native_crate_dir(&root);
     let abis = resolve_abis(abi_names)?;
@@ -580,6 +588,9 @@ fn task_build_native(abi_names: &[String], build_zygisk: bool, release: bool) ->
         } else {
             // `dev` profile keeps debug info and skips optimisation: much faster to compile.
             cargo_args.extend_from_slice(&["--profile", "dev"]);
+        }
+        if wekite_hook {
+            cargo_args.extend_from_slice(&["--features", "wekite_hook"]);
         }
         cargo_args.extend_from_slice(&["--target", spec.cargo_triple]);
         run_cargo(&cargo_args, &native_dir)?;

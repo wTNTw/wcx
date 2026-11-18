@@ -7,7 +7,12 @@ edition = "2024"
 name = "wekit_native"
 crate-type = ["cdylib"]
 
+[features]
+default = []
+wekite_hook = ["dep:wekite-art"]
+
 [dependencies]
+wekite-art = { path = "../../../../../libs/common/wekite-art", optional = true }
 jni = { version = "0.22", default-features = false }
 libc = "0.2"
 markdown = "1"

@@ -1402,6 +1402,7 @@ dependencies = [
  "silk-v3-sys",
  "symphonia",
  "webm-iterable",
+ "wekite-art",
 ]
 
 [[package]]
