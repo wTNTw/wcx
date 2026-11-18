@@ -18,10 +18,12 @@ import com.Johnny.wcx.loader.abc.IHookBridge
 import com.Johnny.wcx.loader.entry.common.ModuleLoader
 import com.Johnny.wcx.loader.startup.StartupAgent
 import com.Johnny.wcx.loader.startup.UnifiedEntryPoint
+import com.Johnny.wcx.loader.utils.ActivityProxy
 import com.Johnny.wcx.loader.utils.NativeLoader
 import com.Johnny.wcx.utils.WeLogger
 import java.io.FileDescriptor
 import java.nio.charset.StandardCharsets
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -56,20 +58,6 @@ object ZygiskEntry {
     private const val LSPLANT_INIT_ATTEMPTS = 3
     private const val LSPLANT_RETRY_DELAY_MS = 3_000L
 
-    /**
-     * 等宿主界面可见的轮询间隔。
-     *
-     * 参考 FunBox 的注入方式：它的原生回调只负责拷 APK + 建 ClassLoader + 调 Java 入口，
-     * **完全不在 zygote 回调里碰 ART**，真正动 inline hook 引擎是在微信启动完成之后，
-     * 所以它从不会撞上 8.0.80 的 libowl / libaff_biz 冲突窗口。
-     *
-     * LSPlant 的 art::init 没法推迟到「装 hook 时」——它本身就是装 hook 的前提，
-     * 但可以把时机从「libaff_biz 出现 +1s（此时微信还在启动）」推到「宿主界面已可见」。
-     *
-     * 这里不设超时兜底：30s 之后还没可见的话，微信自己早就崩了/被杀了，兜底只会在一个
-     * 已经异常或纯后台的进程里白跑一次 art::init。
-     */
-    private const val HOST_VISIBLE_POLL_MS = 250L
     private val LIBAFF_BIZ_NEEDLE = "libaff_biz.so".toByteArray(StandardCharsets.US_ASCII)
     private val entryLock = Any()
     private val moduleStarted = AtomicBoolean(false)
@@ -192,7 +180,7 @@ object ZygiskEntry {
         value != null && value.isNotBlank() && value != "0"
     }.getOrDefault(false)
 
-    /** 主进程的延迟启动：等 libaff_biz → 等宿主界面可见 → 初始化 LSPlant → 主线程启动模块。 */
+    /** 主进程的延迟启动：等 libaff_biz → 安装首 Activity 门 → 按需初始化 LSPlant/模块。 */
     private fun runDeferredStartup(
         service: ZygiskLoaderService,
         bridge: ArtHookBridge,
@@ -224,62 +212,115 @@ object ZygiskEntry {
                 }
                 return
             }
-            // 等宿主界面真正可见再动 ART：把初始化时机挪出微信的启动窗口（理由见常量注释）。
-            awaitHostForeground(app)
-            WeLogger.i(TAG, "deferred startup: 宿主界面已可见，开始初始化 LSPlant")
-            if (!initializeLsPlant()) {
-                // 两种失败要分开报告：
-                //  - libaff_biz 已加载却仍初始化不了 → 是模块/ART 侧的真问题，用 E
-                //  - libaff_biz 压根没出现 → 宿主环境问题，用 W
-                if (loaded) {
-                    WeLogger.e(TAG, "deferred startup: LSPlant init failed after retries; module not started in main process")
+            if (earlyLsplant) {
+                // 保留 A/B 开关的原语义：显式开启时立即初始化，不经过首 Activity 门。
+                if (initializeLsPlant()) {
+                    postMainStartup(service, bridge, apkPath, app)
                 } else {
-                    WeLogger.w(
-                        TAG,
-                        "deferred startup: 宿主环境异常（libaff_biz 未加载），LSPlant 未初始化，本进程不启动模块",
-                    )
+                    reportLsPlantFailure(loaded)
                 }
                 return
             }
-            // 模块启动（ActivityProxy 替换 Instrumentation、HostInfo/MMKV 初始化、功能 hook）
-            // 必须在主线程跑，与原来的 callApplicationOnCreate 时序保持一致，避免后台线程
-            // 替换 Instrumentation 与主线程首帧渲染抢跑。
-            WeLogger.i(TAG, "deferred startup: posting module start to main thread")
-            Handler(Looper.getMainLooper()).post {
-                try {
-                    UnifiedEntryPoint.prepareClassLoaderBridge()
-                    StartupAgent.startup(service, bridge, apkPath, app)
-                } catch (t: Throwable) {
-                    WeLogger.e(TAG, "deferred startup: module start on main thread failed", t)
-                }
+
+            // 背景 BootReceiver 可以先拉起主进程。此时直接装全部 hook 会触发微信 SIGABRT；
+            // 等 importance 进入前台又会晚于 LauncherUI 的首个 onCreate。先只替换
+            // Instrumentation/mH，在 ActivityThread 真正处理首个 Activity transaction 前，
+            // 同步完成 LSPlant + 模块启动，既不碰纯后台启动窗口，也不漏首屏 hook。
+            if (!installMainStartupGate(service, bridge, apkPath, app, loaded)) {
+                WeLogger.e(TAG, "deferred startup: failed to install first-Activity startup gate")
+                return
             }
+            WeLogger.i(TAG, "deferred startup: 首个 Activity 启动门已安装")
         } catch (t: Throwable) {
             WeLogger.e(TAG, "deferred startup failed", t)
         }
     }
 
-    /**
-     * 等本进程进入可见状态（importance <= FOREGROUND）。
-     *
-     * 不依赖任何 hook（此时 LSPlant 还没初始化），只查 ActivityManager 的 importance。
-     * 不设超时兜底：线程是 daemon，进程如果一直不可见说明它已经异常或纯后台，白跑 art::init
-     * 没有意义；进程被回收时线程自然消失。
-     */
-    private fun awaitHostForeground(app: Application) {
-        while (true) {
-            val importance = runCatching {
-                val am = app.getSystemService(android.content.Context.ACTIVITY_SERVICE)
-                    as? android.app.ActivityManager ?: return@runCatching null
-                am.runningAppProcesses
-                    ?.firstOrNull { it.pid == android.os.Process.myPid() }
-                    ?.importance
-            }.getOrNull()
-            if (importance != null &&
-                importance <= android.app.ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND
-            ) {
-                return
+    private fun installMainStartupGate(
+        service: ZygiskLoaderService,
+        bridge: ArtHookBridge,
+        apkPath: String,
+        app: Application,
+        libaffLoaded: Boolean,
+    ): Boolean {
+        val installed = CountDownLatch(1)
+        var success = false
+        Handler(Looper.getMainLooper()).post {
+            success = ActivityProxy.init(app, startupGate = startupGate@{
+                WeLogger.i(TAG, "deferred startup: 首个 Activity 即将创建，开始初始化 LSPlant")
+                if (!initializeLsPlantOffMainThread()) {
+                    reportLsPlantFailure(libaffLoaded)
+                    return@startupGate
+                }
+                try {
+                    UnifiedEntryPoint.prepareClassLoaderBridge()
+                    StartupAgent.startup(service, bridge, apkPath, app)
+                } catch (t: Throwable) {
+                    WeLogger.e(TAG, "deferred startup: module start before first Activity failed", t)
+                }
+            })
+            installed.countDown()
+        }
+        awaitUninterruptibly(installed)
+        return success
+    }
+
+    /** LSPlant may suspend ART; keep that work off ActivityThread while its transaction waits. */
+    private fun initializeLsPlantOffMainThread(): Boolean {
+        val finished = CountDownLatch(1)
+        var success = false
+        Thread({
+            try {
+                success = initializeLsPlant()
+            } finally {
+                finished.countDown()
             }
-            Thread.sleep(HOST_VISIBLE_POLL_MS)
+        }, "WCX-LSPlant-${android.os.Process.myPid()}").apply { isDaemon = true }.start()
+        awaitUninterruptibly(finished)
+        return success
+    }
+
+    private fun postMainStartup(
+        service: ZygiskLoaderService,
+        bridge: ArtHookBridge,
+        apkPath: String,
+        app: Application,
+    ) {
+        WeLogger.i(TAG, "deferred startup: posting module start to main thread")
+        Handler(Looper.getMainLooper()).post {
+            try {
+                UnifiedEntryPoint.prepareClassLoaderBridge()
+                StartupAgent.startup(service, bridge, apkPath, app)
+            } catch (t: Throwable) {
+                WeLogger.e(TAG, "deferred startup: module start on main thread failed", t)
+            }
+        }
+    }
+
+    private fun reportLsPlantFailure(libaffLoaded: Boolean) {
+        if (libaffLoaded) {
+            WeLogger.e(TAG, "deferred startup: LSPlant init failed after retries; module not started in main process")
+        } else {
+            WeLogger.w(
+                TAG,
+                "deferred startup: 宿主环境异常（libaff_biz 未加载），LSPlant 未初始化，本进程不启动模块",
+            )
+        }
+    }
+
+    private fun awaitUninterruptibly(latch: CountDownLatch) {
+        var interrupted = false
+        try {
+            while (true) {
+                try {
+                    latch.await()
+                    return
+                } catch (_: InterruptedException) {
+                    interrupted = true
+                }
+            }
+        } finally {
+            if (interrupted) Thread.currentThread().interrupt()
         }
     }
 

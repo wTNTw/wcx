@@ -33,15 +33,20 @@ import java.lang.reflect.Method
 import java.lang.reflect.Proxy
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicReference
 
 object ActivityProxy {
 
     private const val TAG = "ActivityProxy"
     private var initialized = false
+    private val beforeFirstActivity = AtomicReference<(() -> Unit)?>(null)
 
     @SuppressLint("PrivateApi", "DiscouragedPrivateApi")
-    fun init(ctx: Context) {
-        if (initialized) return
+    fun init(ctx: Context, startupGate: (() -> Unit)? = null): Boolean {
+        if (startupGate != null) {
+            beforeFirstActivity.compareAndSet(null, startupGate)
+        }
+        if (initialized) return true
 
         runCatching {
             val clazzActivityThread = Class.forName("android.app.ActivityThread")
@@ -75,6 +80,15 @@ object ActivityProxy {
 
             initialized = true
         }.onFailure { WeLogger.e(TAG, "failed to init stub activity hooks", it) }
+        return initialized
+    }
+
+    /** Run the deferred main-process startup before ActivityThread creates its first Activity. */
+    private fun runBeforeFirstActivity() {
+        val action = beforeFirstActivity.getAndSet(null) ?: return
+        runCatching(action).onFailure {
+            WeLogger.e(TAG, "startup gate before first Activity failed", it)
+        }
     }
 
     @SuppressLint("PrivateApi", "DiscouragedPrivateApi")
@@ -138,7 +152,7 @@ object ActivityProxy {
             val pmProxy = Proxy.newProxyInstance(
                 iPackageManagerInterface.classLoader,
                 arrayOf(iPackageManagerInterface),
-                PackageManagerInvocationHandler(packageManagerImpl!!)
+                PackageManagerInvocationHandler(packageManagerImpl!!, ctx.packageName)
             )
             sPackageManagerField.set(sCurrentActivityThread, pmProxy)
             mPmField.set(pm, pmProxy)
@@ -208,7 +222,10 @@ object ActivityProxy {
     private class ProxyHandlerCallback(private val next: Handler.Callback?) : Handler.Callback {
         override fun handleMessage(msg: Message): Boolean {
             when (msg.what) {
-                100 -> handleLaunchActivity(msg)     // LAUNCH_ACTIVITY (< Android 9)
+                100 -> {
+                    runBeforeFirstActivity()
+                    handleLaunchActivity(msg)     // LAUNCH_ACTIVITY (< Android 9)
+                }
                 159 -> handleExecuteTransaction(msg) // EXECUTE_TRANSACTION (>= Android 9)
             }
             return runCatching { next?.handleMessage(msg) == true }
@@ -251,6 +268,7 @@ object ActivityProxy {
 
                 callbacks.forEach { item ->
                     if (item != null && item.javaClass.name.contains("LaunchActivityItem")) {
+                        runBeforeFirstActivity()
                         val intentField = item.javaClass.getDeclaredField("mIntent")
                             .makeAccessible()
                         val wrapper = intentField.get(item) as? Intent
@@ -277,6 +295,8 @@ object ActivityProxy {
         }
 
         override fun newActivity(cl: ClassLoader, className: String, intent: Intent): Activity {
+            // Fallback for devices/framework variants that replace ActivityThread.mH's callback.
+            runBeforeFirstActivity()
             var resolvedIntent = intent
             var resolvedClass = className
             tryRecoverIntent(intent)?.takeIf { it.component != null }?.let {
@@ -495,7 +515,10 @@ object ActivityProxy {
             base.acquireLooperManager(looper)
     }
 
-    class PackageManagerInvocationHandler(private val target: Any) : InvocationHandler {
+    class PackageManagerInvocationHandler(
+        private val target: Any,
+        private val hostPackageName: String,
+    ) : InvocationHandler {
         override fun invoke(proxy: Any, method: Method, args: Array<Any?>?): Any? {
             if (method.name == "getActivityInfo" && args != null) {
                 var component: ComponentName? = null
@@ -505,10 +528,13 @@ object ActivityProxy {
                     }
                 }
                 if (component != null &&
-                    component.packageName == HostInfo.packageName &&
+                    component.packageName == hostPackageName &&
                     ActProxyMgr.isModuleProxyActivity(component.className)
                 ) {
-                    return CounterfeitActivityInfoFactory.makeProxyActivityInfo(component.className)
+                    return CounterfeitActivityInfoFactory.makeProxyActivityInfo(
+                        component.className,
+                        hostPackageName,
+                    )
                 }
             }
             return try {
@@ -520,14 +546,14 @@ object ActivityProxy {
     }
 
     object CounterfeitActivityInfoFactory {
-        fun makeProxyActivityInfo(className: String) = ActivityInfo().apply {
+        fun makeProxyActivityInfo(className: String, hostPackageName: String) = ActivityInfo().apply {
             name = className
-            packageName = HostInfo.packageName
+            packageName = hostPackageName
             enabled = true
             exported = false
-            processName = HostInfo.packageName
+            processName = hostPackageName
             applicationInfo = runCatching { HostInfo.appInfo }.getOrElse {
-                ApplicationInfo().apply { packageName = HostInfo.packageName }
+                ApplicationInfo().apply { packageName = hostPackageName }
             }
             launchMode = ActivityInfo.LAUNCH_MULTIPLE
         }
