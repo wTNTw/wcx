@@ -16,6 +16,7 @@ import com.Johnny.wcx.BuildConfig
 import com.Johnny.wcx.constants.PackageNames
 import com.Johnny.wcx.loader.abc.IHookBridge
 import com.Johnny.wcx.loader.entry.common.ModuleLoader
+import com.Johnny.wcx.loader.entry.wekite.WeKiteBackendSelector
 import com.Johnny.wcx.loader.startup.StartupAgent
 import com.Johnny.wcx.loader.startup.UnifiedEntryPoint
 import com.Johnny.wcx.loader.utils.ActivityProxy
@@ -63,7 +64,7 @@ object ZygiskEntry {
     private val moduleStarted = AtomicBoolean(false)
     private val finalClassLoaderHookInstalled = AtomicBoolean(false)
     private var loaderService: ZygiskLoaderService? = null
-    private var hookBridge: ArtHookBridge? = null
+    private var hookBridge: IHookBridge? = null
     private var hostDataDir: String = ""
     private var modulePath: String = ""
 
@@ -94,20 +95,25 @@ object ZygiskEntry {
                     versionName = BuildConfig.VERSION_NAME,
                     versionCode = BuildConfig.VERSION_CODE,
                 )
-                val bridge = ArtHookBridge()
+                val lsPlantBridge = ArtHookBridge()
+                val selectedBridge: IHookBridge = if (processName.contains(':')) {
+                    WeKiteBackendSelector.select(processName) ?: lsPlantBridge
+                } else {
+                    lsPlantBridge
+                }
                 hostDataDir = dataDir
                 modulePath = apkPath
                 loaderService = service
-                hookBridge = bridge
+                hookBridge = selectedBridge
 
                 if (processName.contains(':')) {
                     // 子进程不加载 libaff_biz，原生侧已在 postAppSpecialize 早期初始化
                     // LSPlant，这里沿用原来的 createAppFactory 钩子链。
-                    installEarlyStartupHooks(bridge, targetPackage)
+                    installEarlyStartupHooks(selectedBridge, targetPackage)
                 } else {
                     // 主进程：原生侧已推迟 LSPlant 初始化，等微信把 libaff_biz.so 加载完
                     // 再初始化 LSPlant 并直接启动模块（避开 libowl 与 LSPlant 的冲突）。
-                    startDeferredStartup(service, bridge, apkPath)
+                    startDeferredStartup(service, lsPlantBridge, apkPath)
                 }
             } catch (t: Throwable) {
                 // All fields are published before the hook can become reachable;
@@ -133,7 +139,7 @@ object ZygiskEntry {
      * 子进程早期入口：原生侧已在 postAppSpecialize 初始化 LSPlant，这里直接挂
      * LoadedApk.createAppFactory → AppComponentFactory.instantiateClassLoader → 启动模块。
      */
-    private fun installEarlyStartupHooks(bridge: ArtHookBridge, targetPackage: String) {
+    private fun installEarlyStartupHooks(bridge: IHookBridge, targetPackage: String) {
         // Waits at LoadedApk.createAppFactory. The ClassLoader
         // parameter here is only AOSP's default loader; the final
         // mClassLoader is selected by AppComponentFactory below.
@@ -447,7 +453,7 @@ object ZygiskEntry {
     }
 
     private fun installFinalClassLoaderHook(
-        bridge: ArtHookBridge,
+        bridge: IHookBridge,
         appComponentFactory: Any,
         targetPackage: String,
     ) {
