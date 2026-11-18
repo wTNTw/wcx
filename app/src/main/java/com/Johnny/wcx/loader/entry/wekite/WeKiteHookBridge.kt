@@ -14,14 +14,6 @@ import com.Johnny.wcx.constants.PackageNames
 import com.Johnny.wcx.loader.abc.IHookBridge
 import com.Johnny.wcx.loader.abc.IHookBridge.IMemberHookCallback
 import com.Johnny.wcx.loader.abc.IHookBridge.MemberUnhookHandle
-import com.Johnny.wcx.utils.reflection.BBool
-import com.Johnny.wcx.utils.reflection.BByte
-import com.Johnny.wcx.utils.reflection.BChar
-import com.Johnny.wcx.utils.reflection.BDouble
-import com.Johnny.wcx.utils.reflection.BFloat
-import com.Johnny.wcx.utils.reflection.BInt
-import com.Johnny.wcx.utils.reflection.BLong
-import com.Johnny.wcx.utils.reflection.BShort
 import com.Johnny.wcx.utils.reflection.bool
 import com.Johnny.wcx.utils.reflection.byte
 import com.Johnny.wcx.utils.reflection.char
@@ -219,7 +211,7 @@ class WeKiteHookBridge : IHookBridge {
      * by the native hook with a copy of target's original ArtMethod, so the body
      * is never actually executed.
      */
-    internal fun generateBridgePair(target: Executable): BridgePair {
+    internal fun generateBridgePair(target: Executable, trustDex: Boolean = true): BridgePair {
         val targetParams: Array<Class<*>> = target.parameterTypes
         val targetReturn: Class<*> = when (target) {
             is Method         -> target.returnType
@@ -289,16 +281,20 @@ class WeKiteHookBridge : IHookBridge {
 
         fun boxInfo(prim: Class<*>): BoxInfo? {
             if (!prim.isPrimitive || prim == void) return null
+            // 注意：本仓 Classes.kt 里的 BInt/BBool 是 Int::class.java（原始类型 I/Z），
+            // 与 WeKite 的 Int::class.javaObjectType（包装类 Ljava/lang/Integer;）语义相反！
+            // 这里必须显式取 javaObjectType，否则 wTid 会变成 TypeId.INT('I')，
+            // 生成的 check-cast / valueOf 会报 Invalid descriptor for class_idx: 'I'/'Z'。
             @Suppress("UNCHECKED_CAST")
             val wrapperClass: Class<Any> = when (prim) {
-                int     -> BInt
-                long    -> BLong
-                bool    -> BBool
-                byte    -> BByte
-                char    -> BChar
-                short   -> BShort
-                float   -> BFloat
-                double  -> BDouble
+                int     -> Int::class.javaObjectType
+                long    -> Long::class.javaObjectType
+                bool    -> Boolean::class.javaObjectType
+                byte    -> Byte::class.javaObjectType
+                char    -> Char::class.javaObjectType
+                short   -> Short::class.javaObjectType
+                float   -> Float::class.javaObjectType
+                double  -> Double::class.javaObjectType
                 else    -> return null
             } as Class<Any>
             val unboxName = when (prim) {
@@ -459,7 +455,9 @@ class WeKiteHookBridge : IHookBridge {
             parentLoader,
             null,
         ) as DexFile
-        check(nativeTrustDexFile(dexFile)) { "failed to trust generated hook dex" }
+        if (trustDex) {
+            check(nativeTrustDexFile(dexFile)) { "failed to trust generated hook dex" }
+        }
         @Suppress("DEPRECATION")
         val genClass = dexFile.loadClass(fqn, parentLoader)
 

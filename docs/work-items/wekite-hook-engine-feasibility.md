@@ -32,28 +32,26 @@ WeKite 的 hook 引擎是「ArtMethod entry_point 替换」式，**完全不 hoo
 
 ### 1.2 WeKite 引擎**没有**的能力（显式 `require` 拒绝，会直接抛异常）
 
-| 能力 | WeKite 行为 | 我们是否用到 |
+| 能力 | WeKite 行为 | 全量安装枚举结果 |
 |---|---|---|
-| native 方法 hook | `require(!Modifier.isNative)` 拒绝 | 待确认（见 1.3） |
-| 接口方法 hook | `require(!Modifier.isInterface)` 拒绝 | 待确认 |
-| proxy 类方法 hook | `require(!Proxy.isProxyClass)` 拒绝 | 1 处（`WePacketDispatcher.kt` 引用 Proxy/isInterface） |
-| deoptimize | `deoptimize()` 恒返回 false | 0 处 feature 直接调用（仅 `Lsp10xHookImpl`/`Xp51HookImpl` 适配层暴露） |
+| native 方法 hook | `require(!Modifier.isNative)` 拒绝 | **1 个目标**：`Camera#setPreviewTexture(SurfaceTexture)` |
+| 接口方法 hook | `require(!Modifier.isInterface)` 拒绝 | **0 个目标** |
+| proxy 类方法 hook | `require(!Proxy.isProxyClass)` 拒绝 | **0 个目标** |
+| deoptimize | `deoptimize()` 恒返回 false | feature 直接调用 **0 处**（仅 Xposed API 适配层暴露） |
 
-### 1.3 我们的实际用量（按调用点统计）
+### 1.3 我们的实际用量（运行时全量枚举）
 
-- DSL 层（`hookBefore`/`hookAfter`/`.hook`）最终都汇到 `IHookBridge.hookMethod`：
-  **1156 处**（features + hooks 目录）。
-- 直接 `hookMethod`/`findAndHook` 调用点：约 **254 处**。
-- feature 文件数：**419 个**。
-- `deoptimize`：feature 里 **0 处**直接调用；只有 Xposed API 适配层
-  （`Lsp10xHookImpl.kt:52`、`Xp51HookImpl.java:100`）暴露 `deoptimize(member)`。
-- `invokeOriginal` / `newInstanceOrigin`：经 `HookUtils` 的 `OriginalMethodInvoker` /
-  `invokeOriginal` 使用，WeKite 同语义支持。
+M2a-1 已在真机完成全量 hook 安装枚举：共记录 **542 个 hook 目标**。其中：
 
-**缺口量化**：native/接口/proxy 是运行时属性（取决于被 hook 的 `Member` 是否为 native、
-其 declaring class 是否为接口/代理），静态 grep 无法精确统计。WeKite 的 `ArtHookBridge`
-对这些会在 hook 时**抛异常**（不是静默失败），所以 M2 前需要在真机上跑一遍全量 hook
-安装，把抛出的成员逐个列出并评估兜底（见风险清单 R3）。
+- native：**1 个**，`android.hardware.Camera#setPreviewTexture(SurfaceTexture)`，来自
+  `聊天,音视频通话/虚拟视频通话`；已由 `supportsNativeMethodHook` 能力位在 feature 侧跳过。
+- 接口声明方法：**0 个**。
+- 生成 proxy 类方法：**0 个**。
+- `deoptimize`：feature 直接调用 **0 处**；只有 Xposed API 适配层暴露。
+- `invokeOriginal` / `newInstanceOrigin`：经 `HookUtils` 使用，WeKite 有同语义实现。
+
+因此当前已知硬缺口只有 1 个 native 目标，且已有能力位兜底；它不要求修改
+`IHookBridge` 的 feature-facing hook 契约。
 
 ---
 
@@ -94,10 +92,10 @@ native 导出改动（`natives.rs`）：
 
 ### 3.2 Java（`app/`）
 
-- `ArtHookBridge.kt` / `ArtHookBridgeRuntime.kt`：以 WeKite 版本为基准改写（DexMaker
-  生成 bridge/backup、`hookId` 索引、`hookLock` 同步安装、`dispatch(hookId, self, args)`）。
-- `IHookBridge.kt`：接口微调（WeKite 用 `hookBridgeName` 而非 `apiLevel`，`deoptimize` 参数
-  是 `Executable`）。
+- 保留现有 `ArtHookBridge.kt` / `ArtHookBridgeRuntime.kt` 作为 LSPlant 默认后端。
+- 新增独立的 `WeKiteHookBridge.kt` / `WeKiteHookBridgeRuntime.kt`：DexMaker 生成
+  bridge/backup、`hookId` 索引、`hookLock` 同步安装、`dispatch(hookId, self, args)`。
+- **不修改 `IHookBridge.kt` 对 feature 暴露的接口或语义。**
 - DexMaker 依赖已存在（`com.linkedin.dexmaker:dexmaker:2.28.6`，见 `gradle/libs.versions.toml`）。
 
 ### 3.3 是否保留 LSPlant 作为可选后端
@@ -116,9 +114,9 @@ native 导出改动（`natives.rs`）：
   `paciasp/autiasp` 问题；它做的 ArtMethod entry_point 替换与 LSPlant `DoHook` 同机制
   （我们默认路径已验证可用）。唯一要关注的是蹦床 `br x16` 是间接跳转，Android 16 BTI
   下目标（bridge entry_point）必须 BTI 兼容——M2 在子进程路径上优先验证即可。
-- **R3（native/接口/proxy hook 缺口）**：WeKite 显式拒绝这三类成员，hook 时会抛异常。
-  若我们的 1156 处 hook 里有这类目标，M2 会直接崩/抛。需 M2 前用全量 hook 安装枚举出
-  所有被拒成员，逐个决定「改 hook 点 / 单独保留 LSPlant / 特殊兜底」。
+- **R3（native hook 缺口）**：全量 542 个目标中仅 1 个 native 方法：
+  `Camera#setPreviewTexture(SurfaceTexture)`。M2a-1 已增加 `supportsNativeMethodHook` 能力位，
+  WeKite 后端跳过该 feature；接口/proxy 目标均为 0。
 - **R4（deoptimize 缺失）**：Xposed API 面会退化（`XposedBridge.deoptimizeMethod` 恒 false）。
   feature 不直接用，但第三方脚本/兼容层可能用。
 - **R5（DexMaker 生成 bridge 的可靠性）**：DexMaker 运行时生成 + `DexFile(ByteBuffer[],
@@ -135,8 +133,10 @@ native 导出改动（`natives.rs`）：
 - **M1（本轮）**：编译期引入 WeKite 引擎（复制 `art/` 为 `src/wekite/`，加 cargo feature
   `wcx_hook_wekite` 默认关，`#[cfg(feature=...)]` 挂载，`cargo build --features
   wcx_hook_wekite` 编译通过）。**默认后端仍是 LSPlant，线上零变化，不部署、不重启。**
-- **M2（待拍板 + 授权重启）**：子进程路径（`:push`/`:appbrand`）切到 WeKite 引擎验证——
-  先跑全量 hook 安装枚举被拒成员（R3），再验证子进程不崩、hook 生效。
+- **M2a（已完成 spike）**：全量 hook 枚举、native 能力位、WeKite Java bridge/runtime 移植；
+  primitive descriptor 失败已定位为移植别名错误，不是 DexMaker 缺陷（见下文）。
+- **M2b（待拍板 + 授权部署/重启）**：接通 WeKite JNI，先离线自测生成 bridge，再仅在
+  `:push`/`:appbrand` 切换后端，验证子进程不崩、hook 生效。
 - **M3（待拍板 + 授权重启）**：主进程切 WeKite + `native_early_init`（`postAppSpecialize`
   同步 `art::init`）验证，目标「启动早期安全完成 LSPlant 等价初始化 + 102 feature」。
 
@@ -150,3 +150,74 @@ native 函数的序言**，因此没有「重放/跳过 `paciasp`」的问题—
 SIGSEGV/SIGILL 都发生在 hook `Class::SetStatus`（native 函数）的序言上。WeKite 对
 `Class::SetStatus` 这类 ART 函数是**直接调用**（`ScopedSuspendAll`/`SetNotIntrinsic`/
 `DexFile_setTrusted` 只 resolve + call），不做 inline hook，天然规避 PAC。
+
+---
+
+## M2a spike：LSPlant `BuildDex` 复用评估与 primitive descriptor 根因（2026-11-18）
+
+### 结论
+
+1. **语义上可行，红线不冲突。** 若用 LSPlant 的 `BuildDex` 产出 bridge/backup，现有
+   `ArtHookBridgeRuntime.HookEntry.callback(Object[])` 可原样承担 dispatch；feature 侧
+   `IHookBridge` 契约无需修改。
+2. **工程上不能直接复用。** `BuildDex` 位于 `lsplant.cc` 的匿名 namespace，LSPlant 公共
+   API 只暴露会直接执行 `DoHook` 的 `lsplant::Hook`，没有“只生成 bridge/backup”的入口。
+   在不修改 `third_party/*` 的前提下，只能在 WCX 自己的 C++ 中复制/重实现生成与加载逻辑。
+3. **当前不应转向 BuildDex。** M2a-2 的 `Invalid descriptor for class_idx: 'I'/'Z'` 已定位为
+   移植错误：原 WeKite 的 `BInt`/`BBool` 是 `javaObjectType`（包装类），而 WCX 同名别名是
+   primitive `Class`。错误代码把 `TypeId.INT/BOOLEAN` 用作 check-cast 与 `valueOf` 的类 owner，
+   因此 ART 正确拒绝了 dex；这不是 DexMaker 2.28.6 的 primitive 返回类型缺陷。
+
+### bridge / backup ABI 对照
+
+| 项目 | LSPlant `BuildDex` | 当前 WeKite DexMaker bridge | BuildDex 混合方案影响 |
+|---|---|---|---|
+| bridge 签名 | 生成 static 方法；实例 receiver 作为第 1 个显式 `Object` 参数；引用参数擦除为 `Object` | 保留目标 static/instance 形态；receiver 单独传给 `dispatch`；引用参数擦除为 `Object` | native 入口 ABI 均兼容目标 shorty，但 Java dispatch 入口不同 |
+| callback | hooker 实例的 `Object callback(Object[] rawArgs)` | static `dispatch(long hookId, Object self, Object[] args)` | 复用 `ArtHookBridgeRuntime.HookEntry.callback` 即可，不需要 hookId |
+| 参数语义 | `rawArgs[0]` 仅实例/构造器为 receiver；其余为可变 args | receiver 与 args 分开 | `HookEntry.callback` 已完成拆分；feature 无感 |
+| 返回值 | callback 返回 `Object`，生成代码按目标类型 cast/unbox | 相同 | `result`/`throwable`/primitive unbox 语义不变 |
+| backup | 同 shorty 的 static 占位方法，安装时 `BackupTo` 覆盖 ArtMethod | 同调用形态的占位方法，WeKite `memcpy` target ArtMethod | 均可由反射调用原方法 |
+| 安装竞态 | bridge 可能在 native `Hook` 返回 backup 前执行，靠 `awaitBackup` 等待 | Java 先 register + 写 hookId，再安装；不需要 latch | BuildDex 路线必须保留 `awaitBackup` |
+| 构造器 | shorty 返回 `V`，显式 receiver，backup 反射调用 | 返回 `void`，receiver 由实例 bridge 承载 | `newInstanceOrigin` 仍可 allocate + backup |
+| unhook | 当前 WCX 只移除 callback，native hook 保留到进程结束 | WeKite runtime 支持最后 callback 时恢复 ArtMethod | 为保持现状与 in-flight 安全，BuildDex 混合方案应继续保留 native hook |
+
+### 必须改与可复用
+
+**可原样复用（0 行 feature 改动）：**
+
+- `IHookBridge.hookMethod/hookBefore/hookAfter/backup/invokeOriginal/replace` 的公开语义。
+- `ArtHookBridgeRuntime` 的优先级、before/after 逆序、`result`、`throwable`、`extra`、异常恢复。
+- `HookEntry.callback(Object[])`、`awaitBackup`、`invokeOriginal`、构造器 allocate + backup 路径。
+
+**BuildDex 混合方案必须新增：**
+
+- WCX 自有 C++ bridge/backup generator：复制 `BuildDex`、DexFile 内存加载和反射取 Method 的
+  必要逻辑；不能调用现有匿名 namespace 函数。
+- C++/Rust 边界：把生成出的 bridge/backup ArtMethod 交给
+  `wekite::hook_method(target, backup, bridge)`，并把 backup `Method` 返回 Java。
+- 编译期后端分流；默认 LSPlant 路径保持不变。
+
+**预计改动量（BuildDex 路线）：** C++ 约 250–350 行，Rust/JNI 约 80–130 行，Java 分流
+约 30–60 行，构建配置约 20–40 行，总计约 **380–580 行**。这明显高于修正现有 DexMaker
+路线（本次根因修复约 20 行；M2b 剩余主要是 WeKite JNI 导出与接线）。
+
+### 红线判断
+
+- **PASS：** 两条实现路线都不要求修改 feature-facing `IHookBridge` 语义。
+- **STOP BuildDex 实施：** 当前没有契约红线，但存在不必要的 C++ 复制与维护成本；既然
+  DexMaker 阻塞来自移植别名错误，M2b 应继续现有 WeKite runtime/JNI 路线。
+- 本轮只完成代码修正、编译与文档评估；**未部署、未改注入器、未重启手机**。设备运行时
+  自测仍需后续授权。
+
+### 推荐的 M2b 分步提交计划
+
+1. **M2a-3（当前）**：包装类改用 `javaObjectType`；离线自测覆盖 int/boolean 生成、
+   before/after、early return 与 primitive unbox；默认 LSPlant 不变。
+2. **M2b-0（编译期）**：为 `nativeGetArtMethod/nativeHookMethod/nativeUnhookMethod/
+   nativeTrustDexFile/nativeAllocateInstance` 接通 WeKite Rust JNI；两种 cargo feature 分别构建。
+3. **M2b-1（需授权部署）**：仍用 LSPlant 默认后端，仅运行 `debug.wcx.wekite_selftest=1`，
+   先证明 Android 16 上生成类可加载、int/boolean dispatch 闭环通过。
+4. **M2b-2（需授权重启）**：仅 `:push`/`:appbrand` 选择 WeKite，主进程继续 LSPlant；验证
+   进程存活、hook 计数、`invokeOriginal`、构造器和异常路径。
+5. **M2b-3（稳定性门槛）**：连续冷启动与 10 分钟存活，无新增 status=11/reason=5、
+   tombstone 或 WCX E 日志；不合格立即恢复 Dobby/LSPlant 基线。
