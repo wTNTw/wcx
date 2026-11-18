@@ -119,8 +119,9 @@ class ZygiskNativePayload(val apk: File, private val dataDir: File) {
         check(temporary.setReadable(true, true) && temporary.setExecutable(true, true) &&
             temporary.setWritable(false, false)) { "cannot protect Zygisk native library: $temporary" }
         if (!temporary.renameTo(destination)) {
+            val publishedByPeer = destination.isFile && destination.length() == entry.size
             temporary.delete()
-            error("cannot publish Zygisk native library: $destination")
+            check(publishedByPeer) { "cannot publish Zygisk native library: $destination" }
         }
         return destination
     }
