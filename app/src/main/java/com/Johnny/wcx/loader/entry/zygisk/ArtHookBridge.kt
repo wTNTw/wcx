@@ -4,6 +4,7 @@ import androidx.annotation.Keep
 import com.Johnny.wcx.loader.abc.IHookBridge
 import com.Johnny.wcx.loader.abc.IHookBridge.IMemberHookCallback
 import com.Johnny.wcx.loader.abc.IHookBridge.MemberUnhookHandle
+import com.Johnny.wcx.utils.HookEnumCollector
 import java.lang.reflect.Constructor
 import java.lang.reflect.Executable
 import java.lang.reflect.Member
@@ -36,6 +37,9 @@ class ArtHookBridge : IHookBridge {
         callback: IMemberHookCallback,
         priority: Int,
     ): MemberUnhookHandle {
+        // 全量 hook 安装枚举（debug.wcx.hook_enum=1 时才统计，关闭时零开销）。
+        // 不改任何行为，只统计 WeKite 会拒绝的 native/接口/proxy 目标。
+        HookEnumCollector.record(member)
         require(member is Method || member is Constructor<*>) {
             "hookMethod: unsupported member type ${member::class.java}"
         }
