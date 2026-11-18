@@ -6,7 +6,7 @@
 // `libart.so` at runtime.  These values are required before any hook can be
 // installed.
 
-use crate::wekite::elf::find_symbol_in_file;
+use crate::elf::find_symbol_in_file;
 use crate::{logi, logw};
 use std::sync::atomic::{AtomicU32, Ordering};
 

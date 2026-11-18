@@ -1,0 +1,8 @@
+[package]
+name = "wekite-art"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+jni = { version = "0.22", default-features = false }
+libc = "0.2"

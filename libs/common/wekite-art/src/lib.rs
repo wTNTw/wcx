@@ -1,5 +1,5 @@
 // art/mod.rs — ART method hook engine（从 WeKite 移植，M1 编译期引入，默认不启用）
-#![allow(dead_code)] // M1 仅编译验证，尚未接入 JNI，接入后移除
+#![allow(unsafe_op_in_unsafe_fn)]
 //
 // Initialization:
 //   1. Locate libart.so via dl_iterate_phdr
@@ -14,9 +14,28 @@ pub mod elf;
 pub mod layout;
 pub mod trampoline;
 
-use crate::wekite::elf::find_symbol_in_file;
-use crate::wekite::trampoline::TrampolinePool;
-use crate::{loge, logi, logw};
+#[cfg(target_os = "android")]
+#[link(name = "log")]
+unsafe extern "C" {
+    fn __android_log_write(priority: libc::c_int, tag: *const libc::c_char, text: *const libc::c_char) -> libc::c_int;
+}
+
+#[cfg(target_os = "android")]
+fn android_log(priority: libc::c_int, message: &str) {
+    let message = std::ffi::CString::new(message).unwrap_or_default();
+    unsafe { __android_log_write(priority, c"WCX".as_ptr(), message.as_ptr()); }
+}
+
+#[cfg(not(target_os = "android"))]
+fn android_log(_priority: libc::c_int, message: &str) { eprintln!("{message}"); }
+
+macro_rules! logi { ($($arg:tt)*) => { crate::android_log(4, &format!($($arg)*)) }; }
+macro_rules! logw { ($($arg:tt)*) => { crate::android_log(5, &format!($($arg)*)) }; }
+macro_rules! loge { ($($arg:tt)*) => { crate::android_log(6, &format!($($arg)*)) }; }
+pub(crate) use {loge, logi, logw};
+
+use crate::elf::find_symbol_in_file;
+use crate::trampoline::TrampolinePool;
 use jni::sys::{JNI_FALSE, JNIEnv as RawJNIEnv, jclass, jfieldID, jmethodID, jobject};
 use libc::c_int;
 use std::collections::HashMap;

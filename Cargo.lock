@@ -1364,6 +1364,7 @@ dependencies = [
  "jni",
  "libc",
  "sha2",
+ "wekite-art",
  "zip",
 ]
 
@@ -1401,6 +1402,14 @@ dependencies = [
  "silk-v3-sys",
  "symphonia",
  "webm-iterable",
+]
+
+[[package]]
+name = "wekite-art"
+version = "0.1.0"
+dependencies = [
+ "jni",
+ "libc",
 ]
 
 [[package]]
