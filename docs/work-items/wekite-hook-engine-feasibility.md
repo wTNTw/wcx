@@ -1,6 +1,6 @@
 # WeKite Hook 引擎移植可行性评估（不用 LSPlant）
 
-评估时间：2026-11-18。分支：`feat/wekite-hook-engine`（本轮只做 M1 + 本文档）。
+评估时间：2026-11-18。分支：`feat/wekite-hook-engine`。前文保留 M1/M2a 历史；M2b 实施与验收状态见文末。
 参考实现：`/tmp/wekite`（`wekite-zygisk/native/src/art/`：elf.rs 508 行、layout.rs 97 行、
 mod.rs 1051 行、trampoline.rs 215 行，共 1871 行）。
 
@@ -238,7 +238,138 @@ M2b-0 JNI 导出与 ArtMethod 闭环；无需转向 LSPlant `BuildDex` 复制方
    nativeTrustDexFile/nativeAllocateInstance` 接通 WeKite Rust JNI；两种 cargo feature 分别构建。
 3. **M2b-1（已完成）**：仍用 LSPlant 默认后端，仅运行 `debug.wcx.wekite_selftest=1`，
    已证明 Android 16 上生成类可加载、int/boolean dispatch 闭环通过。
-4. **M2b-2（需授权重启）**：仅 `:push`/`:appbrand` 选择 WeKite，主进程继续 LSPlant；验证
+4. **M2b-2（历史提案；已由 APK 内后端方案替代，不需重启）**：仅 `:push`/`:appbrand` 选择 WeKite，主进程继续 LSPlant；验证
    进程存活、hook 计数、`invokeOriginal`、构造器和异常路径。
 5. **M2b-3（稳定性门槛）**：连续冷启动与 10 分钟存活，无新增 status=11/reason=5、
    tombstone 或 WCX E 日志；不合格立即恢复 Dobby/LSPlant 基线。
+
+## M2b APK native 闭环实施与证据（2026-11-18）
+
+**状态：实现与最终完整矩阵通过，但暂不关闭 M2b 验收。** 较早的一轮 boot 测试发生过
+主进程 LSPlant 路径的 `LauncherUI.onResume` Java 崩溃，根因尚未闭环；后续成功不能作为
+把它归为 flaky 的依据。未添加吞异常补丁，也未修改主进程启动时序来掩盖此问题。
+
+### 实施提交
+
+所有提交均已推送 `origin/feat/wekite-hook-engine`，未推送 master：
+
+| 提交 | 内容 |
+|---|---|
+| `9bcee322e10302d806643e9aa6165f0d4fcb1238` | cherry-pick 已验收 `2d84b5cd` 冷启动首 Activity 门 |
+| `d19e23b17930d30f032a7aad9a9f6b3be94e24f5` | 引擎移动至共享 `libs/common/wekite-art`，无第二份引擎副本 |
+| `39f325b4d9b3fa9e7a8952499051c908227e5bb3` | APK JNI 导出、可选 Cargo feature、显式 `--wekite-hook` |
+| `a16343b9ec7e5be826ae1b0f64c07a6cc538c491` | 幂等 early payload load 与多进程提取发布复用 |
+| `f04e20b8a7327bd3aacc4ffacca119a632140425` | 真实 fixture、自清理、初始化入口；预期故障仅按异常对象身份及私有 fixture 类记 INFO，其余 callback 异常仍记 E |
+| `9e07082781269750bbaf14f54772c92a85f2c06a` | 属性 + 子进程 allowlist + init/self-test gate；失败回退 LSPlant |
+| `4d7c9edd589157555eb4a4ac2e1af39e4d139364` | 启动前 baseline、逐进程核验、完整时长 PID 观察探针 |
+| `a1d737c079935061d1f1938178d586b1843c7941` | 修复真机探针日志来源，随后重跑完整 VM/设备矩阵 |
+
+验证的代码提交及当时远端 SHA 均为 `a1d737c079935061d1f1938178d586b1843c7941`。
+本节另作独立文档提交，不把文档提交误写成 APK provenance。
+
+实现不改 feature-facing `IHookBridge`：主进程始终为 `ArtHookBridge`/LSPlant，只有
+`debug.wcx.wekite_m2b=1` 且进程为 `:push`/`:appbrand*` 时才尝试 APK 后端。
+基线 `wekit-native` feature 默认空；resident 默认仍为 LSPlant。
+
+### VM 矩阵与产物
+
+全部编译仅在 Debian VM `/root/wcx` 执行，通过指定 `wcx-remote.sh` 同步
+`/mnt/d/Github/wcx`。最终 provenance：
+
+```text
+a1d737c079935061d1f1938178d586b1843c7941 dirty=0 synced=2026-11-18T18:55:51+08:00
+```
+
+- `cargo test -p wekite-art`：1 test PASS（arm64 trampoline 寄存器编码），doc tests PASS。
+- `wekit-native` arm64 `cargo check` baseline / `--features wekite_hook`：均 PASS。
+- `wcx-zygisk` arm64 `cargo check` baseline / `--features wcx_hook_wekite`：均 PASS。
+- `wcx-remote.sh release --abi arm64-v8a`：两 flavor release + module APK PASS，20s。
+- 同命令加 `--wekite-hook`：PASS，1m4s。
+- baseline/test native-only release 及导出检查亦通过；最终 APK 内的
+  `libwekit_native.so`：baseline 不含 `WeKiteHookBridge_nativeInitialize`，test 包含。
+- 首次从 workspace 根直接 check APK native 时，依赖构建找不到无 API 后缀的
+  `aarch64-linux-android-clang`；实际 NDK 配置位于该 crate 的 `.cargo/config.toml`。
+  改为从 `app/src/main/rust/wekit-native` 执行，未改源码/工具链，完整矩阵重跑通过。
+
+产物根目录：`C:/Users/kwu89/AppData/Roaming/PiDeck/chat-workspace/wcx-m2b-dist/`。
+
+| 产物（相对根目录） | 字节数 | SHA-256 |
+|---|---:|---|
+| `baseline-a1d737c0/outputs/zygisk/wcx-v347-arm64-v8a.apk` | 44,309,977 | `d511f0d1ba7cea0f54c4848809a33801c2d3422647e9f0f621b66193f5d9e3e7` |
+| `test-a1d737c0/outputs/zygisk/wcx-v347-arm64-v8a.apk` | 44,333,705 | `11e67039d58edfebda0380b2922a0bc432c6e9e27a3b399f800d0b583358f4cf` |
+
+VM 无固定 release keystore，module APK 为本机测试用 unsigned 产物；只作 Zygisk
+module payload，不用于覆盖安装 Android 应用。
+
+### 真机最终完整矩阵
+
+设备：PJZ110 / Android 16 / 微信 8.0.80(3220)。没有重启手机、zygote 或 framework，
+没有替换稳定注入器。部署仅临时替换 module APK；root shell 在替换前安装 EXIT/信号
+rollback trap，每次恢复先删属性并原子发布稳定 APK，再收集诊断。
+
+最终完整运行：`wcx-m2b-full-20261118-190842`。
+
+- boot **6/6**、direct **4/4**：每轮主进程 `enabled_max=102`，LauncherUI
+  `ProxyInstrumentation` 命中、LSPlant initialized，WCX E=0，无新增 Java crash、
+  status=6/11 或 recovery；boot 前后主进程 PID 相同。
+- `:push`、`:appbrand0`、`:appbrand1` 均有 `native init PASS`、
+  `WeKiteNativeSelfTest SELFTEST PASS`、`backend=WeKite`；有真实
+  `AppComponentFactory.instantiateClassLoader` hook 与 `WCX module started` 证据。
+  push 的 NotificationsEvolved 四个方法安装成功，两个 appbrand 进程各加载 2 个延后功能。
+- fixture 所有检查通过：静态 null receiver、实例 receiver 身份、primitive/reference、
+  修改参数、early return、真实 `invokeOriginalMethod`、异常原样传播/after 恢复、
+  before/after 故障状态恢复、优先级/逆序、重复 callback 只装一次 native hook、
+  `invokeOriginalConstructor`、`newInstanceOrigin`、最终 unhook 后直接调用及零遗留 hook。
+- 最后一轮观察 **604 秒**、118 个采样：主进程 **18683**、push **21368**、
+  appbrand1 **22258** 始终不变；appbrand0 按宿主逻辑自然退出，不计为受观察 PID。
+- 观察窗口 `crash.txt` 为空，WCX E=0，无 SELFTEST FAIL/fallback，无新增
+  reason=4/5、status=6/11 或 recovery。没有 native crash/tombstone 通知。
+
+### 失败与尚未关闭的风险
+
+1. 第一轮 smoke 的所有真实 native 自测通过，但探针只在 logcat 找 WCX，误判失败。
+   实际捕获中，logcat 的 push SELFTEST 记录为 **0**，同窗口 WeLogger 文件为 **1**；
+   该 ROM 会抑制应用 logcat，早期文件队列却保留完整记录。先恢复稳定 APK，再以
+   `a1d737c0` 改用文件记录做后端判定，logcat 仍保留系统/崩溃诊断；完整矩阵重新运行。
+2. `19:00:35` 首次 full boot 第 1 轮主进程 PID **13185** 发生：
+
+   ```text
+   Unable to resume activity com.tencent.mm.ui.LauncherUI
+   NullPointerException: void androidx.appcompat.app.b.L() on null
+   LauncherUI.onResume -> ArtHookBridgeRuntime -> LSPHooker_.onResume
+   ```
+
+   当轮首屏门、LSPlant、102 功能和 ProxyInstrumentation 均已命中，随后出现
+   reason=4 Java crash。立即恢复稳定 APK 后再诊断；stable direct 健康检查、stable
+   boot 4 轮及 appbrand→boot 对照 1 轮均通过。相同 test APK 的后续完整矩阵通过，
+   **但这不能证明原崩溃已修复或与 M2b 无关**。保留完整堆栈、exit-info 与窗口；
+   不把此问题标为 flaky，不以吞 NPE 或改变主进程 hook 契约消除失败。
+
+因此 native 功能闭环已有证据，**M2b 最终验收仍受第 2 项根因未明阻塞**。
+下一步应隔离该 LSPlant 主进程 Activity 恢复/初始化路径；未经定位，不安全扩大
+主进程时序或 UI 行为修改。子进程仍由稳定 resident 注入器初始化过 LSPlant，
+本轮不证明“完全移除 LSPlant”的运行模式，也不覆盖 native/interface/proxy hook 或 deoptimize。
+
+### 回滚与最终健康检查
+
+初始、每次 trap 恢复及最终健康检查都精确匹配：
+
+```text
+stable module.apk SHA-256=24de905db1df639df5d43889a2866578a3025e50a24e4dadb4f1a5b43eec1a32
+stable injector MD5=93dcbeea7a5ea0075c36c315696be62f
+```
+
+`debug.wcx.wekite_m2b` 已 `resetprop --delete`；旧 `debug.wcx.wekite_selftest` 也确认
+不存在。恢复后再次只重启微信，direct 健康检查 PASS：主进程 **20139**、push **1765**，
+102 功能、LauncherUI proxy、E=0，无新增 Java/native crash、recovery 或 self-test/backend
+日志。设备最终运行稳定 APK，不是实验 APK。
+
+证据根目录：`C:/Users/kwu89/AppData/Roaming/PiDeck/chat-workspace/wcx-m2b-evidence/`：
+
+- `matrix-native-a1d737c0.log`、`matrix-baseline-a1d737c0.log`、`matrix-test-a1d737c0.log`、
+  `provenance-a1d737c0.txt`。
+- `device-smoke-4d7c9edd.txt`、`wcx-m2b-smoke-20261118-185006/`。
+- `device-full-a1d737c0.txt`、`wcx-m2b-full-20261118-190005/`：保留失败，不替换为重跑输出。
+- `device-full-a1d737c0-repro.txt`、`wcx-m2b-full-20261118-190842/`：最终 6/4/604 秒完整证据。
+- `stable-boot-repro.txt`、`stable-boot-controls.txt`、`stable-appbrand-boot-repro.txt`、
+  `stable-final-health.txt`、`wcx-m2b-stable-final-window.txt`。
