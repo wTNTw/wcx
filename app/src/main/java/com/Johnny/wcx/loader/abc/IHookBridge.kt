@@ -50,6 +50,9 @@ interface IHookBridge {
 
     val isDeoptimizationSupported: Boolean
 
+    /** 当前后端是否支持 hook native 方法（WeKite 后端会拒绝 native 方法 hook）。 */
+    val supportsNativeMethodHook: Boolean
+
     fun deoptimize(member: Member): Boolean
 
     fun invokeOriginalMethod(method: Method, thisObject: Any?, args: Array<Any?>): Any?

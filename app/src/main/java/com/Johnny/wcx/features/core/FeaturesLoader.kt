@@ -8,6 +8,7 @@ import com.Johnny.wcx.features.api.ui.WeSettingsInjector
 import com.Johnny.wcx.ui.content.DexResolver
 import com.Johnny.wcx.ui.utils.showComposeDialog
 import com.Johnny.wcx.utils.HostInfo
+import com.Johnny.wcx.utils.HookEnumCollector
 import com.Johnny.wcx.utils.TargetProcesses
 import com.Johnny.wcx.utils.VersionCompat
 import com.Johnny.wcx.utils.WeLogger
@@ -253,6 +254,7 @@ object FeaturesLoader {
      * 排在它后面的功能（含各类 API 服务）就全都不会启动，表现成「开关是开的但功能没反应」。
      */
     private fun startFeatureBatch(features: List<BaseFeature>, allBrokenItems: List<IResolveDex>) {
+        HookEnumCollector.reset()
         val costs = ArrayList<Pair<String, Long>>(features.size)
         features.forEach { feature ->
             val isBroken = feature is IResolveDex && allBrokenItems.contains(feature)
@@ -271,13 +273,16 @@ object FeaturesLoader {
             }
 
             val started = android.os.SystemClock.elapsedRealtime()
+            HookEnumCollector.currentFeatureName.set(feature.displayName)
             try {
                 runCatching { feature.startup() }
                     .onFailure { WeLogger.e(TAG, "startup failed for ${feature.displayName}", it) }
             } finally {
+                HookEnumCollector.currentFeatureName.remove()
                 costs += feature.displayName to (android.os.SystemClock.elapsedRealtime() - started)
             }
         }
+        HookEnumCollector.logSummary()
         logSlowFeatures(costs)
         // 统计真正装上 hook 的数量：与总数量差距过大说明大部分 feature 的开关被读成关闭
         // （典型就是宿主配置未就绪），这条日志是排查「白屏/不生效」的第一手证据。

@@ -8,6 +8,8 @@ mod crash_handler;
 mod crash_triggerer;
 mod logging;
 mod native_hook;
+#[cfg(feature = "wekite_hook")]
+mod wekite_hook;
 mod signature_verifier;
 mod telegram_sticker;
 mod utils;

@@ -8,7 +8,13 @@ build = "build.rs"
 name = "wcx_zygisk"
 crate-type = ["cdylib"]
 
+[features]
+default = ["wcx_hook_lsplant"]
+wcx_hook_lsplant = []
+wcx_hook_wekite = ["dep:wekite-art"]
+
 [dependencies]
+wekite-art = { path = "../../libs/common/wekite-art", optional = true }
 libc = "0.2"
 jni = { version = "0.22", default-features = false }
 anyhow = "1"

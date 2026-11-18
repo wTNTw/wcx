@@ -49,6 +49,12 @@ object NativeLoader {
         zygiskNativeLibraries[key]?.takeIf { it.isFile }
     }
 
+    /** Load the configured APK backend before the opt-in child-process hooks. */
+    fun loadZygiskNativeLibrariesEarly() = synchronized(nativeLoadLock) {
+        check(zygiskPayload != null) { "Zygisk payload is not configured" }
+        ensureNativeLibrariesLoaded()
+    }
+
     fun init(hostCtx: Context) {
         val libLoader = synchronized(nativeLoadLock) {
             ensureNativeLibrariesLoaded()

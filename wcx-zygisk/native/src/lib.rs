@@ -9,6 +9,8 @@ mod natives;
 mod payload;
 mod protocol;
 mod so_hider;
+#[cfg(feature = "wcx_hook_wekite")]
+pub(crate) use wekite_art as wekite;
 mod zygisk;
 
 use lifecycle::WcxZygiskModule;
