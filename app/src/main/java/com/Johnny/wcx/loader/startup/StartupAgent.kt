@@ -57,6 +57,16 @@ object StartupAgent {
 //        SignatureVerifier.verify(application)
         WeLauncher.init(application)
 
+        // M2a 离线自测：debug.wcx.wekite_selftest=1 时跑一次 DexMaker bridge 生成器
+        // + hookId 注册表 + dispatch 闭环自检（不接 WeKite native 后端，不影响线上）。
+        if (runCatching {
+                val c = Class.forName("android.os.SystemProperties")
+                c.getMethod("get", String::class.java).invoke(null, "debug.wcx.wekite_selftest") as? String
+            }.getOrNull() == "1") {
+            runCatching { com.Johnny.wcx.loader.entry.wekite.WeKiteSelfTest.run() }
+                .onFailure { WeLogger.e(TAG, "WeKiteSelfTest crashed", it) }
+        }
+
         runCatching {
             application.dataDir.toPath().resolve("app_qqprotect").deleteRecursively()
         }.onFailure { WeLogger.e(TAG, "failed to delete app_qqprotect", it) }
