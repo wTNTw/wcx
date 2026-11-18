@@ -42,6 +42,7 @@ object LxpHookImpl : IHookBridge, ILoaderService {
     }
 
     override val isDeoptimizationSupported: Boolean = true
+    override val supportsNativeMethodHook: Boolean = true
 
     override fun deoptimize(member: Member): Boolean {
         return self.deoptimize(member as Executable)

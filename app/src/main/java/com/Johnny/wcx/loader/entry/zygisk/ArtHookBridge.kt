@@ -28,6 +28,7 @@ class ArtHookBridge : IHookBridge {
     override val frameworkVersion: String = "v1"
     override val frameworkVersionCode: Long = 1
     override val isDeoptimizationSupported: Boolean = true
+    override val supportsNativeMethodHook: Boolean = true
 
     override val hookCounter: Long get() = ArtHookBridgeRuntime.hookedMembers().size.toLong()
     override val hookedMethods: Set<Member?> get() = ArtHookBridgeRuntime.hookedMembers()

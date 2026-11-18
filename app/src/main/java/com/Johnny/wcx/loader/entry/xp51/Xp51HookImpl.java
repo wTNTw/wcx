@@ -97,6 +97,11 @@ public class Xp51HookImpl implements IHookBridge, ILoaderService {
     }
 
     @Override
+    public boolean getSupportsNativeMethodHook() {
+        return true;
+    }
+
+    @Override
     public boolean deoptimize(@NonNull Member member) {
         return false;
     }

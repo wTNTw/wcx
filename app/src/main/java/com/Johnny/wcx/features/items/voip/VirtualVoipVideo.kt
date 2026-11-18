@@ -3,6 +3,7 @@
 package com.Johnny.wcx.features.items.voip
 
 import com.Johnny.wcx.utils.HookCallback
+import com.Johnny.wcx.utils.currentHookBridge
 
 import android.graphics.ColorSpace
 import android.graphics.SurfaceTexture
@@ -183,21 +184,27 @@ object VirtualVoipVideo : ClickableFeature(), IResolveDex {
         }
 
         Camera::class.apply {
-            firstMethod { name = "setPreviewTexture" }.hookBefore {
-                WeLogger.i(TAG, "Camera::setPreviewTexture is called")
+            // WeKite 后端（ArtMethod 替换式）无法 hook native 方法；此处 setPreviewTexture
+            // 是 native，跳过并打日志，避免切后端时直接抛异常。LSPlant 后端行为不变。
+            if (currentHookBridge.supportsNativeMethodHook) {
+                firstMethod { name = "setPreviewTexture" }.hookBefore {
+                    WeLogger.i(TAG, "Camera::setPreviewTexture is called")
 
-                if (!shouldInterceptCamera) return@hookBefore
+                    if (!shouldInterceptCamera) return@hookBefore
 
-                WeLogger.i(TAG, "should intercept Camera::setPreviewTexture, starting virtual video...")
+                    WeLogger.i(TAG, "should intercept Camera::setPreviewTexture, starting virtual video...")
 
-                val targetTexture = args.getOrNull(0) as? SurfaceTexture? ?: return@hookBefore
+                    val targetTexture = args.getOrNull(0) as? SurfaceTexture? ?: return@hookBefore
 
-                args[0] = dummySurfaceTexture
-                startVirtualVideo(
-                    surface = Surface(targetTexture),
-                    ownsSurface = true
-                )
-                WeLogger.d(TAG, "camera1 preview texture replaced")
+                    args[0] = dummySurfaceTexture
+                    startVirtualVideo(
+                        surface = Surface(targetTexture),
+                        ownsSurface = true
+                    )
+                    WeLogger.d(TAG, "camera1 preview texture replaced")
+                }
+            } else {
+                WeLogger.i(TAG, "当前后端不支持 native 方法 hook，跳过 Camera.setPreviewTexture")
             }
 
             firstMethod {
