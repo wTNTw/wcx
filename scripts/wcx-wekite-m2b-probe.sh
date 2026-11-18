@@ -64,6 +64,15 @@ for NAME in com.tencent.mm:push "$AB_NAME"; do
 done
 if grep -aE 'SELFTEST FAIL|backend=LSPlant fallback| E/WCX|WCX +E ' "$STATE/logcat.txt"; then OK=0; fi
 if grep -aE 'SELFTEST FAIL|backend=LSPlant fallback| E/' "$STATE/wcx.txt"; then OK=0; fi
+# Each complete fixture run deliberately throws twice in before and twice in
+# after. Count only the exact private-test markers; never exclude any WCX E.
+SELFTESTS=$(grep -ac 'I/WCX WeKiteNativeSelfTest: SELFTEST PASS process=' "$STATE/wcx.txt")
+EXPECTED_BEFORE=$(grep -ac 'I/WCX WeKiteHookBridgeRuntime: SELFTEST expected before callback fault restored$' "$STATE/wcx.txt")
+EXPECTED_AFTER=$(grep -ac 'I/WCX WeKiteHookBridgeRuntime: SELFTEST expected after callback fault restored$' "$STATE/wcx.txt")
+UNEXPECTED_E=$(grep -ac ' E/' "$STATE/wcx.txt")
+[ "$EXPECTED_BEFORE" -eq "$((SELFTESTS * 2))" ] || OK=0
+[ "$EXPECTED_AFTER" -eq "$((SELFTESTS * 2))" ] || OK=0
+echo "selftests=$SELFTESTS expected_callback_before=$EXPECTED_BEFORE expected_callback_after=$EXPECTED_AFTER expected_callback_total=$((EXPECTED_BEFORE + EXPECTED_AFTER)) unexpected_wcx_E=$UNEXPECTED_E"
 if grep -aE 'FATAL EXCEPTION|SIGABRT|SIGSEGV|Fatal signal|>>> com.tencent.mm' "$STATE/crash.txt"; then OK=0; fi
 # Compare identities, not bounded-history counts: old records can roll off.
 awk '/timestamp=|reason=|status=|process=/' "$STATE/exit-before.txt" > "$STATE/exit-before-key.txt"
