@@ -133,10 +133,11 @@ native 导出改动（`natives.rs`）：
 - **M1（本轮）**：编译期引入 WeKite 引擎（复制 `art/` 为 `src/wekite/`，加 cargo feature
   `wcx_hook_wekite` 默认关，`#[cfg(feature=...)]` 挂载，`cargo build --features
   wcx_hook_wekite` 编译通过）。**默认后端仍是 LSPlant，线上零变化，不部署、不重启。**
-- **M2a（已完成 spike）**：全量 hook 枚举、native 能力位、WeKite Java bridge/runtime 移植；
-  primitive descriptor 失败已定位为移植别名错误，不是 DexMaker 缺陷（见下文）。
-- **M2b（待拍板 + 授权部署/重启）**：接通 WeKite JNI，先离线自测生成 bridge，再仅在
-  `:push`/`:appbrand` 切换后端，验证子进程不崩、hook 生效。
+- **M2a（已完成并通过真机自测）**：全量 hook 枚举、native 能力位、WeKite Java
+  bridge/runtime 移植；primitive descriptor 失败已定位为移植别名错误，不是 DexMaker 缺陷，
+  Android 16 真机上的 int/boolean dispatch 闭环已通过（见下文）。
+- **M2b（待实现）**：接通 WeKite JNI，再仅在 `:push`/`:appbrand` 切换后端，验证
+  native ArtMethod 替换、`invokeOriginal`、构造器和异常路径。
 - **M3（待拍板 + 授权重启）**：主进程切 WeKite + `native_early_init`（`postAppSpecialize`
   同步 `art::init`）验证，目标「启动早期安全完成 LSPlant 等价初始化 + 102 feature」。
 
@@ -206,8 +207,28 @@ SIGSEGV/SIGILL 都发生在 hook `Class::SetStatus`（native 函数）的序言�
 - **PASS：** 两条实现路线都不要求修改 feature-facing `IHookBridge` 语义。
 - **STOP BuildDex 实施：** 当前没有契约红线，但存在不必要的 C++ 复制与维护成本；既然
   DexMaker 阻塞来自移植别名错误，M2b 应继续现有 WeKite runtime/JNI 路线。
-- 本轮只完成代码修正、编译与文档评估；**未部署、未改注入器、未重启手机**。设备运行时
-  自测仍需后续授权。
+- 真机自测仅替换 module APK，未修改注入器；测试结束后已恢复当前稳定 APK 与 Dobby/LSPlant
+  基线。结果见下一节。
+
+### M2a-3 / M2b-1 Android 16 真机验收（2026-11-18）
+
+- 验证提交：`7cf14aed`；VM clean release 产物大小 `44,326,361` 字节，SHA-256
+  `187c5bb837ebdc84f83474f7a39c8322a24e0781852cbf670b4c894a1a127995`。
+- 部署范围：只替换 `/data/adb/modules/zygisk-wcx/module.apk`；注入器始终保持 Dobby 基线
+  MD5 `93dcbeea7a5ea0075c36c315696be62f`。
+- `debug.wcx.wekite_selftest=1` 下，主进程及当时启动的 `:push`/`:appbrand0`/`:appbrand1`
+  均输出 `SELFTEST PASS`：
+  - `Integer.parseInt(String)` bridge：before/after 均命中 2 次；backup 占位异常为预期的
+    `UnsupportedOperationException`；early-return primitive int 正确拆箱为 `42`。
+  - `Boolean.parseBoolean(String)` bridge：early-return primitive boolean 正确拆箱为 `true`。
+- 未出现 `Invalid descriptor for class_idx: 'I'/'Z'`、`UnsatisfiedLinkError`、WCX E 日志、
+  Java crash、SIGABRT 或 SIGSEGV；主进程同时正常载入 102 个功能并命中 LauncherUI
+  `ProxyInstrumentation`。
+- 测试后已用 `resetprop --delete debug.wcx.wekite_selftest` 删除属性，并恢复稳定 APK
+  SHA-256 `24de905db1df639df5d43889a2866578a3025e50a24e4dadb4f1a5b43eec1a32`。
+
+**结论：M2a Java bridge/runtime 与 primitive boxing/unboxing 红线 PASS。** 下一阶段可直接进入
+M2b-0 JNI 导出与 ArtMethod 闭环；无需转向 LSPlant `BuildDex` 复制方案。
 
 ### 推荐的 M2b 分步提交计划
 
@@ -215,8 +236,8 @@ SIGSEGV/SIGILL 都发生在 hook `Class::SetStatus`（native 函数）的序言�
    before/after、early return 与 primitive unbox；默认 LSPlant 不变。
 2. **M2b-0（编译期）**：为 `nativeGetArtMethod/nativeHookMethod/nativeUnhookMethod/
    nativeTrustDexFile/nativeAllocateInstance` 接通 WeKite Rust JNI；两种 cargo feature 分别构建。
-3. **M2b-1（需授权部署）**：仍用 LSPlant 默认后端，仅运行 `debug.wcx.wekite_selftest=1`，
-   先证明 Android 16 上生成类可加载、int/boolean dispatch 闭环通过。
+3. **M2b-1（已完成）**：仍用 LSPlant 默认后端，仅运行 `debug.wcx.wekite_selftest=1`，
+   已证明 Android 16 上生成类可加载、int/boolean dispatch 闭环通过。
 4. **M2b-2（需授权重启）**：仅 `:push`/`:appbrand` 选择 WeKite，主进程继续 LSPlant；验证
    进程存活、hook 计数、`invokeOriginal`、构造器和异常路径。
 5. **M2b-3（稳定性门槛）**：连续冷启动与 10 分钟存活，无新增 status=11/reason=5、
