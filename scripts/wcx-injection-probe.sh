@@ -3,18 +3,21 @@
 #
 # Usage after pushing to the device:
 #   su -c 'sh /data/local/tmp/wcx-injection-probe.sh direct 25'
+#   su -c 'sh /data/local/tmp/wcx-injection-probe.sh screenoff 25'
 #   su -c 'sh /data/local/tmp/wcx-injection-probe.sh boot 25'
 #
 # "boot" reproduces the failure-prone path: an exported BootReceiver starts the
 # main process in the background, then LauncherUI is opened after injection had
-# a chance to initialize. PASS requires the first LauncherUI to pass through
-# ProxyInstrumentation, not merely that features eventually load.
+# a chance to initialize. PASS requires no LSPlant initialization before
+# Activity open, and requires the first LauncherUI to pass through
+# ProxyInstrumentation.
 MODE=${1:-direct}
 WAIT=${2:-25}
 LOG=$(ls -t /sdcard/Android/data/com.tencent.mm/wcx/logs/wcx-*.log 2>/dev/null | head -1)
 [ -n "$LOG" ] || { echo "RESULT=HARNESS_ERROR no_log"; exit 2; }
 BASE=$(wc -l < "$LOG")
 BASE4=$(dumpsys activity exit-info com.tencent.mm 2>/dev/null | grep -c 'reason=4 (APP CRASH(EXCEPTION))')
+BASE5=$(dumpsys activity exit-info com.tencent.mm 2>/dev/null | grep -c 'reason=5 (APP CRASH(NATIVE))')
 BASE6=$(dumpsys activity exit-info com.tencent.mm 2>/dev/null | grep -c 'status=6')
 BASE11=$(dumpsys activity exit-info com.tencent.mm 2>/dev/null | grep -c 'status=11')
 START=$(date '+%Y-%m-%d_%H-%M-%S')
@@ -29,8 +32,19 @@ ps -A -o PID,NAME 2>/dev/null \
 sleep 3
 
 PRE_MAIN=
+PRE_LSPLANT=0
+PRE_STARTED=0
 case "$MODE" in
   direct)
+    input keyevent KEYCODE_WAKEUP
+    wm dismiss-keyguard >/dev/null 2>&1
+    am start -n com.tencent.mm/.ui.LauncherUI >/dev/null 2>&1
+    ;;
+  screenoff)
+    input keyevent KEYCODE_SLEEP
+    sleep 2
+    am start -n com.tencent.mm/.ui.LauncherUI >/dev/null 2>&1
+    sleep 8
     input keyevent KEYCODE_WAKEUP
     wm dismiss-keyguard >/dev/null 2>&1
     am start -n com.tencent.mm/.ui.LauncherUI >/dev/null 2>&1
@@ -41,7 +55,9 @@ case "$MODE" in
     sleep 8
     tail -n +$((BASE + 1)) "$LOG" > "$PRE" 2>/dev/null
     PRE_MAIN=$(pidof com.tencent.mm)
-    echo "PREOPEN main=$PRE_MAIN push=$(pidof com.tencent.mm:push) lines=$(wc -l < "$PRE")"
+    PRE_LSPLANT=$(grep -ac 'deferred startup: LSPlant initialized' "$PRE")
+    PRE_STARTED=$(grep -ac 'startup_gate_result=started' "$PRE")
+    echo "PREOPEN main=$PRE_MAIN push=$(pidof com.tencent.mm:push) pre_lsplant=$PRE_LSPLANT pre_started=$PRE_STARTED lines=$(wc -l < "$PRE")"
     input keyevent KEYCODE_WAKEUP
     wm dismiss-keyguard >/dev/null 2>&1
     am start -n com.tencent.mm/.ui.LauncherUI >/dev/null 2>&1
@@ -57,21 +73,29 @@ tail -n +$((BASE + 1)) "$LOG" > "$OUT" 2>/dev/null
 
 ENTRY=$(grep -ac 'ZygiskEntry.init: process=com.tencent.mm apk=' "$OUT")
 LIBAFF=$(grep -ac 'deferred startup: libaff_biz loaded' "$OUT")
-GATE=$(grep -ac 'deferred startup: 首个 Activity 启动门已安装' "$OUT")
-TRIGGER=$(grep -ac 'deferred startup: 首个 Activity 即将创建' "$OUT")
+GATE=$(grep -ac 'startup_gate_installed' "$OUT")
+TRIGGER=$(grep -ac 'startup_gate_activity_arrived' "$OUT")
+READY=$(grep -ac 'startup_gate_ready' "$OUT")
+STARTED=$(grep -ac 'startup_gate_result=started' "$OUT")
+PREP_FAILED=$(grep -ac 'startup_gate_result=prepare_failed' "$OUT")
+LSPLANT_FAILED=$(grep -ac 'startup_gate_result=lsplant_failed' "$OUT")
+STARTUP_FAILED=$(grep -ac 'startup_gate_result=startup_failed' "$OUT")
 LSPLANT=$(grep -ac 'deferred startup: LSPlant initialized' "$OUT")
 PROXY=$(grep -ac 'ProxyInstrumentation: callActivityOnCreate: com.tencent.mm.ui.LauncherUI' "$OUT")
 ERRORS=$(grep -ac ' E/' "$OUT")
-ENABLED=$(grep -a '本批 169 个：已启用' "$OUT" | sed 's/.*已启用 //; s/ 个.*//' | sort -n | tail -1)
+ENABLED=$(grep -aE 'FeaturesLoader: 本批 [0-9]+ 个：已启用 [0-9]+ 个' "$OUT" | sed 's/.*已启用 //; s/ 个.*//' | sort -n | tail -1)
 [ -n "$ENABLED" ] || ENABLED=0
+FOCUSED=$(dumpsys activity activities 2>/dev/null | grep -cE 'topResumedActivity=.*com\.tencent\.mm/\.ui\.LauncherUI|mResumedActivity:.*com\.tencent\.mm/\.ui\.LauncherUI')
 MAIN=$(pidof com.tencent.mm)
 PUSH=$(pidof com.tencent.mm:push)
 RECOVERY=$(pidof com.tencent.mm:recovery)
 NEW4=$(( $(dumpsys activity exit-info com.tencent.mm 2>/dev/null | grep -c 'reason=4 (APP CRASH(EXCEPTION))') - BASE4 ))
+NEW5=$(( $(dumpsys activity exit-info com.tencent.mm 2>/dev/null | grep -c 'reason=5 (APP CRASH(NATIVE))') - BASE5 ))
 NEW6=$(( $(dumpsys activity exit-info com.tencent.mm 2>/dev/null | grep -c 'status=6') - BASE6 ))
 NEW11=$(( $(dumpsys activity exit-info com.tencent.mm 2>/dev/null | grep -c 'status=11') - BASE11 ))
 # exit-info is a bounded rolling history; old entries may disappear during a run.
 [ "$NEW4" -lt 0 ] && NEW4=0
+[ "$NEW5" -lt 0 ] && NEW5=0
 [ "$NEW6" -lt 0 ] && NEW6=0
 [ "$NEW11" -lt 0 ] && NEW11=0
 SAME_MAIN=1
@@ -81,13 +105,21 @@ fi
 
 STAGE=ok
 [ "$ENTRY" -lt 1 ] && STAGE=no_java_entry
-[ "$ENTRY" -ge 1 ] && [ "$LIBAFF" -lt 1 ] && STAGE=waiting_libaff
-[ "$LIBAFF" -ge 1 ] && [ "$GATE" -lt 1 ] && STAGE=startup_gate_missing
+[ "$ENTRY" -ge 1 ] && [ "$GATE" -lt 1 ] && STAGE=startup_gate_missing
 [ "$GATE" -ge 1 ] && [ "$TRIGGER" -lt 1 ] && STAGE=startup_gate_not_triggered
-[ "$TRIGGER" -ge 1 ] && [ "$LSPLANT" -lt 1 ] && STAGE=lsplant_failed
-[ "$LSPLANT" -ge 1 ] && [ "$ENABLED" -lt 100 ] && STAGE=features_missing
-[ "$ENABLED" -ge 100 ] && [ "$PROXY" -lt 1 ] && STAGE=first_activity_missed
+[ "$PREP_FAILED" -gt 0 ] && STAGE=startup_prepare_failed
+[ "$LSPLANT_FAILED" -gt 0 ] && STAGE=lsplant_failed
+[ "$STARTUP_FAILED" -gt 0 ] && STAGE=module_start_failed
+[ "$TRIGGER" -ge 1 ] && [ "$READY" -lt 1 ] && [ "$PREP_FAILED" -eq 0 ] && STAGE=startup_not_ready
+[ "$READY" -ge 1 ] && [ "$STARTED" -lt 1 ] && STAGE=startup_not_completed
+[ "$STARTED" -ge 1 ] && [ "$LSPLANT" -lt 1 ] && STAGE=lsplant_log_missing
+[ "$LSPLANT" -ge 1 ] && [ "$ENABLED" -lt 10 ] && STAGE=features_missing
+[ "$ENABLED" -ge 10 ] && [ "$PROXY" -lt 1 ] && STAGE=first_activity_missed
+[ "$PROXY" -ge 1 ] && [ "$FOCUSED" -lt 1 ] && STAGE=launcher_not_focused
+[ "$MODE" = boot ] && [ "$PRE_LSPLANT" -gt 0 ] && STAGE=background_initialized_early
+[ "$MODE" = boot ] && [ "$PRE_STARTED" -gt 0 ] && STAGE=background_initialized_early
 [ "$NEW4" -gt 0 ] && STAGE=java_crash
+[ "$NEW5" -gt 0 ] && STAGE=native_crash
 [ "$NEW6" -gt 0 ] && STAGE=sigabrt
 [ "$NEW11" -gt 0 ] && STAGE=sigsegv
 [ "$SAME_MAIN" -eq 0 ] && STAGE=background_process_restarted
@@ -98,17 +130,18 @@ OK=1
 [ -n "$RECOVERY" ] && OK=0
 [ "$ERRORS" -gt 0 ] && OK=0
 [ "$NEW4" -gt 0 ] && OK=0
+[ "$NEW5" -gt 0 ] && OK=0
 [ "$NEW6" -gt 0 ] && OK=0
 [ "$NEW11" -gt 0 ] && OK=0
 [ "$SAME_MAIN" -eq 0 ] && OK=0
 
-echo "mode=$MODE pre_main=[$PRE_MAIN] main=[$MAIN] same_main=$SAME_MAIN push=[$PUSH] recovery=[$RECOVERY]"
-echo "entry=$ENTRY libaff=$LIBAFF gate=$GATE trigger=$TRIGGER lsplant=$LSPLANT enabled_max=$ENABLED proxy=$PROXY E=$ERRORS new_java_crash=$NEW4 new_status6=$NEW6 new_status11=$NEW11 stage=$STAGE"
+echo "mode=$MODE pre_main=[$PRE_MAIN] main=[$MAIN] same_main=$SAME_MAIN push=[$PUSH] recovery=[$RECOVERY] pre_lsplant=$PRE_LSPLANT pre_started=$PRE_STARTED focused=$FOCUSED"
+echo "entry=$ENTRY libaff=$LIBAFF gate=$GATE trigger=$TRIGGER ready=$READY started=$STARTED prep_failed=$PREP_FAILED lsplant_failed=$LSPLANT_FAILED startup_failed=$STARTUP_FAILED lsplant=$LSPLANT enabled_max=$ENABLED proxy=$PROXY E=$ERRORS new_java_crash=$NEW4 new_native_crash=$NEW5 new_status6=$NEW6 new_status11=$NEW11 stage=$STAGE"
 if [ "$OK" = 1 ]; then
   echo "RESULT=PASS"
 else
   echo "RESULT=FAIL"
   echo "ARTIFACT=$OUT"
   echo "---- failure window ----"
-  grep -aE 'ZygiskEntry|LSPlant|WCX module started|本批 169|ProxyInstrumentation|StartupAgent|StartupCrashGuard| E/' "$OUT" | tail -80
+  grep -aE 'ZygiskEntry|LSPlant|WCX module started|FeaturesLoader: 本批|ProxyInstrumentation|StartupAgent|StartupCrashGuard| E/' "$OUT" | tail -80
 fi
