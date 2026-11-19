@@ -21,11 +21,11 @@ Fix branch: `fix/first-activity-gate-race`
 
 | Check | Result |
 | --- | --- |
-| Python contracts | Not run in this document revision |
-| standard arm64 release | Not run in this document revision |
-| minified ABI contracts | Not run in this document revision |
-| APK SHA-256 | Not recorded in this document revision |
-| Injector MD5 | Not recorded in this document revision |
+| Python contracts | 11/11 passed |
+| standard arm64 release | `BUILD SUCCESSFUL`, `wcx-v347-arm64-v8a.apk` (44,309,977 bytes) |
+| minified ABI contracts | 71/71 passed (`contracts=71 missing=0`) |
+| APK SHA-256 | `7ff621e8f34ed894d9cf66c71cc8fffaa9c4be40a395479a16eecd1f6421a23f` |
+| Injector MD5 | `93dcbeea7a5ea0075c36c315696be62f` |
 
 ## Device matrix
 
