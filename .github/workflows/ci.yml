@@ -293,6 +293,15 @@ jobs:
             exit "$STATUS"
           fi
 
+      - name: Verify minified APK dynamic ABI
+        run: |
+          APK=$(find app/build/outputs/zygisk -name '*-arm64-v8a.apk' -type f | head -1)
+          test -n "$APK" || { echo "::error::Zygisk APK missing"; exit 1; }
+          sh scripts/wcx-minified-contract.sh \
+            --apk "$APK" \
+            --mapping app/build/outputs/mapping/standardRelease \
+            --contracts scripts/wcx-minified-contracts.txt
+
       - name: Verify APK signatures (fixed keystore)
         if: github.event_name != 'pull_request' && !(github.event_name == 'workflow_dispatch' && inputs.skip_signing)
         run: |
