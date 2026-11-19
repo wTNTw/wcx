@@ -1384,11 +1384,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a28ac98ddc8b9274cb41bb4d9d4d5c425b6020c50c46f25559911905610b4a88"
 
 [[package]]
-name = "wekit-native"
+name = "wekit-media"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "bindgen",
  "cc",
  "flate2",
  "gif",
@@ -1402,6 +1401,16 @@ dependencies = [
  "silk-v3-sys",
  "symphonia",
  "webm-iterable",
+]
+
+[[package]]
+name = "wekit-native"
+version = "0.1.0"
+dependencies = [
+ "bindgen",
+ "jni",
+ "libc",
+ "sha2",
  "wekite-art",
 ]
 

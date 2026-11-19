@@ -264,8 +264,12 @@ fn workspace_root() -> PathBuf {
     }
 }
 
-fn native_crate_dir(root: &Path) -> PathBuf {
+fn core_native_crate_dir(root: &Path) -> PathBuf {
     root.join("app/src/main/rust/wekit-native")
+}
+
+fn media_native_crate_dir(root: &Path) -> PathBuf {
+    root.join("app/src/main/rust/wekit-media")
 }
 
 fn jni_libs_dir(root: &Path) -> PathBuf {
@@ -404,10 +408,7 @@ fn task_configure() -> Result<()> {
     let ndk_bin_dir = find_ndk_bin_dir(&android_home)?;
 
     // Derive the NDK sysroot from the bin dir (e.g. .../bin → .../sysroot).
-    let ndk_sysroot = Path::new(&ndk_bin_dir)
-        .parent()
-        .unwrap()
-        .join("sysroot");
+    let ndk_sysroot = Path::new(&ndk_bin_dir).parent().unwrap().join("sysroot");
 
     // On Windows the NDK ships `.cmd` wrappers for the clang binaries.
     let ext = if cfg!(target_os = "windows") {
@@ -454,18 +455,22 @@ fn task_configure() -> Result<()> {
 
     let out = out.trim_end_matches('\n').to_owned() + "\n";
 
-    let config_path = native_crate_dir(&root).join(".cargo/config.toml");
-    fs::create_dir_all(config_path.parent().unwrap())?;
-    // Only touch the file when it actually changes: rewriting it on every build needlessly
-    // invalidates Cargo's fingerprint inputs and hides real diffs from the developer.
-    if fs::read_to_string(&config_path).map(|old| old == out).unwrap_or(false) {
-        println!("configure: unchanged {}", config_path.display());
-        return Ok(());
+    for crate_dir in [core_native_crate_dir(&root), media_native_crate_dir(&root)] {
+        let config_path = crate_dir.join(".cargo/config.toml");
+        fs::create_dir_all(config_path.parent().unwrap())?;
+        // Only touch the file when it actually changes: rewriting it on every build needlessly
+        // invalidates Cargo's fingerprint inputs and hides real diffs from the developer.
+        if fs::read_to_string(&config_path)
+            .map(|old| old == out)
+            .unwrap_or(false)
+        {
+            println!("configure: unchanged {}", config_path.display());
+            continue;
+        }
+        fs::write(&config_path, &out)
+            .with_context(|| format!("failed to write {}", config_path.display()))?;
+        println!("configure: wrote {}", config_path.display());
     }
-    fs::write(&config_path, &out)
-        .with_context(|| format!("failed to write {}", config_path.display()))?;
-
-    println!("configure: wrote {}", config_path.display());
     Ok(())
 }
 
@@ -531,7 +536,12 @@ fn task_build_android(args: &BuildArgs) -> Result<()> {
     task_configure()?;
     let abis = resolve_abi_names(&args.native.abis, args.release, args.all_abis);
     if !args.skip_native {
-        task_build_native(&abis, args.zygisk || args.release, !args.dev_native, args.wekite_hook)?;
+        task_build_native(
+            &abis,
+            args.zygisk || args.release,
+            !args.dev_native,
+            args.wekite_hook,
+        )?;
     }
     let root = workspace_root();
     let gradle_task = gradle_variant_task("assemble", args.flavor.as_ref(), args.release);
@@ -566,54 +576,82 @@ fn task_run(args: RunArgs) -> Result<()> {
 
 /// True when running under CI (GitHub Actions sets `CI=true`).
 fn is_ci() -> bool {
-    env::var("CI").map(|v| !v.is_empty() && v != "false").unwrap_or(false)
+    env::var("CI")
+        .map(|v| !v.is_empty() && v != "false")
+        .unwrap_or(false)
 }
 
-/// Native-only build: cargo build + copy .so to jniLibs/.
-fn task_build_native(abi_names: &[String], build_zygisk: bool, release: bool, wekite_hook: bool) -> Result<()> {
-    let root = workspace_root();
-    let native_dir = native_crate_dir(&root);
-    let abis = resolve_abis(abi_names)?;
+fn build_native_crate(
+    root: &Path,
+    spec: &AbiSpec,
+    release: bool,
+    crate_dir: &Path,
+    library_file: &str,
+    feature: Option<&str>,
+) -> Result<()> {
     let profile_dir = if release { "release" } else { "dev" };
+    let mut cargo_args = vec!["build"];
+    if release {
+        cargo_args.push("--release");
+    } else {
+        cargo_args.extend_from_slice(&["--profile", "dev"]);
+    }
+    if let Some(feature) = feature {
+        cargo_args.extend_from_slice(&["--features", feature]);
+    }
+    cargo_args.extend_from_slice(&["--target", spec.cargo_triple]);
+    run_cargo(&cargo_args, crate_dir)?;
+
+    let so_src = root
+        .join("target")
+        .join(spec.cargo_triple)
+        .join(profile_dir)
+        .join(library_file);
+    let so_dst_dir = jni_libs_dir(root).join(spec.android_name);
+    let so_dst = so_dst_dir.join(library_file);
+    fs::create_dir_all(&so_dst_dir)
+        .with_context(|| format!("could not create {}", so_dst_dir.display()))?;
+    fs::copy(&so_src, &so_dst)
+        .with_context(|| format!("could not copy {} → {}", so_src.display(), so_dst.display()))?;
+    println!(
+        "build(native):  {} → {}",
+        so_src.display(),
+        so_dst.display()
+    );
+    Ok(())
+}
+
+/// Native-only build: cargo build + copy both .so files to jniLibs/.
+fn task_build_native(
+    abi_names: &[String],
+    build_zygisk: bool,
+    release: bool,
+    wekite_hook: bool,
+) -> Result<()> {
+    let root = workspace_root();
+    let abis = resolve_abis(abi_names)?;
 
     for spec in &abis {
         println!(
             "build(native): {} ({})",
             spec.android_name, spec.cargo_triple
         );
-
-        let mut cargo_args = vec!["build"];
-        if release {
-            cargo_args.push("--release");
-        } else {
-            // `dev` profile keeps debug info and skips optimisation: much faster to compile.
-            cargo_args.extend_from_slice(&["--profile", "dev"]);
-        }
-        if wekite_hook {
-            cargo_args.extend_from_slice(&["--features", "wekite_hook"]);
-        }
-        cargo_args.extend_from_slice(&["--target", spec.cargo_triple]);
-        run_cargo(&cargo_args, &native_dir)?;
-
-        let so_src = root
-            .join("target")
-            .join(spec.cargo_triple)
-            .join(profile_dir)
-            .join("libwekit_native.so");
-        let so_dst_dir = jni_libs_dir(&root).join(spec.android_name);
-        let so_dst = so_dst_dir.join("libwekit_native.so");
-
-        fs::create_dir_all(&so_dst_dir)
-            .with_context(|| format!("could not create {}", so_dst_dir.display()))?;
-        fs::copy(&so_src, &so_dst).with_context(|| {
-            format!("could not copy {} → {}", so_src.display(), so_dst.display())
-        })?;
-
-        println!(
-            "build(native):  {} → {}",
-            so_src.display(),
-            so_dst.display()
-        );
+        build_native_crate(
+            &root,
+            spec,
+            release,
+            &core_native_crate_dir(&root),
+            "libwekit_native.so",
+            wekite_hook.then_some("wekite_hook"),
+        )?;
+        build_native_crate(
+            &root,
+            spec,
+            release,
+            &media_native_crate_dir(&root),
+            "libwekit_media.so",
+            None,
+        )?;
     }
 
     // Zygisk 注入器（libwcx_zygisk.so）也要随 APK 打包（packageZygiskApk 会把它搬到模块的
@@ -648,8 +686,7 @@ fn task_build_native(abi_names: &[String], build_zygisk: bool, release: bool, we
                 ("CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER", linker.as_str()),
             ],
         )?;
-        let so_src = root
-            .join("target/aarch64-linux-android/release/libwcx_zygisk.so");
+        let so_src = root.join("target/aarch64-linux-android/release/libwcx_zygisk.so");
         let so_dst_dir = jni_libs_dir(&root).join("arm64-v8a");
         let so_dst = so_dst_dir.join("libwcx_zygisk.so");
         fs::create_dir_all(&so_dst_dir)
@@ -671,18 +708,20 @@ fn task_build_native(abi_names: &[String], build_zygisk: bool, release: bool, we
 
 fn task_cargo_cmd(subcommand: &str, abi_args: &[String], extra_args: &[&str]) -> Result<()> {
     let root = workspace_root();
-    let native_dir = native_crate_dir(&root);
     let abis = resolve_abis(abi_args)?;
 
     for spec in &abis {
-        println!(
-            "{subcommand}: {} ({})",
-            spec.android_name, spec.cargo_triple
-        );
-
-        let mut cmd_args = vec![subcommand, "--target", spec.cargo_triple];
-        cmd_args.extend_from_slice(extra_args);
-        run_cargo(&cmd_args, &native_dir)?;
+        for crate_dir in [core_native_crate_dir(&root), media_native_crate_dir(&root)] {
+            println!(
+                "{subcommand}: {} ({}) in {}",
+                spec.android_name,
+                spec.cargo_triple,
+                crate_dir.display(),
+            );
+            let mut cmd_args = vec![subcommand, "--target", spec.cargo_triple];
+            cmd_args.extend_from_slice(extra_args);
+            run_cargo(&cmd_args, &crate_dir)?;
+        }
     }
 
     Ok(())
