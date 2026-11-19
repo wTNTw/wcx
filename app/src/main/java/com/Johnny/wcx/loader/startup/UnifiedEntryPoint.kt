@@ -56,6 +56,7 @@ object UnifiedEntryPoint {
     fun prepareClassLoaderBridge() {
         val self = ClassLoaders.MODULE
         val selfParent = self.parent
+        if (selfParent === HybridClassLoader) return
         if (self is BaseDexClassLoader) {
             // The Zygisk payload's parent is the system loader. Keep the payload loader
             // separately so HybridClassLoader can search its DEX without parent delegation.

@@ -10,6 +10,7 @@ import com.Johnny.wcx.utils.fs.createDirsSafe
 import com.Johnny.wcx.utils.unreachable
 import org.json.JSONObject
 import java.nio.file.Path
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.io.path.deleteIfExists
 import kotlin.io.path.div
 import kotlin.io.path.exists
@@ -33,6 +34,29 @@ object DexCacheManager {
 
     private val cacheDir: Path by lazy {
         (KnownPaths.moduleData / CACHE_DIR_NAME).createDirsSafe()
+    }
+
+    private val parsedCache = ConcurrentHashMap<String, JSONObject>()
+
+    fun prewarmCacheFiles() {
+        runCatching {
+            cacheDir.listDirectoryEntries("*$CACHE_FILE_SUFFIX").forEach { entry ->
+                val fileName = entry.fileName.toString()
+                if (!parsedCache.containsKey(fileName)) {
+                    runCatching { parsedCache.putIfAbsent(fileName, JSONObject(entry.readText())) }
+                }
+            }
+        }
+    }
+
+    private fun readCacheJson(path: String): JSONObject? {
+        val fileName = path.replace("/", "_") + CACHE_FILE_SUFFIX
+        parsedCache[fileName]?.let { return it }
+        val cacheFile = cacheDir / fileName
+        if (!cacheFile.exists()) return null
+        val parsed = JSONObject(cacheFile.readText())
+        parsedCache[fileName] = parsed
+        return parsed
     }
 
     fun init(currentVer: String) {
@@ -67,14 +91,11 @@ object DexCacheManager {
     fun isItemCacheValid(item: IResolveDex): Boolean {
         if (item !is BaseFeature) unreachable()
 
-        val cacheFile = getCacheFile(item.name)
-        if (!cacheFile.exists()) {
-            WeLogger.d(TAG, "cache not found for ${item.name}")
-            return false
-        }
-
         return try {
-            val json = JSONObject(cacheFile.readText())
+            val json = readCacheJson(item.name) ?: run {
+                WeLogger.d(TAG, "cache not found for ${item.name}")
+                return false
+            }
 
             // hash 缺失（生成器漏注册等）时不判定为失效：降级为仅按 key 完整性校验，
             // 绝不因 hash 异常抛错崩微信，也不进入修复循环。
@@ -127,6 +148,7 @@ object DexCacheManager {
             }
 
             cacheFile.writeText(json.toString(2))
+            parsedCache[cacheFile.fileName.toString()] = json
             WeLogger.d(TAG, "cache saved for: ${item.displayName}")
         } catch (e: Exception) {
             WeLogger.e(TAG, "failed to save cache for: ${item.displayName}", e)
@@ -142,11 +164,8 @@ object DexCacheManager {
             error("item is not BaseFeature")
         }
 
-        val cacheFile = getCacheFile(item.name)
-        if (!cacheFile.exists()) return null
-
         return try {
-            val json = JSONObject(cacheFile.readText())
+            val json = readCacheJson(item.name) ?: return null
             buildMap {
                 for (key in json.keys()) {
                     if (key !in META_KEYS) put(key, json.get(key))
@@ -159,10 +178,13 @@ object DexCacheManager {
     }
 
     fun deleteCache(path: String) {
-        getCacheFile(path).deleteIfExists()
+        val cacheFile = getCacheFile(path)
+        parsedCache.remove(cacheFile.fileName.toString())
+        cacheFile.deleteIfExists()
     }
 
     fun clearAllCache() {
+        parsedCache.clear()
         cacheDir.listDirectoryEntries().forEach { path ->
             path.deleteIfExists()
         }

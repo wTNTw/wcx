@@ -33,8 +33,9 @@ object HostInfo {
         com.tencent.mm.boot.BuildConfig.BUILD_TAG.contains("GP", ignoreCase = true)
     }
 
+    @Synchronized
     fun init(application: Application) {
-        check(!::_info.isInitialized) { "HostInfo has already been initialized" }
+        if (::_info.isInitialized) return
 
         val pm = application.packageManager
         val packageName = application.packageName

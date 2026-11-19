@@ -299,6 +299,9 @@ object ZygiskEntry {
             DeferredStartupPreparation.Failed("exception:${t.javaClass.simpleName}")
         }
         publishPreparation(gate, result)
+        if (result is DeferredStartupPreparation.Ready) {
+            com.Johnny.wcx.features.core.FeaturesLoader.prewarmEarlyFeatures(result.application)
+        }
     }
 
     private fun publishPreparation(

@@ -73,6 +73,16 @@ class FeatureDescriptorContractTest(unittest.TestCase):
         self.assertLess(bg, launcher.index("LocalAdaptationEngine.init", bg))
         self.assertLess(bg, launcher.index("HchatBootstrap.install", bg))
 
+        loader = (FEATURES_ROOT / "core/FeaturesLoader.kt").read_text(encoding="utf-8")
+        self.assertIn("fun prewarmEarlyFeatures(", loader)
+        self.assertIn("DexCacheManager.prewarmCacheFiles()", loader)
+
+        dex_cache = (
+            ROOT / "app/src/main/java/com/Johnny/wcx/dexkit/cache/DexCacheManager.kt"
+        ).read_text(encoding="utf-8")
+        self.assertIn("fun prewarmCacheFiles()", dex_cache)
+        self.assertIn("ConcurrentHashMap<String, JSONObject>", dex_cache)
+
     def test_non_switch_base_feature_declares_startup_default(self):
         april_fools = (
             FEATURES_ROOT / "items/easter_egg/AprilFools.kt"

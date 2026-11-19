@@ -30,6 +30,37 @@ object FeaturesLoader {
     private const val PARALLEL_CACHE_THREADS = 4
 
     private const val TAG = "FeaturesLoader"
+    private val prewarmStarted = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /**
+     * 在 libaff_biz 稳定后、LauncherUI 创建前的空闲窗口内后台预热纯元数据与早启单例。
+     * 严禁在此触碰 LSPlant、NativeLoader、MMKV 或安装任何 Hook。
+     */
+    fun prewarmEarlyFeatures(application: android.app.Application) {
+        if (!prewarmStarted.compareAndSet(false, true)) return
+        runCatching {
+            val realClassLoader = application.baseContext?.classLoader ?: application.classLoader
+            if (realClassLoader != null) {
+                com.Johnny.wcx.loader.utils.HybridClassLoader.hostClassLoader = realClassLoader
+                dev.ujhhgtg.reflekt.utils.ReflectionClassLoader.value = realClassLoader
+            }
+            HostInfo.init(application)
+            DexCacheManager.prewarmCacheFiles()
+            val descriptors = FeaturesProvider.ALL_FEATURES
+            val snapshot = FeatureSwitchSnapshot.enabledNames()
+            val earlyCandidates = descriptors.filter { descriptor ->
+                descriptor.isEarly() && (
+                    com.Johnny.wcx.utils.DebugFlags.enableAllFeatures ||
+                        descriptor.isApi ||
+                        descriptor.defaultEnabled ||
+                        descriptor.name in snapshot
+                    )
+            }
+            instantiateDescriptorsParallel(earlyCandidates, swallowErrors = true)
+        }.onFailure {
+            WeLogger.w(TAG, "prewarmEarlyFeatures skipped: ${it.message}")
+        }
+    }
 
     fun loadFeatures() {
         val startedAt = android.os.SystemClock.elapsedRealtime()
@@ -38,7 +69,7 @@ object FeaturesLoader {
         val earlyDescriptors = descriptors.filter { descriptor ->
             descriptor.isEarly() && descriptor.enabledBeforePrefsReady(snapshot)
         }
-        val earlyFeatures = earlyDescriptors.map(FeatureDescriptor::instance)
+        val earlyFeatures = instantiateDescriptorsParallel(earlyDescriptors, swallowErrors = false)
         val earlyDexItems = earlyFeatures.filterIsInstance<IResolveDex>()
         val earlyBrokenItems = prepareDexItems(earlyDexItems)
 
@@ -132,6 +163,41 @@ object FeaturesLoader {
     private fun FeatureDescriptor.enabledBeforePrefsReady(snapshot: Set<String>): Boolean =
         com.Johnny.wcx.utils.DebugFlags.enableAllFeatures || isApi || defaultEnabled ||
             name in snapshot || com.Johnny.wcx.preferences.WePrefs.getBoolOrDef(name, defaultEnabled)
+
+    private fun instantiateDescriptorsParallel(
+        descriptors: List<FeatureDescriptor>,
+        swallowErrors: Boolean,
+    ): List<BaseFeature> {
+        if (descriptors.size < PARALLEL_CACHE_THRESHOLD) {
+            return if (swallowErrors) {
+                descriptors.mapNotNull { runCatching { it.instance() }.getOrNull() }
+            } else {
+                descriptors.map(FeatureDescriptor::instance)
+            }
+        }
+        val threadCount = minOf(PARALLEL_CACHE_THREADS, descriptors.size)
+        val pool = java.util.concurrent.Executors.newFixedThreadPool(threadCount) { r ->
+            Thread(r, "WCX-FeatureInit").apply { isDaemon = true }
+        }
+        return try {
+            val futures = descriptors.map { descriptor ->
+                pool.submit<BaseFeature?> {
+                    if (swallowErrors) {
+                        runCatching { descriptor.instance() }.getOrNull()
+                    } else {
+                        descriptor.instance()
+                    }
+                }
+            }
+            if (swallowErrors) {
+                futures.mapNotNull { runCatching { it.get() }.getOrNull() }
+            } else {
+                futures.map { requireNotNull(it.get()) }
+            }
+        } finally {
+            pool.shutdown()
+        }
+    }
 
     private fun logRegistryCounts(descriptors: Int, early: Int, deferred: Int) {
         WeLogger.i(
