@@ -38,49 +38,80 @@ import java.util.concurrent.atomic.AtomicReference
 object ActivityProxy {
 
     private const val TAG = "ActivityProxy"
-    private var initialized = false
+    private val initLock = Any()
+    private var handlerInterceptorInstalled = false
+    private var instrumentationInterceptorInstalled = false
+    private var routingInitialized = false
     private val beforeFirstActivity = AtomicReference<(() -> Unit)?>(null)
+
+    fun installStartupGate(startupGate: () -> Unit): Boolean {
+        beforeFirstActivity.compareAndSet(null, startupGate)
+        if (ensureHandlerInterceptor()) return true
+        beforeFirstActivity.compareAndSet(startupGate, null)
+        return false
+    }
+
+    @SuppressLint("PrivateApi", "DiscouragedPrivateApi")
+    fun installInstrumentationFallback(): Boolean = synchronized(initLock) {
+        if (instrumentationInterceptorInstalled) return true
+        runCatching {
+            val activityThreadClass = Class.forName("android.app.ActivityThread")
+            val activityThread = ActivityThread.currentActivityThread()
+            val field = activityThreadClass.getDeclaredField("mInstrumentation")
+                .makeAccessible()
+            val instrumentation = field.get(activityThread) as? Instrumentation
+                ?: return@synchronized false
+            if (instrumentation !is ProxyInstrumentation) {
+                field.set(activityThread, ProxyInstrumentation(instrumentation))
+            }
+            instrumentationInterceptorInstalled = true
+            true
+        }.onFailure {
+            WeLogger.e(TAG, "failed to install Instrumentation fallback", it)
+        }.getOrDefault(false)
+    }
+
+    @SuppressLint("PrivateApi", "DiscouragedPrivateApi")
+    private fun ensureHandlerInterceptor(): Boolean = synchronized(initLock) {
+        if (handlerInterceptorInstalled) return true
+        runCatching {
+            val activityThreadClass = Class.forName("android.app.ActivityThread")
+            val activityThread = ActivityThread.currentActivityThread()
+            val handler = activityThreadClass.getDeclaredField("mH")
+                .makeAccessible()
+                .get(activityThread) as Handler
+            val callbackField = Handler::class.java.getDeclaredField("mCallback")
+                .makeAccessible()
+            val current = callbackField.get(handler) as? Handler.Callback
+            if (current == null || current.javaClass.name != ProxyHandlerCallback::class.java.name) {
+                callbackField.set(handler, ProxyHandlerCallback(current))
+            }
+            handlerInterceptorInstalled = true
+            true
+        }.onFailure {
+            WeLogger.e(TAG, "failed to install ActivityThread handler interceptor", it)
+        }.getOrDefault(false)
+    }
 
     @SuppressLint("PrivateApi", "DiscouragedPrivateApi")
     fun init(ctx: Context, startupGate: (() -> Unit)? = null): Boolean {
-        if (startupGate != null) {
-            beforeFirstActivity.compareAndSet(null, startupGate)
+        if (startupGate != null && !installStartupGate(startupGate)) return false
+        if (!ensureHandlerInterceptor()) return false
+        if (!installInstrumentationFallback()) return false
+
+        return synchronized(initLock) {
+            if (routingInitialized) return@synchronized true
+            runCatching {
+                val activityThreadClass = Class.forName("android.app.ActivityThread")
+                val activityThread = ActivityThread.currentActivityThread()
+                hookIActivityManager()
+                hookPackageManager(ctx, activityThread, activityThreadClass)
+                routingInitialized = true
+                true
+            }.onFailure {
+                WeLogger.e(TAG, "failed to init stub activity hooks", it)
+            }.getOrDefault(false)
         }
-        if (initialized) return true
-
-        runCatching {
-            val clazzActivityThread = Class.forName("android.app.ActivityThread")
-            val currentActivityThread = ActivityThread.currentActivityThread()
-
-            // Hook Instrumentation
-            val mInstrumentationField = clazzActivityThread.getDeclaredField("mInstrumentation")
-                .makeAccessible()
-            val instrumentation =
-                mInstrumentationField.get(currentActivityThread) as Instrumentation
-            if (instrumentation !is ProxyInstrumentation) {
-                mInstrumentationField.set(
-                    currentActivityThread,
-                    ProxyInstrumentation(instrumentation)
-                )
-            }
-
-            // Hook Handler (mH)
-            val oriHandler = clazzActivityThread.getDeclaredField("mH")
-                .makeAccessible()
-                .get(currentActivityThread) as Handler
-            val callbackField = Handler::class.java.getDeclaredField("mCallback")
-                .makeAccessible()
-            val current = callbackField.get(oriHandler) as? Handler.Callback
-            if (current == null || current.javaClass.name != ProxyHandlerCallback::class.java.name) {
-                callbackField.set(oriHandler, ProxyHandlerCallback(current))
-            }
-
-            hookIActivityManager()
-            hookPackageManager(ctx, currentActivityThread, clazzActivityThread)
-
-            initialized = true
-        }.onFailure { WeLogger.e(TAG, "failed to init stub activity hooks", it) }
-        return initialized
     }
 
     /** Run the deferred main-process startup before ActivityThread creates its first Activity. */
