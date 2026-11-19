@@ -401,9 +401,6 @@ dependencies {
     implementation("io.github.billywei01:fastkv:3.0.1")
     implementation("com.google.flatbuffers:flatbuffers-java:23.5.26")
     implementation("dev.rikka.ndk.thirdparty:cxx:1.2.0")
-    // 内置 ARSCLib：JitPack 在该构件上经常 30s+ 才响应，CI 里会直接判成 Could not find。
-    // 该库无传递依赖（POM 只有自身坐标），内置后构建可复现。升级时手动替换 jar 即可。
-    implementation(files("libs/ARSCLib-V1.3.8.jar"))
     implementation("io.github.skylot:jadx-dex-input:1.5.5") {
         exclude(group = "com.google.guava", module = "guava")
     }
