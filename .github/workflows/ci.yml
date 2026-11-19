@@ -267,6 +267,32 @@ jobs:
           echo "Published APKs:"
           ls -1 dist/apk
 
+      - name: Report WCX APK size
+        if: always()
+        run: |
+          mkdir -p dist/perf
+          APK=$(find app/build/outputs/zygisk -name '*-arm64-v8a.apk' -type f | head -1)
+          test -n "$APK" || { echo "::error::Zygisk APK missing"; exit 1; }
+          MAPPING_ARGS=()
+          if [ -d app/build/outputs/mapping/standardRelease ]; then
+            MAPPING_ARGS=(--mapping app/build/outputs/mapping/standardRelease)
+          else
+            echo "::warning::standardRelease mapping is unavailable; package attribution skipped"
+          fi
+          set +e
+          python3 scripts/wcx_apk_report.py \
+            --apk "$APK" \
+            --budget config/wcx-performance-budget.json \
+            "${MAPPING_ARGS[@]}" \
+            --output dist/perf/wcx-apk-report.json
+          STATUS=$?
+          set -e
+          if [ "$STATUS" -eq 2 ]; then
+            echo "::warning::WCX package still exceeds optimization budget"
+          elif [ "$STATUS" -ne 0 ]; then
+            exit "$STATUS"
+          fi
+
       - name: Verify APK signatures (fixed keystore)
         if: github.event_name != 'pull_request' && !(github.event_name == 'workflow_dispatch' && inputs.skip_signing)
         run: |
@@ -348,6 +374,14 @@ jobs:
         with:
           name: wcx-mapping
           path: dist/mapping/*.txt
+
+      - name: Upload performance report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: wcx-performance-report
+          path: dist/perf/**
+          if-no-files-found: warn
 
   release:
     needs: build

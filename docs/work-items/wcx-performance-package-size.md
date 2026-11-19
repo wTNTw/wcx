@@ -1,0 +1,72 @@
+# WCX performance and package-size optimization
+
+## Scope and guardrails
+
+- Design: `docs/superpowers/specs/2026-11-19-wcx-performance-package-size-design.md`
+- Plan: `docs/superpowers/plans/2026-11-19-wcx-performance-package-size.md`
+- Implementation branch: `perf/module-size-startup`
+- Keep one full-featured APK; do not remove feature families or split release variants.
+- Preserve the `libaff_biz` stability gate, first-Activity gate, LSPlant/Dobby split and `IHookBridge` semantics.
+- Build only in Debian VM `/root/wcx`; device work remains blocked until the stable baseline health probe passes.
+
+## Acceptance budgets
+
+| Metric | Budget |
+| --- | ---: |
+| arm64 full Zygisk APK | ≤ 36,000,000 bytes |
+| Uncompressed DEX total | ≤ 25,500,000 bytes |
+| Native library total | ≤ 5,500,000 bytes |
+| Main-process WCX startup P50 | At least 25% lower than baseline |
+| Main-process WCX startup P95 | No regression |
+| Unexpected WCX errors | 0 |
+
+## Baseline package report
+
+The baseline APK was built from `72d1fad100ca7a20054868f1b0b990d55c0da8ba`; Task 1 only added host-side reporting files and does not change APK contents. The report was generated with the Task 1 implementation at `4abd94cd`.
+
+- APK: `app/build/outputs/zygisk/wcx-v347-arm64-v8a.apk`
+- SHA-256: `17795772071351340d70d5826f557e5c608ce70b57fb73a52e56bdee061d10bd`
+
+| Group | Raw bytes | Compressed bytes | Entries |
+| --- | ---: | ---: | ---: |
+| APK file | 44,309,977 | — | — |
+| DEX | 32,408,544 | 32,408,544 | 3 |
+| Native | 5,456,152 | 5,456,152 | 7 |
+| Assets | 1,793,506 | 1,557,896 | 25 |
+| Resources | 1,765,526 | 1,429,295 | 944 |
+| Other | 6,549,437 | 3,215,641 | 52 |
+| META-INF | 84,206 | 31,690 | 117 |
+
+Largest native entries:
+
+| Entry | Bytes |
+| --- | ---: |
+| `libwekit_native.so` | 3,216,800 |
+| `libwcx_zygisk.so` | 746,040 |
+| `libmmkv.so` | 731,088 |
+| `libdexkit.so` | 390,280 |
+| `libsilk_codec.so` | 346,808 |
+| `libhchat_crash.so` | 15,040 |
+| `libandroidx.graphics.path.so` | 10,096 |
+
+Baseline budget result: APK and DEX exceed their budgets; native total is 43,848 bytes below its initial guardrail.
+
+## Reproduction
+
+```bash
+# Local source is synced with the project helper; build runs in Debian VM.
+C:/Users/kwu89/AppData/Roaming/PiDeck/chat-workspace/wcx-remote.sh \
+  release --abi arm64-v8a
+
+ssh debian13 'cd /root/wcx && python3 scripts/wcx_apk_report.py \
+  --apk app/build/outputs/zygisk/wcx-v347-arm64-v8a.apk \
+  --budget config/wcx-performance-budget.json \
+  --mapping app/build/outputs/mapping/standardRelease \
+  --output /tmp/wcx-apk-report.json || test $? -eq 2'
+```
+
+## Phase ledger
+
+| Phase | Commit | APK bytes | DEX bytes | Native bytes | Verification |
+| --- | --- | ---: | ---: | ---: | --- |
+| Baseline measurement | `4abd94cd` | 44,309,977 | 32,408,544 | 5,456,152 | 9 Python tests pass; report exits 2 as expected |
