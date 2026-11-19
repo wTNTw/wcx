@@ -61,7 +61,7 @@ object ZygiskEntry {
     private const val ACTIVITY_THREAD_POLL_MS = 5L
 
     /** 首 Activity 到达早于 libaff_biz 稳定时，ActivityThread 同步等待准备结果的上限。 */
-    private const val ACTIVITY_GATE_WAIT_MS = 5_000L
+    private const val ACTIVITY_GATE_WAIT_MS = 8_000L
 
     /** art::init（LSPlant）失败时的重试次数与退避。 */
     private const val LSPLANT_INIT_ATTEMPTS = 3
@@ -307,7 +307,10 @@ object ZygiskEntry {
     ) {
         if (gate.publish(result)) {
             when (result) {
-                is DeferredStartupPreparation.Ready -> WeLogger.i(TAG, "startup_gate_ready")
+                is DeferredStartupPreparation.Ready -> {
+                    ActivityProxy.markStartupGateReady()
+                    WeLogger.i(TAG, "startup_gate_ready")
+                }
                 is DeferredStartupPreparation.Failed -> {
                     val message = "startup_gate_result=prepare_failed reason=${result.reason}"
                     if (result.warnOnly) {

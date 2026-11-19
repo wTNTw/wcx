@@ -39,11 +39,26 @@ import java.util.concurrent.atomic.AtomicReference
 object ActivityProxy {
 
     private const val TAG = "ActivityProxy"
+    private const val SPLASH_HACK_ACTIVITY = "${PackageNames.WECHAT}.splash.SplashHackActivity"
     private val initLock = Any()
     private var handlerInterceptorInstalled = false
     private var instrumentationInterceptorInstalled = false
+    @Volatile
     private var routingInitialized = false
+    @Volatile
+    private var gateReadyHint = false
+    @Volatile
+    private var splashBootstrapPassed = false
     private val beforeFirstActivity = AtomicReference<(() -> Unit)?>(null)
+
+    fun markStartupGateReady() {
+        gateReadyHint = true
+    }
+
+    private fun isHostSplashBootstrap(className: String?): Boolean {
+        if (routingInitialized || className == null) return false
+        return className == SPLASH_HACK_ACTIVITY || className == ActProxyMgr.SETTINGS_PROXY
+    }
 
     fun installStartupGate(startupGate: () -> Unit): Boolean {
         beforeFirstActivity.compareAndSet(null, startupGate)
@@ -323,6 +338,7 @@ object ActivityProxy {
         }
 
         private fun unwrapIntent(wrapper: Intent?): Intent? {
+            if (!routingInitialized) return null
             wrapper ?: return null
             val cl = ParcelableFixer.hybridClassLoader
             wrapper.setExtrasClassLoader(cl)
@@ -339,6 +355,7 @@ object ActivityProxy {
         }
 
         private fun handleLaunchActivity(msg: Message) {
+            if (!routingInitialized) return
             runCatching {
                 val record = msg.obj
                 val intentField =
@@ -366,19 +383,24 @@ object ActivityProxy {
             runCatching {
                 val transaction = msg.obj ?: return
                 var items = extractTransactionItems(transaction)
+                // Only block inside mH before Instrumentation when background preparation is
+                // already ready; on cold start WeChat's Splash first swaps the launch into
+                // SplashHackActivity -> WeChatSplashActivity to load libaff_biz.so, so blocking
+                // before SplashHackActivity stalls kernel init on WeChat's 3.5s splash watchdog.
                 if (items == null &&
+                    gateReadyHint &&
                     beforeFirstActivity.get() != null &&
                     transaction.toString().contains("LaunchActivityItem")
                 ) {
-                    // Android 15+ stores items in blocked mTransactionItems while getCallbacks()
-                    // returns null; detect the first LaunchActivityItem via public toString(),
-                    // then re-query after startup unlocks hidden APIs.
                     runBeforeFirstActivity()
                     items = extractTransactionItems(transaction)
                 }
                 items?.forEach { item ->
                     if (item != null && item.javaClass.name.contains("LaunchActivityItem")) {
-                        runBeforeFirstActivity()
+                        if (gateReadyHint) {
+                            runBeforeFirstActivity()
+                        }
+                        if (!routingInitialized) return@forEach
                         val intentField = item.javaClass.getDeclaredField("mIntent")
                             .makeAccessible()
                         val wrapper = intentField.get(item) as? Intent
@@ -393,6 +415,7 @@ object ActivityProxy {
     private class ProxyInstrumentation(private val base: Instrumentation) : Instrumentation() {
 
         private fun tryRecoverIntent(intent: Intent?): Intent? {
+            if (!routingInitialized) return null
             intent ?: return null
             if (!intent.hasExtra(ActProxyMgr.ACTIVITY_PROXY_INTENT_TOKEN)) return null
             val cl = ParcelableFixer.hybridClassLoader
@@ -405,8 +428,14 @@ object ActivityProxy {
         }
 
         override fun newActivity(cl: ClassLoader, className: String, intent: Intent): Activity {
-            // Fallback for devices/framework variants that replace ActivityThread.mH's callback.
-            runBeforeFirstActivity()
+            // Once splash bootstrap has passed (or background readiness is already published),
+            // run the gate before constructing the first real host Activity (e.g. LauncherUI).
+            if (beforeFirstActivity.get() != null &&
+                !isHostSplashBootstrap(className) &&
+                (gateReadyHint || splashBootstrapPassed)
+            ) {
+                runBeforeFirstActivity()
+            }
             var resolvedIntent = intent
             var resolvedClass = className
             tryRecoverIntent(intent)?.takeIf { it.component != null }?.let {
@@ -439,7 +468,19 @@ object ActivityProxy {
                 return ClassLoaders.MODULE.loadClass(resolvedClass)
                     .getDeclaredConstructor().newInstance() as Activity
             }
-            return base.newActivity(cl, resolvedClass, resolvedIntent)
+            val activity = base.newActivity(cl, resolvedClass, resolvedIntent)
+            if (beforeFirstActivity.get() != null) {
+                if (isHostSplashBootstrap(activity.javaClass.name)) {
+                    splashBootstrapPassed = true
+                    WeLogger.i(
+                        TAG,
+                        "startup_gate_deferred_splash activity=${activity.javaClass.name}",
+                    )
+                } else {
+                    runBeforeFirstActivity()
+                }
+            }
+            return activity
         }
 
         override fun newActivity(
