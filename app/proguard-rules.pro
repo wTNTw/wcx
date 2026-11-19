@@ -100,10 +100,6 @@
 # kavaref-core 部分内部类在运行时按需加载，R8 静态分析缺失（不影响实际功能）
 -dontwarn com.highcapable.kavaref.**
 # 迁移引入的反射/DexKit 相关库
--dontwarn io.github.skylot.jadx.**
--dontwarn com.android.tools.smali.**
--dontwarn com.github.REAndroid.**
--dontwarn org.jf.dexlib2.**
 -dontwarn dev.rikka.ndk.thirdparty.**
 -keep class com.highcapable.kavaref.** { *; }
 # h.Hchat 不再整包 keep：常规类走可达性分析，脚本按名解析的 ABI 面在下方逐项固定。
