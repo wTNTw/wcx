@@ -6,8 +6,10 @@
 -keep class com.Johnny.wcx.application.** { *; }
 
 # ─── Feature / Hook Classes ─────────────────────────────────────────
-# Keep class structure (for reflection/Xposed callback) but allow obfuscation
--keep class com.Johnny.wcx.features.** { *; }
+# Keep feature/Dex-resolver entry class names for GeneratedMethodHashes lookup,
+# while allowing R8 to shrink, inline, and obfuscate feature internals.
+-keepnames class * extends com.Johnny.wcx.features.core.BaseFeature
+-keepnames class * implements com.Johnny.wcx.dexkit.abc.IResolveDex
 -keep,allowobfuscation class com.Johnny.wcx.hooks.** { *; }
 -keep,allowobfuscation class com.Johnny.wcx.datas.** { *; }
 
