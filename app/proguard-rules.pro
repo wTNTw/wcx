@@ -23,8 +23,8 @@
 -keep class kotlin.coroutines.Continuation { *; }
 -dontwarn kotlinx.coroutines.**
 
-# kotlin-reflect 在运行时反射路径中使用；暂时保留其内建表，避免反射/脚本功能回归。
--keep class kotlin.reflect.** { *; }
+# KClass/KProperty 使用 Kotlin 标准库接口，不需要保留 kotlin-reflect 实现。
+# 若依赖仍可达反射入口，由其 consumer rules 或精确规则负责。
 -dontwarn kotlin.reflect.**
 
 # ─── Serialization ──────────────────────────────────────────────────

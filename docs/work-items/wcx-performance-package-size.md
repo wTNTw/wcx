@@ -84,6 +84,9 @@ Use separate boot and direct cohorts. The acceptance comparison is `optimized_p5
 | --- | --- | ---: | ---: | ---: | --- |
 | Baseline measurement | `4abd94cd` | 44,309,977 | 32,408,544 | 5,456,152 | 9 Python tests pass; report exits 2 as expected |
 | Task 6: feature R8 optimization | `62d1fc2c` | 40,802,644 (-3,507,333) | 28,902,400 (-3,506,144) | 5,456,152 (0) | 37/37 ABI contracts pass; 295/295 feature classes and 134/134 Dex hash keys retained; 4,512 feature usage entries pruned |
-| Task 7: narrow Hchat/script keeps | pending | 36,591,186 (-4,211,458) | 24,699,344 (-4,203,056) | 5,456,152 (0) | Release build passes; 56/56 ABI contracts pass; Hchat bytecode 3,661,091 bytes; APK is 591,186 bytes over final budget |
+| Task 7: narrow Hchat/script keeps | `83a45e89` | 36,591,186 (-4,211,458) | 24,699,344 (-4,203,056) | 5,456,152 (0) | Release build passes; 56/56 ABI contracts pass; Hchat bytecode 3,661,091 bytes; APK is 591,186 bytes over final budget |
+| Task 8: remove broad kotlin-reflect keep | pending | 35,377,345 (-1,213,841) | 23,481,128 (-1,218,216) | 5,456,152 (0) | All package budgets pass; 56/56 ABI contracts pass; kotlin.reflect bytecode falls from 1,398,788 to 819,628 bytes |
 
 Task 7 replaced the package-wide `h.Hchat.** { *; }` rule with exact BeanShell prelude, callback-input, public API and static-JNI contracts. The manual Hchat settings/BeanShell/snapshot/callback smoke checklist remains deferred to Task 16 because device deployment is blocked until the stable baseline health probe passes.
+
+Task 8 removed the unused `fastJavaMethod` compatibility extension and the package-wide kotlin-reflect keep. Remaining `KClass`/`KProperty` references use standard-library interfaces; R8 now removes unreachable reflection implementation code.
