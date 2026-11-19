@@ -91,7 +91,8 @@ Use separate boot and direct cohorts. The acceptance comparison is `optimized_p5
 | Task 9c: remove smali/baksmali runtime | `62c4b1b5` | 30,406,729 (-153) | 21,657,588 (-2,400) | 5,456,152 (0) | Release and 56/56 contracts pass; dependency was effectively unreachable after R8 |
 | Task 9d: remove explicit Guava runtime | `84d87110` | 30,406,729 (0) | 21,655,720 (-1,868) | 5,456,152 (0) | Release and 56/56 contracts pass; no `com.google.common` package remains in the minified APK |
 | Task 9e: enforce package budgets | `7f747717` | 30,406,729 | 21,655,720 | 5,456,152 | CI now fails on report exit 2; stale JADX/ARSCLib/smali warning suppressions removed |
-| Task 10: lazy feature descriptors | pending | 30,423,113 (+16,384) | 21,679,816 (+24,096) | 5,456,152 (0) | Release and 56/56 contracts pass; KSP emits 295 descriptors/factories, 14 defaults, 41 APIs and 134 Dex resolvers |
+| Task 10: lazy feature descriptors | `849eee19` | 30,423,113 (+16,384) | 21,679,816 (+24,096) | 5,456,152 (0) | Release and 56/56 contracts pass; KSP emits 295 descriptors/factories, 14 switch defaults, 41 APIs and 134 Dex resolvers |
+| Task 11: instantiate startup features on demand | pending | 30,423,113 (0) | 21,683,364 (+3,548) | 5,456,152 (0) | Full `./x` release and 56/56 contracts pass; startup loader has no `ALL_HOOK_ITEMS` access; registry batch counts added; direct BaseFeature startup metadata brings total defaults to 15 |
 
 Task 7 replaced the package-wide `h.Hchat.** { *; }` rule with exact BeanShell prelude, callback-input, public API and static-JNI contracts. The manual Hchat settings/BeanShell/snapshot/callback smoke checklist remains deferred to Task 16 because device deployment is blocked until the stable baseline health probe passes.
 

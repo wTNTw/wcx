@@ -32,11 +32,14 @@ object FeatureSwitchSnapshot {
     private val file: File?
         get() = runCatching { File(HostInfo.application.filesDir, FILE_NAME) }.getOrNull()
 
-    /** 快照里该功能是否启用（快照为空/读失败时一律 false）。 */
-    fun isEnabled(featureName: String): Boolean {
+    /** 当前快照的不可变副本；用于实例化 feature 前筛选启动候选。 */
+    fun enabledNames(): Set<String> {
         ensureLoaded()
-        return snapshot.contains(featureName)
+        return snapshot.toSet()
     }
+
+    /** 快照里该功能是否启用（快照为空/读失败时一律 false）。 */
+    fun isEnabled(featureName: String): Boolean = featureName in enabledNames()
 
     /**
      * 按批次增量更新快照。仅在开关存储可读时调用。

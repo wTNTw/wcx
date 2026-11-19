@@ -30,7 +30,7 @@ class FeatureDescriptorContractTest(unittest.TestCase):
                 offenders.append(str(source.relative_to(ROOT)))
             enabled_annotations += len(re.findall(r"defaultEnabled\s*=\s*true", text))
         self.assertEqual([], offenders)
-        self.assertEqual(14, enabled_annotations)
+        self.assertEqual(15, enabled_annotations)
 
     def test_scanner_generates_lazy_descriptors_using_supertype_metadata(self):
         scanner = (SCANNER_ROOT / "FeaturesScanner.kt").read_text(encoding="utf-8")
@@ -41,6 +41,27 @@ class FeatureDescriptorContractTest(unittest.TestCase):
         self.assertIn("hasDexResolver", scanner)
         self.assertIn("factory", scanner)
         self.assertRegex(scanner, r"superTypes[\s\S]+resolve\(\)[\s\S]+qualifiedName")
+
+    def test_startup_loader_selects_descriptors_before_instantiation(self):
+        loader = (FEATURES_ROOT / "core/FeaturesLoader.kt").read_text(encoding="utf-8")
+        self.assertIn("FeaturesProvider.ALL_FEATURES", loader)
+        self.assertNotIn("FeaturesProvider.ALL_HOOK_ITEMS", loader)
+        self.assertIn("enabledBeforePrefsReady", loader)
+        self.assertIn("FeatureSwitchSnapshot.enabledNames()", loader)
+        self.assertIn("FeatureRegistry.instantiated()", loader)
+        self.assertIn("FeatureRegistry: descriptors=", loader)
+
+        snapshot = (FEATURES_ROOT / "core/FeatureSwitchSnapshot.kt").read_text(encoding="utf-8")
+        self.assertIn("fun enabledNames(): Set<String>", snapshot)
+
+    def test_non_switch_base_feature_declares_startup_default(self):
+        april_fools = (
+            FEATURES_ROOT / "items/easter_egg/AprilFools.kt"
+        ).read_text(encoding="utf-8")
+        self.assertRegex(
+            april_fools,
+            r"@Feature\([\s\S]*defaultEnabled\s*=\s*true[\s\S]*\)\s*object AprilFools",
+        )
 
 
 if __name__ == "__main__":

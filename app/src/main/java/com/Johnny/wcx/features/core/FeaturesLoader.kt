@@ -32,30 +32,133 @@ object FeaturesLoader {
     private const val TAG = "FeaturesLoader"
 
     fun loadFeatures() {
-        val allFeatures = FeaturesProvider.ALL_HOOK_ITEMS
-        val allDexItems = allFeatures.filterIsInstance<IResolveDex>()
+        val startedAt = android.os.SystemClock.elapsedRealtime()
+        val descriptors = FeaturesProvider.ALL_FEATURES
+        val snapshot = FeatureSwitchSnapshot.enabledNames()
+        val earlyDescriptors = descriptors.filter { descriptor ->
+            descriptor.isEarly() && descriptor.enabledBeforePrefsReady(snapshot)
+        }
+        val earlyFeatures = earlyDescriptors.map(FeatureDescriptor::instance)
+        val earlyDexItems = earlyFeatures.filterIsInstance<IResolveDex>()
+        val earlyBrokenItems = prepareDexItems(earlyDexItems)
 
-        val t0 = android.os.SystemClock.elapsedRealtime()
-        val outdatedItems = DexCacheManager.getOutdatedItems(allDexItems)
-        val t1 = android.os.SystemClock.elapsedRealtime()
-        val validItems = allDexItems - outdatedItems.toSet()
+        logRegistryCounts(descriptors.size, earlyFeatures.size, deferred = 0)
+        val earlyStartedAt = android.os.SystemClock.elapsedRealtime()
+        startFeatureBatchWhenPrefsReady(earlyFeatures, earlyBrokenItems) {
+            val elapsed = android.os.SystemClock.elapsedRealtime() - earlyStartedAt
+            WeLogger.i(TAG, "enabling all hook items took ${elapsed}ms（首屏必需 ${earlyFeatures.size} 个）")
+            StartupPerformance.mark("early_features_ready")
+            StartupPerformance.emitOnce(TargetProcesses.currentName)
 
-        if (outdatedItems.isNotEmpty())
+            runCatching {
+                if (TargetProcesses.isInMain) {
+                    com.Johnny.wcx.loader.startup.StartupCrashGuard.scheduleHealthyReset()
+                }
+            }
+            if (TargetProcesses.isInMain && Preferences.showStartupToast) {
+                showToast("WCX 加载成功!")
+            }
+
+            scheduleDeferredDescriptors(
+                descriptors = descriptors,
+                earlyDescriptorIds = earlyDescriptors.mapTo(mutableSetOf(), FeatureDescriptor::id),
+                snapshot = snapshot,
+                earlyBrokenItems = earlyBrokenItems,
+                earlyCount = earlyFeatures.size,
+            )
+        }
+
+        WeLogger.i(
+            TAG,
+            "loadFeatures 耗时拆解: descriptors=${descriptors.size} early=${earlyFeatures.size} " +
+                "dispatch=${android.os.SystemClock.elapsedRealtime() - startedAt}ms",
+        )
+    }
+
+    private fun scheduleDeferredDescriptors(
+        descriptors: List<FeatureDescriptor>,
+        earlyDescriptorIds: Set<String>,
+        snapshot: Set<String>,
+        earlyBrokenItems: List<IResolveDex>,
+        earlyCount: Int,
+    ) {
+        val remaining = descriptors.filterNot { it.id in earlyDescriptorIds }
+        if (remaining.isEmpty()) {
+            reportBrokenItems(earlyBrokenItems)
+            StartupPerformance.mark("deferred_features_ready")
+            return
+        }
+
+        runAfterFirstFrame("延后描述符 ${remaining.size} 个") {
+            runWhenPrefsReady("延后描述符 ${remaining.size} 个") { prefsReady ->
+                val deferredStartedAt = android.os.SystemClock.elapsedRealtime()
+                // 配置探针超时属于异常降级：实例化全部剩余项，让 SwitchFeature 的延迟复核仍能恢复。
+                val startupDescriptors = if (prefsReady) {
+                    remaining.filter { it.enabledBeforePrefsReady(snapshot) }
+                } else {
+                    remaining
+                }
+                val materializedDescriptors = (startupDescriptors + remaining.filter { it.hasDexResolver })
+                    .distinctBy(FeatureDescriptor::id)
+                val beforeCount = FeatureRegistry.instantiated().size
+                val materialized = materializedDescriptors.map(FeatureDescriptor::instance)
+                val startupIds = startupDescriptors.mapTo(hashSetOf(), FeatureDescriptor::id)
+                val startupFeatures = materialized.filter { it.technicalId in startupIds }
+                val deferredDexItems = materialized.filterIsInstance<IResolveDex>()
+                val deferredBrokenItems = prepareDexItems(deferredDexItems)
+                val allBrokenItems = (earlyBrokenItems + deferredBrokenItems).distinct()
+
+                reportBrokenItems(allBrokenItems)
+                startFeatureBatch(startupFeatures, allBrokenItems)
+
+                val deferredCount = FeatureRegistry.instantiated().size - beforeCount
+                logRegistryCounts(descriptors.size, earlyCount, deferredCount)
+                WeLogger.i(
+                    TAG,
+                    "首帧后延后批次完成: 启动 ${startupFeatures.size} 个, " +
+                        "实例化 $deferredCount 个, 耗时 " +
+                        "${android.os.SystemClock.elapsedRealtime() - deferredStartedAt}ms",
+                )
+                StartupPerformance.mark("deferred_features_ready")
+            }
+        }
+    }
+
+    private fun FeatureDescriptor.isEarly(): Boolean {
+        if (name in DEFER_BY_NAME) return false
+        return categories.isEmpty() || categories.any { it in EARLY_CATEGORIES }
+    }
+
+    private fun FeatureDescriptor.enabledBeforePrefsReady(snapshot: Set<String>): Boolean =
+        com.Johnny.wcx.utils.DebugFlags.enableAllFeatures || isApi || defaultEnabled ||
+            name in snapshot || com.Johnny.wcx.preferences.WePrefs.getBoolOrDef(name, defaultEnabled)
+
+    private fun logRegistryCounts(descriptors: Int, early: Int, deferred: Int) {
+        WeLogger.i(
+            TAG,
+            "FeatureRegistry: descriptors=$descriptors " +
+                "instantiated=${FeatureRegistry.instantiated().size} early=$early deferred=$deferred",
+        )
+    }
+
+    // ---------------------------------------------------------------------------
+
+    private fun prepareDexItems(items: List<IResolveDex>): List<IResolveDex> {
+        if (items.isEmpty()) return emptyList()
+        val outdatedItems = DexCacheManager.getOutdatedItems(items)
+        val validItems = items - outdatedItems.toSet()
+        if (outdatedItems.isNotEmpty()) {
             WeLogger.i(TAG, "found ${validItems.size} valid items, ${outdatedItems.size} outdated items")
-
-        // 只从缓存加载「完整」的条目；不完整的条目绝不启动 —— 缺的委托是 placeholder，
-        // 带着它启动会让 feature 里的 hook 拿到假方法/空数组（8.0.80 实测会 ArrayIndexOutOfBounds
-        // 甚至把微信界面搞白）。跳过只是该功能不生效，安全得多。
+        }
         val (cacheFailedItems, partialItems) = loadDescriptorsFromCache(validItems)
-        val t2 = android.os.SystemClock.elapsedRealtime()
-        val brokenFromCache = (cacheFailedItems + partialItems).distinct()
+        return (outdatedItems + cacheFailedItems + partialItems).distinct()
+    }
 
-        // 当前微信版本已经确认「凑不齐」的功能：跳过但不再弹窗。
-        // 记录按 版本号+APK 大小/mtime 指纹保存，换微信（升级）后自动失效重试。
+    private fun reportBrokenItems(allBrokenItems: List<IResolveDex>) {
+        if (allBrokenItems.isEmpty()) return
         val knownUnavailableNames = runCatching {
             com.Johnny.wcx.dexkit.cache.DexUnavailableStore.items(HostInfo.application)
         }.getOrDefault(emptySet())
-        val allBrokenItems = (outdatedItems + brokenFromCache).distinct()
         val (knownBroken, actionableBroken) = allBrokenItems.partition { item ->
             (item as? BaseFeature)?.displayName in knownUnavailableNames
         }
@@ -66,60 +169,8 @@ object FeaturesLoader {
                     knownBroken.joinToString { (it as? BaseFeature)?.displayName ?: it.javaClass.simpleName },
             )
         }
-        if (actionableBroken.isNotEmpty())
-            handleBrokenItems(actionableBroken)
-
-        // 拆分两批：只保留少量「首屏必需」的现在装，其余全部等首帧渲染完后装。
-        // 实测：每个 feature 的 startup 只要 ~1.6ms，没有单点热点（208 个共 340ms），
-        // 所以能省的只能靠「少装一点」，靠不了「优化某个慢 feature」。
-        val (earlyFeatures, deferredFeatures) = allFeatures.partition { feature ->
-            val categories = (feature as? BaseFeature)?.categories.orEmpty()
-            // 实测最贵的几个（设置模块入口 101ms / 莫奈引擎 33ms / 视频号分享菜单 12ms）
-            // 都不影响首屏渲染，按名字单独推到首帧后。
-            val deferByName = (feature as? BaseFeature)?.name in DEFER_BY_NAME
-            // 没标注分类的按「必需」处理，宁可慢一点也不要漏装。
-            !deferByName && (categories.isEmpty() || categories.any { it in EARLY_CATEGORIES })
-        }
-
-        val earlyStartedAt = android.os.SystemClock.elapsedRealtime()
-        startFeatureBatchWhenPrefsReady(earlyFeatures, allBrokenItems) {
-            val elapsed = android.os.SystemClock.elapsedRealtime() - earlyStartedAt
-            WeLogger.i(TAG, "enabling all hook items took ${elapsed}ms（首屏必需 ${earlyFeatures.size} 个）")
-            StartupPerformance.mark("early_features_ready")
-            StartupPerformance.emitOnce(TargetProcesses.currentName)
-        }
-
-        if (deferredFeatures.isNotEmpty()) {
-            runAfterFirstFrame("延后批次 ${deferredFeatures.size} 个") {
-                val deferredStartedAt = android.os.SystemClock.elapsedRealtime()
-                startFeatureBatchWhenPrefsReady(deferredFeatures, allBrokenItems) {
-                    val elapsed = android.os.SystemClock.elapsedRealtime() - deferredStartedAt
-                    WeLogger.i(TAG, "首帧后延后批次完成: ${deferredFeatures.size} 个, 耗时 ${elapsed}ms")
-                    StartupPerformance.mark("deferred_features_ready")
-                }
-            }
-        }
-
-        WeLogger.i(
-            TAG,
-            "loadFeatures 耗时拆解: outdated=${t1 - t0}ms cache=${t2 - t1}ms " +
-                "startupDispatch=${android.os.SystemClock.elapsedRealtime() - t2}ms",
-        )
-
-        // 功能全部加载完 → 30 秒后若进程仍存活就清零「连续启动失败」计数，
-        // 避免 StartupCrashGuard 把偶发的一次崩溃也算成隐患。
-        runCatching {
-            if (TargetProcesses.isInMain) {
-                com.Johnny.wcx.loader.startup.StartupCrashGuard.scheduleHealthyReset()
-            }
-        }
-
-        if (TargetProcesses.isInMain && Preferences.showStartupToast) {
-            showToast("WCX 加载成功!")
-        }
+        if (actionableBroken.isNotEmpty()) handleBrokenItems(actionableBroken)
     }
-
-    // ---------------------------------------------------------------------------
 
     /**
      * 逐委托从缓存恢复状态。
@@ -218,6 +269,26 @@ object FeaturesLoader {
         com.Johnny.wcx.preferences.WePrefs.putBool(PREFS_READY_PROBE_KEY, true)
         com.Johnny.wcx.preferences.WePrefs.getBoolOrFalse(PREFS_READY_PROBE_KEY)
     }.getOrDefault(false)
+
+    private fun runWhenPrefsReady(
+        reason: String,
+        attempt: Int = 1,
+        block: (ready: Boolean) -> Unit,
+    ) {
+        if (hostPrefsReady()) {
+            if (attempt > 1) WeLogger.i(TAG, "开关配置已就绪（第 $attempt 次尝试）：$reason")
+            block(true)
+            return
+        }
+        if (attempt >= PREFS_READY_MAX_ATTEMPTS) {
+            WeLogger.w(TAG, "开关配置 ${attempt - 1} 次重试仍不可读，降级执行：$reason")
+            block(false)
+            return
+        }
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            runWhenPrefsReady(reason, attempt + 1, block)
+        }, PREFS_READY_RETRY_DELAY_MS)
+    }
 
     /**
      * 等宿主配置就绪后再启动这一批；未就绪则短延迟重试，**绝不**把 feature 当成「用户关闭」。
@@ -405,7 +476,7 @@ object FeaturesLoader {
         try {
             val (compatible, message) = VersionCompat.checkCompatibility(
                 brokenItems.size,
-                FeaturesProvider.ALL_HOOK_ITEMS.filterIsInstance<IResolveDex>().size
+                FeaturesProvider.ALL_FEATURES.count { it.hasDexResolver }
             )
             if (!compatible) {
                 WeLogger.w(TAG, "版本兼容性警告: $message")

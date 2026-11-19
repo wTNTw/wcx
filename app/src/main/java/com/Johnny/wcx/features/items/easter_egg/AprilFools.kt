@@ -23,7 +23,12 @@ import java.time.Month
 import java.util.WeakHashMap
 
 
-@Feature(name = "愚人节彩蛋", categories = ["彩蛋"], description = "不显示于模块界面, 愚人节自动启用")
+@Feature(
+    name = "愚人节彩蛋",
+    categories = ["彩蛋"],
+    description = "不显示于模块界面, 愚人节自动启用",
+    defaultEnabled = true,
+)
 object AprilFools : BaseFeature() {
 
     const val KEY_SURRENDER = "april_fools_surrender"
