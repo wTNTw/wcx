@@ -53,6 +53,25 @@ class FeatureDescriptorContractTest(unittest.TestCase):
 
         snapshot = (FEATURES_ROOT / "core/FeatureSwitchSnapshot.kt").read_text(encoding="utf-8")
         self.assertIn("fun enabledNames(): Set<String>", snapshot)
+        self.assertIn(
+            "if (TargetProcesses.isInMain && active > 0 && hostPrefsReady())",
+            loader,
+        )
+
+    def test_startup_background_subsystems_do_not_eagerly_instantiate_all_features(self):
+        adaptation = (
+            ROOT / "app/src/main/java/com/Johnny/wcx/dynamic/LocalAdaptationEngine.kt"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("ALL_HOOK_ITEMS", adaptation)
+        self.assertIn("FeaturesProvider.ALL_FEATURES", adaptation)
+
+        launcher = (
+            ROOT / "app/src/main/java/com/Johnny/wcx/loader/startup/WeLauncher.kt"
+        ).read_text(encoding="utf-8")
+        self.assertIn("FeaturesLoader.runAfterFirstFrame", launcher)
+        bg = launcher.index("FeaturesLoader.runAfterFirstFrame")
+        self.assertLess(bg, launcher.index("LocalAdaptationEngine.init", bg))
+        self.assertLess(bg, launcher.index("HchatBootstrap.install", bg))
 
     def test_non_switch_base_feature_declares_startup_default(self):
         april_fools = (

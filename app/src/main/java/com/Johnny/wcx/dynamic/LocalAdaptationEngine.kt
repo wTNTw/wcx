@@ -294,8 +294,7 @@ object LocalAdaptationEngine {
         // 这两种都属于「该功能不可用」，**不是适配失败**。
         // 以前这里直接抛异常，版本指纹不保存 → 每次启动都重新完整适配、每次都弹适配窗。
         val incomplete = withContext(Dispatchers.IO) {
-            FeaturesProvider.ALL_HOOK_ITEMS
-                .filterIsInstance<com.Johnny.wcx.dexkit.abc.IResolveDex>()
+            dexResolvableFeatures()
                 .filter { item ->
                     val name = (item as? com.Johnny.wcx.features.core.BaseFeature)?.displayName
                         ?: item.javaClass.simpleName
@@ -336,13 +335,21 @@ object LocalAdaptationEngine {
         WeLogger.i(TAG, "version info saved: $currentVersion")
     }
 
+    private fun dexResolvableFeatures(): List<com.Johnny.wcx.dexkit.abc.IResolveDex> =
+        FeaturesProvider.ALL_FEATURES
+            .filter { it.hasDexResolver }
+            .map { it.instance() }
+            .filterIsInstance<com.Johnny.wcx.dexkit.abc.IResolveDex>()
+
+    private fun com.Johnny.wcx.features.core.FeatureDescriptor.displayName(): String =
+        if (categories.isEmpty()) name else "${categories.joinToString(",")}/$name"
+
     /** 把「已经扫过、但当前微信版本凑不齐委托」的功能补进不可用清单（只读缓存元信息，很便宜）。 */
     private fun refreshIncompleteFromCache() {
         runCatching {
             if (!com.Johnny.wcx.utils.TargetProcesses.isInMain) return
             val context = HostInfo.application
-            val incomplete = FeaturesProvider.ALL_HOOK_ITEMS
-                .filterIsInstance<com.Johnny.wcx.dexkit.abc.IResolveDex>()
+            val incomplete = dexResolvableFeatures()
                 .filter { DexCacheManager.hasCacheFile(it) && !DexCacheManager.isItemCacheValid(it) }
                 .map { (it as com.Johnny.wcx.features.core.BaseFeature).displayName }
             val existing = DexUnavailableStore.items(context)
@@ -374,11 +381,15 @@ object LocalAdaptationEngine {
 
         scope.launch {
             runCatching {
+                val candidates = FeaturesProvider.ALL_FEATURES
+                    .filter { it.hasDexResolver && (it.displayName() in names || it.name in names) }
+                    .map { it.instance() }
+                    .filterIsInstance<com.Johnny.wcx.dexkit.abc.IResolveDex>()
+                if (candidates.isEmpty()) return@runCatching
                 val dexKit = DexKit
                 val stillFailed = mutableSetOf<String>()
                 var resolved = 0
-                for (item in FeaturesProvider.ALL_HOOK_ITEMS
-                    .filterIsInstance<com.Johnny.wcx.dexkit.abc.IResolveDex>()) {
+                for (item in candidates) {
                     val name = (item as? com.Johnny.wcx.features.core.BaseFeature)?.displayName
                         ?: item.javaClass.simpleName
                     if (name !in names) continue
@@ -418,7 +429,7 @@ object LocalAdaptationEngine {
     )
 
     private fun scanAllFeatures(dexKit: DexKitBridge): ScanSummary {
-        val features = FeaturesProvider.ALL_HOOK_ITEMS.filterIsInstance<com.Johnny.wcx.dexkit.abc.IResolveDex>()
+        val features = dexResolvableFeatures()
         WeLogger.i(TAG, "scanning ${features.size} Dex-resolvable features...")
 
         var successCount = 0

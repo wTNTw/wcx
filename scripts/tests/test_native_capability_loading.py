@@ -23,6 +23,7 @@ class NativeCapabilityLoadingContractTest(unittest.TestCase):
         ):
             self.assertIn(f"fun {method}", source)
         self.assertIn("loadedCapabilities.remove(capability)", source)
+        self.assertIn("hideLoadedModuleLibraries()", source)
         init_body = source[source.index("fun init(hostCtx: Context)") : source.index("fun ensureCoreLoaded()")]
         self.assertIn("ensureCoreLoaded", init_body)
         self.assertNotIn("ensureDexKitLoaded", init_body)

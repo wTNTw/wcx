@@ -377,8 +377,9 @@ object FeaturesLoader {
         // （典型就是宿主配置未就绪），这条日志是排查「白屏/不生效」的第一手证据。
         val active = features.count { it.isActive }
         WeLogger.i(TAG, "本批 ${features.size} 个：已启用 $active 个")
-        // 只有在「确实读到过真实开关」时才写快照：否则会把「全读成 false」也固化下来。
-        if (active > 0 && hostPrefsReady()) {
+        // 只有在主进程且「确实读到过真实开关」时才写快照：子进程（:push/:appbrand）大部分
+        // feature 因 !TargetProcesses.isInMain 直接返回（isActive=false），写入会把主进程快照清空。
+        if (TargetProcesses.isInMain && active > 0 && hostPrefsReady()) {
             FeatureSwitchSnapshot.save(features.map { it.name }, features.filter { it.isActive }.map { it.name })
         }
     }
@@ -402,7 +403,7 @@ object FeaturesLoader {
      * 双保险：主线程消息队列空闲（IdleHandler）就立即跑；若一直不空闲，
      * [FIRST_FRAME_FALLBACK_MS] 后强制跑，保证延后批次不会因为持续绘制而饿死。
      */
-    private fun runAfterFirstFrame(reason: String, block: () -> Unit) {
+    internal fun runAfterFirstFrame(reason: String, block: () -> Unit) {
         val handler = android.os.Handler(android.os.Looper.getMainLooper())
         val done = java.util.concurrent.atomic.AtomicBoolean(false)
         val runOnce = {

@@ -124,6 +124,10 @@ object NativeLoader {
         try {
             loadPackagedLibrary(libraryName)
             loadedCapabilities.add(capability)
+            (runCatching { StartupInfo.hookBridge }.getOrNull()
+                as? com.Johnny.wcx.loader.entry.zygisk.ArtHookBridge)?.let { bridge ->
+                runCatching { bridge.hideLoadedModuleLibraries() }
+            }
         } catch (error: Throwable) {
             loadedCapabilities.remove(capability)
             throw error

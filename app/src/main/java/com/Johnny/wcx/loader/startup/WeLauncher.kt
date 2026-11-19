@@ -78,20 +78,8 @@ object WeLauncher {
             // 连续启动失败自愈：先记一次尝试，稳定运行一段时间后由 service.sh 之外的逻辑清零
             runCatching { phase("StartupCrashGuard") { StartupCrashGuard.onMainProcessStart() } }
             // ActivityProxy 必须在主线程：它要替换 Instrumentation。
-            // 其余“看门狗/适配器”类初始化不需要主线程，统一丢到后台，给首帧让路。
             phase("ActivityProxy") { ActivityProxy.init(appContext) }
             StartupPerformance.mark("activity_proxy_ready")
-            Thread({
-                val bgStart = android.os.SystemClock.elapsedRealtime()
-                runCatching { LocalAdaptationEngine.init(appContext) }
-                    .onFailure { WeLogger.w(TAG, "LocalAdaptationEngine init 失败: ${it.message}") }
-                runCatching { SelfHealingMonitor.init() }
-                    .onFailure { WeLogger.w(TAG, "SelfHealingMonitor init 失败: ${it.message}") }
-                WeLogger.d(
-                    TAG,
-                    "后台初始化完成（本地适配/自愈监控）: ${android.os.SystemClock.elapsedRealtime() - bgStart}ms",
-                )
-            }, "WCX-BgInit").apply { isDaemon = true }.start()
 
             val prefs =
                 context.getSharedPreferences("${PackageNames.WECHAT}_preferences", Context.MODE_PRIVATE)
@@ -114,11 +102,27 @@ object WeLauncher {
             phase("FeaturesLoader") { FeaturesLoader.loadFeatures() }
         }.onFailure { WeLogger.e(TAG, "failed to load hooks", it) }
 
-        // Hchat 脚本子系统（可插拔）：独立后台引导，失败不影响 WCX 既有功能。
-        // 移除本调用即完全下线脚本子系统。
-        runCatching {
-            com.Johnny.wcx.features.hchat.HchatBootstrap.install(context)
-        }.onFailure { WeLogger.e(TAG, "hchat bootstrap failed", it) }
+        // 适配监控与 Hchat 脚本子系统推迟到首帧后启动，避免在首屏关键路径上与
+        // FeaturesLoader 争抢类加载锁或提前映射 DexKit / base.apk。
+        FeaturesLoader.runAfterFirstFrame("后台子系统初始化") {
+            if (TargetProcesses.isInMain) {
+                val appContext = context.applicationContext ?: context
+                Thread({
+                    val bgStart = android.os.SystemClock.elapsedRealtime()
+                    runCatching { LocalAdaptationEngine.init(appContext) }
+                        .onFailure { WeLogger.w(TAG, "LocalAdaptationEngine init 失败: ${it.message}") }
+                    runCatching { SelfHealingMonitor.init() }
+                        .onFailure { WeLogger.w(TAG, "SelfHealingMonitor init 失败: ${it.message}") }
+                    WeLogger.d(
+                        TAG,
+                        "后台初始化完成（本地适配/自愈监控）: ${android.os.SystemClock.elapsedRealtime() - bgStart}ms",
+                    )
+                }, "WCX-BgInit").apply { isDaemon = true }.start()
+            }
+            runCatching {
+                com.Johnny.wcx.features.hchat.HchatBootstrap.install(context)
+            }.onFailure { WeLogger.e(TAG, "hchat bootstrap failed", it) }
+        }
 
         WeLogger.i(
             TAG,
