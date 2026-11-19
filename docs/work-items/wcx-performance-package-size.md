@@ -65,6 +65,19 @@ ssh debian13 'cd /root/wcx && python3 scripts/wcx_apk_report.py \
   --output /tmp/wcx-apk-report.json || test $? -eq 2'
 ```
 
+## Startup distribution collection
+
+Device timing collection is intentionally deferred until the installed stable APK passes the existing boot/direct health probe. If `startup_gate_not_triggered` recurs, perform only the previously approved narrowed retry and stop after a second failure; do not deploy the optimization APK in that state.
+
+After a healthy stable run, collect persisted WCX log windows and summarize each cohort without touching device state:
+
+```bash
+sh scripts/wcx-injection-probe.sh --summarize-startup baseline-startup.log
+sh scripts/wcx-injection-probe.sh --summarize-startup optimized-startup.log
+```
+
+Use separate boot and direct cohorts. The acceptance comparison is `optimized_p50 <= baseline_p50 * 0.75` and `optimized_p95 <= baseline_p95`.
+
 ## Phase ledger
 
 | Phase | Commit | APK bytes | DEX bytes | Native bytes | Verification |

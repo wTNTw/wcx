@@ -9,6 +9,33 @@
 # main process in the background, then LauncherUI is opened after injection had
 # a chance to initialize. PASS requires the first LauncherUI to pass through
 # ProxyInstrumentation, not merely that features eventually load.
+#
+# Host-side summary mode performs no adb/device operations:
+#   sh scripts/wcx-injection-probe.sh --summarize-startup captured.log
+if [ "${1:-}" = "--summarize-startup" ]; then
+  INPUT=${2:-}
+  [ -n "$INPUT" ] && [ -f "$INPUT" ] || {
+    echo "RESULT=HARNESS_ERROR startup_log_missing"
+    exit 2
+  }
+  VALUES=$(mktemp)
+  trap 'rm -f "$VALUES"' EXIT HUP INT TERM
+  sed -n 's/.*StartupPerf: startup .* total=\([0-9][0-9]*\)ms.*/\1/p' "$INPUT" \
+    | sort -n > "$VALUES"
+  COUNT=$(wc -l < "$VALUES" | tr -d ' ')
+  if [ "$COUNT" -eq 0 ]; then
+    echo "count=0 p50=NA p95=NA max=NA"
+    exit 1
+  fi
+  P50_INDEX=$(( (50 * COUNT + 99) / 100 ))
+  P95_INDEX=$(( (95 * COUNT + 99) / 100 ))
+  P50=$(sed -n "${P50_INDEX}p" "$VALUES")
+  P95=$(sed -n "${P95_INDEX}p" "$VALUES")
+  MAX=$(tail -1 "$VALUES")
+  echo "count=$COUNT p50=${P50}ms p95=${P95}ms max=${MAX}ms"
+  exit 0
+fi
+
 MODE=${1:-direct}
 WAIT=${2:-25}
 LOG=$(ls -t /sdcard/Android/data/com.tencent.mm/wcx/logs/wcx-*.log 2>/dev/null | head -1)
