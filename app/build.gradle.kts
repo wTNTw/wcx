@@ -331,11 +331,19 @@ val generateMethodHashes = tasks.register<GenerateMethodHashesTask>("generateMet
 // 注入模块条目（module.prop / customize.sh / uninstall.sh / META-INF 安装器）后重签。
 // 注入器本体作为 lib/arm64-v8a/libwcx_zygisk.so 随 APK 打包（由 cargo 构建后放进 jniLibs），
 // 安装时 customize.sh 把它搬到 /zygisk/arm64-v8a.so，并把整包复制成 module.apk。
+val requestedAbiProperty = providers.gradleProperty("wekit.abi")
+
 val packageZygiskApk = tasks.register<PackageZygiskApkTask>("packageZygiskApk") {
     description = "把 release APK 变成「可安装 APK + 可刷模块包」一体包 (arm64-v8a)"
     group = "wekit"
 
     dependsOn("assembleStandardRelease")
+    onlyIf("Zygisk injector packaging is arm64-only") {
+        !requestedAbiProperty.isPresent || requestedAbiProperty.get()
+            .split(',')
+            .map(String::trim)
+            .contains("arm64-v8a")
+    }
 
     apkDir.set(layout.buildDirectory.dir("outputs/apk/standard/release"))
     templateDir.set(rootProject.layout.projectDirectory.dir("wcx-zygisk"))
