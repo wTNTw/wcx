@@ -112,7 +112,7 @@ PROXY=$(grep -ac 'ProxyInstrumentation: callActivityOnCreate: com.tencent.mm.ui.
 ERRORS=$(grep -ac ' E/' "$OUT")
 ENABLED=$(grep -aE 'FeaturesLoader: 本批 [0-9]+ 个：已启用 [0-9]+ 个' "$OUT" | sed 's/.*已启用 //; s/ 个.*//' | sort -n | tail -1)
 [ -n "$ENABLED" ] || ENABLED=0
-FOCUSED=$(dumpsys activity activities 2>/dev/null | grep -cE 'topResumedActivity=.*com\.tencent\.mm/\.ui\.LauncherUI|mResumedActivity:.*com\.tencent\.mm/\.ui\.LauncherUI')
+FOCUSED=$(dumpsys activity activities 2>/dev/null | grep 'Hist  #0:' | head -1 | grep -c 'com\.tencent\.mm/\.ui\.LauncherUI')
 MAIN=$(pidof com.tencent.mm)
 PUSH=$(pidof com.tencent.mm:push)
 RECOVERY=$(pidof com.tencent.mm:recovery)
