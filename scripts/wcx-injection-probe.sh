@@ -40,9 +40,9 @@ fi
 
 MODE=${1:-direct}
 WAIT=${2:-25}
-LOG=$(ls -t /sdcard/Android/data/com.tencent.mm/wcx/logs/wcx-*.log 2>/dev/null | head -1)
-[ -n "$LOG" ] || { echo "RESULT=HARNESS_ERROR no_log"; exit 2; }
-BASE=$(wc -l < "$LOG")
+LOGDIR=/sdcard/Android/data/com.tencent.mm/wcx/logs
+FIRST_LOG=$(ls -t "$LOGDIR"/wcx-*.log 2>/dev/null | head -1)
+[ -n "$FIRST_LOG" ] || { echo "RESULT=HARNESS_ERROR no_log"; exit 2; }
 BASE4=$(dumpsys activity exit-info com.tencent.mm 2>/dev/null | grep -c 'reason=4 (APP CRASH(EXCEPTION))')
 BASE5=$(dumpsys activity exit-info com.tencent.mm 2>/dev/null | grep -c 'reason=5 (APP CRASH(NATIVE))')
 BASE6=$(dumpsys activity exit-info com.tencent.mm 2>/dev/null | grep -c 'status=6')
@@ -50,6 +50,7 @@ BASE11=$(dumpsys activity exit-info com.tencent.mm 2>/dev/null | grep -c 'status
 START=$(date '+%Y-%m-%d_%H-%M-%S')
 OUT=/data/local/tmp/wcx-injection-${START}-${MODE}.log
 PRE=/data/local/tmp/wcx-injection-${START}-${MODE}-preopen.log
+OFFSETS=/data/local/tmp/wcx-injection-${START}-${MODE}.offsets
 
 # Kill every WeChat process so surviving appbrand/push log lines cannot pollute
 # the per-run window. Do not force-stop the package: the boot receiver must stay callable.
@@ -57,6 +58,26 @@ ps -A -o PID,NAME 2>/dev/null \
   | awk '$2 == "com.tencent.mm" || index($2, "com.tencent.mm:") == 1 { print $1 }' \
   | while read -r pid; do kill -9 "$pid" 2>/dev/null; done
 sleep 3
+
+# Snapshot per-file byte sizes after killing processes; postAppSpecialize logs in UTC
+# before RuntimeInit sets local timezone, so 00:00-08:00 UTC+8 spans two daily files.
+: > "$OFFSETS"
+for f in $(ls -1tr "$LOGDIR"/wcx-*.log 2>/dev/null | tail -3); do
+  printf '%s\t%s\n' "$f" "$(wc -c < "$f" | tr -d ' ')" >> "$OFFSETS"
+done
+
+collect_window() {
+  DEST=$1
+  : > "$DEST"
+  for f in $(ls -1tr "$LOGDIR"/wcx-*.log 2>/dev/null | tail -3); do
+    OLD=$(awk -F '\t' -v target="$f" '$1 == target { print $2 }' "$OFFSETS")
+    [ -n "$OLD" ] || OLD=0
+    CUR=$(wc -c < "$f" | tr -d ' ')
+    if [ "$CUR" -gt "$OLD" ]; then
+      tail -c +$((OLD + 1)) "$f" >> "$DEST" 2>/dev/null
+    fi
+  done
+}
 
 PRE_MAIN=
 PRE_LSPLANT=0
@@ -80,7 +101,7 @@ case "$MODE" in
     am broadcast -n 'com.tencent.mm/.booter.MMReceivers$BootReceiver' \
       -a android.intent.action.BOOT_COMPLETED >/dev/null 2>&1
     sleep 8
-    tail -n +$((BASE + 1)) "$LOG" > "$PRE" 2>/dev/null
+    collect_window "$PRE"
     PRE_MAIN=$(pidof com.tencent.mm)
     PRE_LSPLANT=$(grep -ac 'deferred startup: LSPlant initialized' "$PRE")
     PRE_STARTED=$(grep -ac 'startup_gate_result=started' "$PRE")
@@ -90,13 +111,15 @@ case "$MODE" in
     am start -n com.tencent.mm/.ui.LauncherUI >/dev/null 2>&1
     ;;
   *)
+    rm -f "$OFFSETS"
     echo "RESULT=HARNESS_ERROR unknown_mode=$MODE"
     exit 2
     ;;
 esac
 
 sleep "$WAIT"
-tail -n +$((BASE + 1)) "$LOG" > "$OUT" 2>/dev/null
+collect_window "$OUT"
+rm -f "$OFFSETS"
 
 ENTRY=$(grep -ac 'ZygiskEntry.init: process=com.tencent.mm apk=' "$OUT")
 LIBAFF=$(grep -ac 'deferred startup: libaff_biz loaded' "$OUT")
