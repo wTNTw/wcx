@@ -39,6 +39,9 @@ class FirstActivityGateRaceContractTest(unittest.TestCase):
         self.assertIn("installInstrumentationFallback()", source)
         self.assertIn('getDeclaredMethod("getTransactionItems")', source)
         self.assertIn('transaction.toString().contains("LaunchActivityItem")', source)
+        self.assertIn("SPLASH_HACK_ACTIVITY", source)
+        self.assertIn("startup_gate_deferred_splash", source)
+        self.assertGreaterEqual(source.count("if (!routingInitialized) return null"), 2)
 
     def test_zygisk_arms_gate_before_waiting_for_libaff(self):
         source = (ZYGISK / "ZygiskEntry.kt").read_text(encoding="utf-8")
@@ -46,7 +49,8 @@ class FirstActivityGateRaceContractTest(unittest.TestCase):
         arm = prep.index("ActivityProxy.awaitStartupGate")
         libaff = prep.index("waitForLibaffBiz()")
         self.assertLess(arm, libaff)
-        self.assertIn("ACTIVITY_GATE_WAIT_MS = 5_000L", source)
+        self.assertIn("ACTIVITY_GATE_WAIT_MS = 8_000L", source)
+        self.assertIn("ActivityProxy.markStartupGateReady()", source)
 
     def test_gate_has_structured_outcomes_and_drops_late_readiness(self):
         source = (ZYGISK / "ZygiskEntry.kt").read_text(encoding="utf-8")
