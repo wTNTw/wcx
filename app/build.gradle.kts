@@ -402,7 +402,6 @@ dependencies {
     implementation("com.google.flatbuffers:flatbuffers-java:23.5.26")
     implementation("dev.rikka.ndk.thirdparty:cxx:1.2.0")
     implementation("com.google.guava:guava:33.5.0-android")
-    implementation("com.android.tools.smali:smali-baksmali:3.0.9")
     implementation("com.highcapable.kavaref:kavaref-core:1.1.0")
     implementation("com.jakewharton.android.repackaged:dalvik-dx:16.0.1")
     implementation("androidx.navigationevent:navigationevent:1.1.2")

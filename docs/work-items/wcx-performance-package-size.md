@@ -87,7 +87,8 @@ Use separate boot and direct cohorts. The acceptance comparison is `optimized_p5
 | Task 7: narrow Hchat/script keeps | `83a45e89` | 36,591,186 (-4,211,458) | 24,699,344 (-4,203,056) | 5,456,152 (0) | Release build passes; 56/56 ABI contracts pass; Hchat bytecode 3,661,091 bytes; APK is 591,186 bytes over final budget |
 | Task 8: remove broad kotlin-reflect keep | `6d2e5864` | 35,377,345 (-1,213,841) | 23,481,128 (-1,218,216) | 5,456,152 (0) | All package budgets pass; 56/56 ABI contracts pass; kotlin.reflect bytecode falls from 1,398,788 to 819,628 bytes |
 | Task 9a: remove ARSCLib runtime | `136961d8` | 31,164,575 (-4,212,770) | 21,662,032 (-1,819,096) | 5,456,152 (0) | Release and 56/56 contracts pass; `frameworks/android/android-*.apk` removed; three ARSC metadata assets remain and will be checked against JADX ownership next |
-| Task 9b: remove JADX dex-input runtime | pending | 30,406,882 (-757,693) | 21,659,988 (-2,044) | 5,456,152 (0) | Release and 56/56 contracts pass; `clst/core.jcst`, `android/res-map.txt` and `android/attrs.xml` removed |
+| Task 9b: remove JADX dex-input runtime | `9ab2f158` | 30,406,882 (-757,693) | 21,659,988 (-2,044) | 5,456,152 (0) | Release and 56/56 contracts pass; `clst/core.jcst`, `android/res-map.txt` and `android/attrs.xml` removed |
+| Task 9c: remove smali/baksmali runtime | pending | 30,406,729 (-153) | 21,657,588 (-2,400) | 5,456,152 (0) | Release and 56/56 contracts pass; dependency was effectively unreachable after R8 |
 
 Task 7 replaced the package-wide `h.Hchat.** { *; }` rule with exact BeanShell prelude, callback-input, public API and static-JNI contracts. The manual Hchat settings/BeanShell/snapshot/callback smoke checklist remains deferred to Task 16 because device deployment is blocked until the stable baseline health probe passes.
 
