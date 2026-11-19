@@ -97,7 +97,7 @@ Use separate boot and direct cohorts. The acceptance comparison is `optimized_p5
 | Task 13: split core/media Rust JNI | `5b462f1d` | 30,699,854 (+276,741) | 21,681,544 (0) | 5,732,472 (+276,320) | Native build and `wekite-art` tests pass; core falls from 3,216,800 to 380,504 bytes and media is 3,112,616 bytes; the temporary native overage is removed by Task 14 Silk consolidation |
 | Task 14: load native capabilities on demand | `94c00076` | 30,355,714 (-344,140) | 21,683,660 (+2,116) | 5,389,304 (-343,168) | Baseline and `--wekite-hook` arm64 releases pass all budgets; 71/71 ABI contracts and 29 Python tests pass; duplicate `libsilk_codec.so` removed |
 | Task 15: static and VM acceptance matrix | `a35515c1` | 30,355,714 (0) | 21,683,660 (0) | 5,389,304 (0) | 30 Python tests, `wekite-art`, 71/71 ABI contracts, baseline/WeKite arm64 and standard/legacy arm64/v7 builds pass |
-| Task 16: guarded device acceptance | **IN PROGRESS** | — | — | — | Stable first-Activity gate fix (`f56c5e4c...`) passed 18/18 strict device matrix (direct 10/10, screen-off 5/5, boot 3/3); optimization APK acceptance unblocked |
+| Task 16: guarded device acceptance | `886e5e21` | 30,372,098 (+16,384) | 21,691,908 (+8,248) | 5,389,304 (0) | 39/39 Python tests, 71/71 ABI contracts, 19/19 device matrix (`direct` 10/10, `boot` 6/6, `screenoff` 3/3), `WeLauncher` P50 1,138→512 ms (-55.0%), P95 1,173→540 ms (-54.0%), WCX `E=0`, `/proc/<pid>/maps` 0 exposed `.so` |
 
 Task 7 replaced the package-wide `h.Hchat.** { *; }` rule with exact BeanShell prelude, callback-input, public API and static-JNI contracts. The manual Hchat settings/BeanShell/snapshot/callback smoke checklist remains deferred to Task 16 because device deployment is blocked until the stable baseline health probe passes.
 
@@ -169,9 +169,60 @@ Final native section summary:
 
 Static gates at the final baseline artifact: 71/71 minified ABI contracts, 30/30 Python report/contract tests, and 1/1 `wekite-art` unit test pass. Startup distribution, process maps and functional first-use checks remain the guarded Task 16 device work.
 
-## Task 16 status: UNBLOCKED (stable baseline verified)
+## Task 16: Guarded device acceptance — COMPLETE
 
-- Stable first-Activity gate fix (`f56c5e4c8337c3b2a1c172d318e4f84fe284a987be85fe85e5a1cd63505df57e`, see `docs/work-items/wcx-first-activity-gate-race.md`) validated on the non-optimized baseline: direct 10/10, screen-off 5/5, background-to-foreground 3/3, with 0 Java/native crashes, 0 tombstones, and injector MD5 unchanged (`93dcbeea7a5ea0075c36c315696be62f`).
-- Stable direct 10-run startup baseline recorded: `WeLauncher` P50 = 1,138 ms / P95 = 1,173 ms; `activity_gate -> started` P50 = 1,316 ms / P95 = 1,346 ms.
-- The same first-Activity gate fix is ported into `perf/module-size-startup` and passed 38/38 Python contract tests.
-- Optimized device acceptance may now proceed while preserving the injector (`module.apk` replacement only).
+### 1. Stable baseline prerequisite
+
+- Stable first-Activity gate fix (`f56c5e4c8337c3b2a1c172d318e4f84fe284a987be85fe85e5a1cd63505df57e`, 44,309,977 bytes; see `docs/work-items/wcx-first-activity-gate-race.md`) passed the strict 18/18 matrix (`direct` 10/10, `screenoff` 5/5, `boot` 3/3) with 0 crashes, 0 tombstones, and injector MD5 `93dcbeea7a5ea0075c36c315696be62f`.
+
+### 2. Final optimized candidate
+
+- Source commit: `216422e3` (with probe log-window enhancement `886e5e21`)
+- Artifact: `app/build/outputs/zygisk/wcx-v347-arm64-v8a.apk`
+- SHA-256: `d4a7701e98a4d259abf8ef563a3bcdb3e5848b85ee2f044bbf74b599650606f4`
+- Package metrics:
+  - APK: **30,372,098 bytes** (-13,937,879 B / **-31.46%**, budget ≤ 36,000,000 B)
+  - DEX: **21,691,908 bytes** (-10,716,636 B / **-33.07%**, budget ≤ 25,500,000 B)
+  - Native: **5,389,304 bytes** (-66,848 B / **-1.23%**, budget ≤ 5,500,000 B)
+- Static gates: **39/39** Python contract/report tests and **71/71** minified ABI contracts (`missing=0`).
+- Additional startup optimizations verified on-device during Task 16:
+  - Removed eager `ALL_HOOK_ITEMS` evaluation from `LocalAdaptationEngine` and deferred `WCX-BgInit` + `HchatBootstrap` past first frame (`a33ebcf6`); guarded `FeatureSwitchSnapshot.save` with `TargetProcesses.isInMain` so child processes no longer overwrite main-process snapshot state; invoked `hideLoadedModuleLibraries()` after lazy capability loads.
+  - Added off-main-thread metadata/JSON prewarming (`FeaturesLoader.prewarmEarlyFeatures` + `DexCacheManager.prewarmCacheFiles`, `216422e3`) in the post-`libaff_biz` idle window without touching LSPlant, `NativeLoader`, `MMKV`, or hooks.
+
+### 3. Controlled device matrix (20/20 runs clean)
+
+| Scenario | Runs | Result | Key observations |
+| --- | ---: | --- | --- |
+| Pre-matrix smoke | 1/1 | PASS | `enabled_max=102`, `proxy=1`, `E=0`, `WeLauncher=493ms` |
+| Direct cold start (`direct`) | 10/10 | PASS | `enabled_max=102`, `proxy=1`, `focused=1`, `E=0`, `startup_gate_wait_ms=0` |
+| Background then foreground (`boot`) | 6/6 | PASS | `pre_lsplant=0`, `pre_started=0`, `same_main=1`, `enabled_max=102`, `proxy=1`, `E=0` |
+| Screen-off cold start (`screenoff`) | 3/3 | PASS | `enabled_max=102`, `proxy=1`, `focused=1`, `E=0` |
+
+### 4. Startup latency comparison (P50 / P95)
+
+| Cohort & Metric | Stable Baseline | Optimized Candidate | Delta | Acceptance Gate |
+| --- | ---: | ---: | ---: | --- |
+| `direct` (n=10) `WeLauncher` P50 | 1,138 ms | **512 ms** | **-626 ms (-55.0%)** | ≤ 853 ms (-25%) — **PASS** |
+| `direct` (n=10) `WeLauncher` P95 | 1,173 ms | **540 ms** | **-633 ms (-54.0%)** | ≤ 1,173 ms — **PASS** |
+| `direct` (n=10) `activity_gate → started` P50 | 1,316 ms | **604 ms** | **-712 ms (-54.1%)** | ≤ 987 ms (-25%) — **PASS** |
+| `direct` (n=10) `activity_gate → started` P95 | 1,346 ms | **637 ms** | **-709 ms (-52.7%)** | ≤ 1,346 ms — **PASS** |
+| `boot` (n=6 vs n=3) `WeLauncher` P50 | 1,554 ms | **572 ms** | **-982 ms (-63.2%)** | ≤ 1,165 ms (-25%) — **PASS** |
+| `boot` (n=6 vs n=3) `WeLauncher` P95 | 1,590 ms | **613 ms** | **-977 ms (-61.4%)** | ≤ 1,590 ms — **PASS** |
+| `screenoff` (n=3 vs n=5) `WeLauncher` P50 | 1,345 ms | **399 ms** | **-946 ms (-70.3%)** | ≤ 1,008 ms (-25%) — **PASS** |
+
+Raw `direct` 10-run cohorts:
+- Stable `WeLauncher`: `[1153, 1117, 1167, 1173, 1138, 1127, 1115, 1137, 1146, 1152]` ms
+- Optimized `WeLauncher`: `[502, 540, 531, 497, 518, 515, 520, 499, 512, 506]` ms
+- Optimized `StartupPerf (early_features_ready - activity_gate)`: `[589, 628, 614, 578, 598, 594, 608, 580, 594, 582]` ms (P50 = 594 ms, P95 = 628 ms)
+- `--summarize-startup` end-to-end process wall (`zygisk_entry → early_features_ready`): `direct` `count=10 p50=12520ms p95=12786ms max=12786ms`; `boot` `count=6 p50=23236ms p95=23431ms max=23431ms`.
+
+### 5. Lazy instantiation, native maps, memory & subsystem checks
+
+- **Feature instantiation**: `FeatureRegistry: descriptors=295 instantiated=102 early=102 deferred=0` at first screen (down from 295 eager singletons), and `instantiated=202 early=102 deferred=100` after deferred batch (93 disabled features never instantiated); active enabled counts remain identical (`102` early + `53` deferred = `155`).
+- **`/proc/<main_pid>/maps`**: `0` `.wcx-native`, `0` `libwekit_media.so`, `0` `libsilk_codec.so`, `0` unhidden module `.so` entries (`16` `/memfd:wk` segments vs `36` before media split/lazy loading).
+- **Memory (`dumpsys meminfo`)**: Java Heap `80,864 KB`, Native Heap `276,572 KB`, TOTAL PSS `1,166,685 KB`.
+- **Runtime subsystems**: `WeDatabaseApi` (`zp0.b0 -> ai5.d0`), `HchatBootstrap` (`wechat_api` + `script_plugin`, `dbOperational=true msgReady=true msgInstalled=true`), `QuickRead` (`com.tencent.mm.storage.m4` captured), `MonetEngine`, `:push`, and `:appbrand0`/`:appbrand1` all verified with **WCX `E=0`**, **0** Java/native crashes (`reason=4/5 = 0`, `status=6/11 = 0`), and **0** tombstones.
+
+### 6. Final device state
+
+- Restored `/data/adb/modules/zygisk-wcx/module.apk` to the verified fixed-stable baseline (`f56c5e4c8337c3b2a1c172d318e4f84fe284a987be85fe85e5a1cd63505df57e`), verified injector MD5 `93dcbeea7a5ea0075c36c315696be62f` and empty debug properties, and confirmed `RESULT=PASS` on a final direct health probe. The verified optimized APK remains staged at `/data/local/tmp/wcx-optimized.apk` (`d4a7701e98a4d259abf8ef563a3bcdb3e5848b85ee2f044bbf74b599650606f4`) for immediate activation when desired.
