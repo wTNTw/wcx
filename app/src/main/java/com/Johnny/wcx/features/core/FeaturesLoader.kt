@@ -13,6 +13,7 @@ import com.Johnny.wcx.utils.TargetProcesses
 import com.Johnny.wcx.utils.VersionCompat
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.android.showToast
+import com.Johnny.wcx.utils.perf.StartupPerformance
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.MainScope
@@ -21,7 +22,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.time.Duration.Companion.milliseconds
-import kotlin.time.measureTime
 
 object FeaturesLoader {
 
@@ -81,23 +81,29 @@ object FeaturesLoader {
             !deferByName && (categories.isEmpty() || categories.any { it in EARLY_CATEGORIES })
         }
 
-        val elapsed = measureTime {
-            startFeatureBatchWhenPrefsReady(earlyFeatures, allBrokenItems)
+        val earlyStartedAt = android.os.SystemClock.elapsedRealtime()
+        startFeatureBatchWhenPrefsReady(earlyFeatures, allBrokenItems) {
+            val elapsed = android.os.SystemClock.elapsedRealtime() - earlyStartedAt
+            WeLogger.i(TAG, "enabling all hook items took ${elapsed}ms（首屏必需 ${earlyFeatures.size} 个）")
+            StartupPerformance.mark("early_features_ready")
+            StartupPerformance.emitOnce(TargetProcesses.currentName)
         }
-        WeLogger.i(TAG, "enabling all hook items took $elapsed（首屏必需 ${earlyFeatures.size} 个）")
 
         if (deferredFeatures.isNotEmpty()) {
             runAfterFirstFrame("延后批次 ${deferredFeatures.size} 个") {
-                val deferredElapsed = measureTime {
-                    startFeatureBatchWhenPrefsReady(deferredFeatures, allBrokenItems)
+                val deferredStartedAt = android.os.SystemClock.elapsedRealtime()
+                startFeatureBatchWhenPrefsReady(deferredFeatures, allBrokenItems) {
+                    val elapsed = android.os.SystemClock.elapsedRealtime() - deferredStartedAt
+                    WeLogger.i(TAG, "首帧后延后批次完成: ${deferredFeatures.size} 个, 耗时 ${elapsed}ms")
+                    StartupPerformance.mark("deferred_features_ready")
                 }
-                WeLogger.i(TAG, "首帧后延后批次完成: ${deferredFeatures.size} 个, 耗时 ${deferredElapsed}ms")
             }
         }
 
         WeLogger.i(
             TAG,
-            "loadFeatures 耗时拆解: outdated=${t1 - t0}ms cache=${t2 - t1}ms startup=${elapsed}ms",
+            "loadFeatures 耗时拆解: outdated=${t1 - t0}ms cache=${t2 - t1}ms " +
+                "startupDispatch=${android.os.SystemClock.elapsedRealtime() - t2}ms",
         )
 
         // 功能全部加载完 → 30 秒后若进程仍存活就清零「连续启动失败」计数，
@@ -221,13 +227,21 @@ object FeaturesLoader {
         features: List<BaseFeature>,
         allBrokenItems: List<IResolveDex>,
         attempt: Int = 1,
+        onComplete: () -> Unit = {},
     ) {
-        if (features.isEmpty()) return
+        if (features.isEmpty()) {
+            onComplete()
+            return
+        }
         if (hostPrefsReady()) {
             if (attempt > 1) {
                 WeLogger.i(TAG, "开关配置已就绪（第 $attempt 次尝试），开始启动本批 ${features.size} 个")
             }
-            startFeatureBatch(features, allBrokenItems)
+            try {
+                startFeatureBatch(features, allBrokenItems)
+            } finally {
+                onComplete()
+            }
             return
         }
         if (attempt >= PREFS_READY_MAX_ATTEMPTS) {
@@ -236,7 +250,11 @@ object FeaturesLoader {
                 "开关配置 ${attempt - 1} 次重试仍不可读，按默认值启动本批 ${features.size} 个" +
                     "（其中被读成关闭的功能本次不会生效）",
             )
-            startFeatureBatch(features, allBrokenItems)
+            try {
+                startFeatureBatch(features, allBrokenItems)
+            } finally {
+                onComplete()
+            }
             return
         }
         WeLogger.i(
@@ -244,7 +262,7 @@ object FeaturesLoader {
             "开关配置尚未就绪（第 $attempt 次），${PREFS_READY_RETRY_DELAY_MS}ms 后重试本批 ${features.size} 个",
         )
         android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-            startFeatureBatchWhenPrefsReady(features, allBrokenItems, attempt + 1)
+            startFeatureBatchWhenPrefsReady(features, allBrokenItems, attempt + 1, onComplete)
         }, PREFS_READY_RETRY_DELAY_MS)
     }
 

@@ -24,6 +24,7 @@ import com.Johnny.wcx.utils.crash.JavaCrashHandler
 import com.Johnny.wcx.utils.crash.NativeCrashHandler
 import com.Johnny.wcx.utils.crash.ProcessTimeline
 import com.Johnny.wcx.utils.hookBeforeDirectly
+import com.Johnny.wcx.utils.perf.StartupPerformance
 import com.Johnny.wcx.utils.invokeOriginal
 import com.Johnny.wcx.utils.reflection.int
 
@@ -54,6 +55,7 @@ object WeLauncher {
         }
 
         phase("ParcelableFixer") { ParcelableFixer.init() }
+        StartupPerformance.mark("parcelable_ready")
 
         // 兜底：「资源表里有 ID、APK 里没有文件」的 res/raw/*.svg 会让微信自己 inflate 时闪退，
         // 这里只对该类资源做降级（其它资源零开销），详见 ResourceFallbackGuard 注释。
@@ -78,6 +80,7 @@ object WeLauncher {
             // ActivityProxy 必须在主线程：它要替换 Instrumentation。
             // 其余“看门狗/适配器”类初始化不需要主线程，统一丢到后台，给首帧让路。
             phase("ActivityProxy") { ActivityProxy.init(appContext) }
+            StartupPerformance.mark("activity_proxy_ready")
             Thread({
                 val bgStart = android.os.SystemClock.elapsedRealtime()
                 runCatching { LocalAdaptationEngine.init(appContext) }

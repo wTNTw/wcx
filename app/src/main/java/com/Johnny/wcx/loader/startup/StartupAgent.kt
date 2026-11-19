@@ -10,6 +10,7 @@ import com.Johnny.wcx.loader.utils.HybridClassLoader
 import com.Johnny.wcx.loader.utils.NativeLoader
 import com.Johnny.wcx.utils.HostInfo
 import com.Johnny.wcx.utils.WeLogger
+import com.Johnny.wcx.utils.perf.StartupPerformance
 import org.lsposed.hiddenapibypass.HiddenApiBypass
 import java.io.File
 import java.lang.reflect.Field
@@ -44,6 +45,7 @@ object StartupAgent {
 
         HostInfo.init(application)
         NativeLoader.init(application)
+        StartupPerformance.mark("native_ready")
 
         // 把模块加载过的原生库从 /proc/self/maps 里隐藏掉（memfd 重映射 + 路径隐藏）。
         // 移植上游 wekit-zygisk 时只搬了 native 侧的 so_hider，Java 侧的调用漏了，

@@ -22,6 +22,7 @@ import com.Johnny.wcx.loader.startup.UnifiedEntryPoint
 import com.Johnny.wcx.loader.utils.ActivityProxy
 import com.Johnny.wcx.loader.utils.NativeLoader
 import com.Johnny.wcx.utils.WeLogger
+import com.Johnny.wcx.utils.perf.StartupPerformance
 import java.io.FileDescriptor
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.CountDownLatch
@@ -81,6 +82,8 @@ object ZygiskEntry {
             WeLogger.w(TAG, "ignoring unsupported Zygisk target: $targetPackage")
             return
         }
+        StartupPerformance.begin()
+        StartupPerformance.mark("zygisk_entry")
         synchronized(entryLock) {
             if (hookBridge != null) return
 
@@ -200,6 +203,7 @@ object ZygiskEntry {
                 WeLogger.w(TAG, "debug.wcx.early_lsplant=1：跳过 libaff_biz 等待，按上游时序初始化 LSPlant")
             }
             val loaded = if (earlyLsplant) true else waitForLibaffBiz()
+            StartupPerformance.mark("libaff_ready")
             WeLogger.i(
                 TAG,
                 "deferred startup: libaff_biz ${if (loaded) "loaded" else "timeout"} after polling",
@@ -253,6 +257,7 @@ object ZygiskEntry {
         var success = false
         Handler(Looper.getMainLooper()).post {
             success = ActivityProxy.init(app, startupGate = startupGate@{
+                StartupPerformance.mark("activity_gate")
                 WeLogger.i(TAG, "deferred startup: 首个 Activity 即将创建，开始初始化 LSPlant")
                 if (!initializeLsPlantOffMainThread()) {
                     reportLsPlantFailure(libaffLoaded)
@@ -339,6 +344,7 @@ object ZygiskEntry {
     private fun initializeLsPlant(): Boolean {
         for (attempt in 1..LSPLANT_INIT_ATTEMPTS) {
             if (nativeDeferredInitialize()) {
+                StartupPerformance.mark("lsplant_ready")
                 WeLogger.i(TAG, "deferred startup: LSPlant initialized")
                 return true
             }
