@@ -18,7 +18,8 @@ abstract class SwitchFeature : BaseFeature() {
     }
 
     /** Default state when the user has never toggled this feature. */
-    protected open val defaultEnabled: Boolean = false
+    protected open val defaultEnabled: Boolean
+        get() = startupDefaultEnabled
 
     /** Whether this feature should load in the current process. Defaults to the main process only. */
     protected open val shouldLoadInCurrentProcess: Boolean

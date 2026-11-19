@@ -5,5 +5,6 @@ package com.Johnny.wcx.features.core
 annotation class Feature(
     val name: String,
     val categories: Array<String>,
-    val description: String = ""
+    val description: String = "",
+    val defaultEnabled: Boolean = false,
 )

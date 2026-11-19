@@ -84,6 +84,9 @@ abstract class BaseFeature {
     /** WeKit 兼容: 功能稳定标识 (FeaturesLoader 注入, 本模块保留以兼容连带代码)。 */
     var technicalId: String = ""
 
+    /** KSP 描述符提供的首次启动默认值，避免为读取默认值提前初始化 feature object。 */
+    internal var startupDefaultEnabled: Boolean = false
+
     open fun startup() {
         error("You shouldn't inherit BaseFeature")
     }

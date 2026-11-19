@@ -9,12 +9,15 @@ import com.Johnny.wcx.utils.android.showToast
 import com.Johnny.wcx.utils.crash.CrashLogsManager
 import com.Johnny.wcx.utils.crash.JavaCrashHandler
 
-@Feature(name = "崩溃拦截", categories = ["调试"], description = "拦截 Java 层崩溃并记录详细信息, 支持查看和导出日志")
+@Feature(
+    name = "崩溃拦截",
+    categories = ["调试"],
+    description = "拦截 Java 层崩溃并记录详细信息, 支持查看和导出日志",
+    defaultEnabled = true,
+)
 object CrashInterceptor : SwitchFeature() {
 
     private const val TAG = "CrashInterceptor"
-
-    override val defaultEnabled = true
 
     override fun onEnable() {
         JavaCrashHandler.install()

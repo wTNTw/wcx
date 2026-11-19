@@ -37,7 +37,8 @@ import com.Johnny.wcx.utils.invokeOriginal
 @Feature(
     name = "聊天直播浮窗崩溃防御",
     categories = ["聊天"],
-    description = "修复聊天页「附近直播」预览浮窗初始化时的微信自身 NPE 闪退（仅豁免该已知崩溃，其它异常照常上报）"
+    description = "修复聊天页「附近直播」预览浮窗初始化时的微信自身 NPE 闪退（仅豁免该已知崩溃，其它异常照常上报）",
+    defaultEnabled = true,
 )
 object ChatLivePreviewCrashGuard : SwitchFeature() {
 
@@ -58,8 +59,6 @@ object ChatLivePreviewCrashGuard : SwitchFeature() {
     /** 已知微信自身崩溃的特征（聊天页「附近直播」预览浮窗初始化 NPE）。 */
     private const val VICTIM_PACKAGE = "com.tencent.mm.plugin.finder"
     private const val VICTIM_HINT = "nearby"
-
-    override val defaultEnabled: Boolean = true
 
     override fun onEnable() {
         val taskClass = runCatching {

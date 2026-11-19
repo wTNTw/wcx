@@ -36,8 +36,6 @@ private const val TAG_ORIGINAL_STATUS_BAR_COLOR = 0x7F000003
 )
 object ImmersiveStatusBar : SwitchFeature() {
 
-    override val defaultEnabled: Boolean = false
-
     // 记录每个 Activity 修改前的原始值，用于 disable 时恢复
     private val trackedActivities = mutableSetOf<Activity>()
 
