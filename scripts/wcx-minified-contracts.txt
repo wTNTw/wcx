@@ -22,8 +22,27 @@ class|com.Johnny.wcx.activity.settings.SettingsActivity
 
 # BeanShell and the string-evaluated Hchat script ABI.
 class|bsh.Interpreter
+class|h.Hchat.ModuleEntry
 class|h.Hchat.hooks.items.script.ScriptPluginRuntime
+class|h.Hchat.hooks.items.script.ScriptPluginBridge
 class|h.Hchat.hooks.items.script.ScriptWaBridge
+class|h.Hchat.hooks.items.script.ScriptAudioBridge
+class|h.Hchat.hooks.items.script.ScriptDexKitBridge
+class|h.Hchat.hooks.items.script.ScriptMessageBean
+method|h.Hchat.hooks.items.script.ScriptWaBridge|sendText(java.lang.String,java.lang.String)
+method|h.Hchat.hooks.items.script.ScriptMessageBean|getTalker()
+class|h.Hchat.hooks.items.protobuf.ProtobufPacketRuntime$Packet
+method|h.Hchat.hooks.items.protobuf.ProtobufPacketRuntime$Packet|getUri()
+class|h.Hchat.dexkit.DexFinder
+class|h.Hchat.dexkit.DexBridgeHolder
+class|h.Hchat.utils.KavaReflector
+method|h.Hchat.utils.KavaReflector|loadClass(java.lang.String,java.lang.ClassLoader)
+class|h.Hchat.hooks.api.core.WeChatApis
+method|h.Hchat.hooks.api.core.WeChatApis|database()
+method|h.Hchat.hooks.api.core.WeChatApis|contacts()
+class|h.Hchat.hooks.api.model.ContactLabelBean
+class|h.Hchat.crash.NativeCrashBridge
+method|h.Hchat.crash.NativeCrashBridge|nativeInstall(java.lang.String)
 class|me.hd.wauxv.plugin.api.callback.PluginCallBack
 class|me.hd.wauxv.plugin.api.callback.PluginCallBack$HttpCallback
 method|me.hd.wauxv.plugin.api.callback.PluginCallBack$HttpCallback|onSuccess(int,java.lang.String)

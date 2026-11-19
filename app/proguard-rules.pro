@@ -106,7 +106,7 @@
 -dontwarn org.jf.dexlib2.**
 -dontwarn dev.rikka.ndk.thirdparty.**
 -keep class com.highcapable.kavaref.** { *; }
--keep class h.Hchat.** { *; }
+# h.Hchat 不再整包 keep：常规类走可达性分析，脚本按名解析的 ABI 面在下方逐项固定。
 
 -dontwarn com.termux.**
 -keep class com.termux.** { *; }
@@ -124,8 +124,33 @@
 # 脚本 API 前置代码（ScriptPluginRuntime 内以字符串 eval）按名导入的类
 -keep class org.luckypray.dexkit.DexKitBridge { *; }
 -keep class me.hd.wauxv.** { *; }
-# 脚本 ABI 强引用锚点：以真实类型引用这些只被脚本按类名引用的类，避免 R8 裁剪/改名
--keep class h.Hchat.hooks.items.script.ScriptPluginAbi { *; }
+# Hchat 脚本 ABI：prelude 按原始类名 import、BeanShell 按名反射调用 public 方法。
+# 这些类都从编译代码可达，-keep 只固定名字与 public 成员，不额外扩大保留图。
+-keep class h.Hchat.ModuleEntry { public *; }
+-keep class h.Hchat.hooks.items.script.ScriptPluginBridge { public *; }
+-keep class h.Hchat.hooks.items.script.ScriptWaBridge { public *; }
+-keep class h.Hchat.hooks.items.script.ScriptAudioBridge { public *; }
+-keep class h.Hchat.hooks.items.script.ScriptDexKitBridge { public *; }
+-keep class h.Hchat.hooks.items.script.ScriptPluginRuntime { public *; }
+-keep class h.Hchat.dexkit.DexFinder { public *; }
+-keep class h.Hchat.dexkit.DexBridgeHolder { public *; }
+-keep class h.Hchat.utils.KavaReflector { public *; }
+-keep class h.Hchat.hooks.api.core.WeChatApis { public *; }
+-keep class h.Hchat.hooks.api.model.ContactLabelBean { public *; }
+# libhchat_crash.so 按静态 JNI 符号 Java_h_Hchat_crash_NativeCrashBridge_nativeInstall 绑定
+-keep class h.Hchat.crash.NativeCrashBridge {
+    private static native boolean nativeInstall(java.lang.String);
+}
+# 脚本回调入参对象：getter 由脚本按名调用
+-keepnames class h.Hchat.hooks.items.script.**
+-keepclassmembers class h.Hchat.hooks.items.script.** { public *; }
+-keep class h.Hchat.hooks.items.protobuf.ProtobufPacketRuntime$Packet { public *; }
+# Hchat 公共 API 与模型 bean：脚本经 apis/wa 等桥接拿到实例后按名调 public 方法；
+# 不强制保留（未被编译代码引用的可剔除），存活者保持原名与 public 成员。
+-keepnames class h.Hchat.hooks.api.**
+-keepclassmembers class h.Hchat.hooks.api.** { public *; }
+-keepnames class h.Hchat.dexkit.**
+-keepclassmembers class h.Hchat.dexkit.** { public *; }
 -keep class me.hd.wauxv.plugin.api.callback.** { *; }
 -keep class me.hd.wauxv.data.bean.** { *; }
 -keep class me.hd.wauxv.data.bean.info.** { *; }
