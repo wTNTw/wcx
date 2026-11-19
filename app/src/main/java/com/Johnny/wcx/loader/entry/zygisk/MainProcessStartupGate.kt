@@ -1,5 +1,6 @@
 package com.Johnny.wcx.loader.entry.zygisk
 
+import android.os.SystemClock
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
@@ -21,11 +22,7 @@ internal class MainProcessStartupGate<T> {
     }
 
     fun awaitAndConsume(timeoutMs: Long): T? {
-        if (!completion.await(timeoutMs, TimeUnit.MILLISECONDS) &&
-            state.compareAndSet(State.Pending, State.Consumed)
-        ) {
-            return null
-        }
+        awaitBounded(timeoutMs)
         while (true) {
             when (val current = state.get()) {
                 is State.Published -> {
@@ -36,6 +33,21 @@ internal class MainProcessStartupGate<T> {
                 }
                 State.Consumed -> return null
             }
+        }
+    }
+
+    private fun awaitBounded(timeoutMs: Long) {
+        val sliceMs = 100L
+        var activeWaitedMs = 0L
+        while (activeWaitedMs < timeoutMs) {
+            val remainingMs = timeoutMs - activeWaitedMs
+            val waitSliceMs = minOf(sliceMs, remainingMs)
+            val sliceStart = SystemClock.elapsedRealtime()
+            if (completion.await(waitSliceMs, TimeUnit.MILLISECONDS)) return
+            val elapsed = (SystemClock.elapsedRealtime() - sliceStart).coerceAtLeast(1L)
+            // Cap each slice so cgroup freezer time during screen-off does not
+            // falsely exhaust the active wait budget while threads were unscheduled.
+            activeWaitedMs += elapsed.coerceAtMost(waitSliceMs * 2)
         }
     }
 }

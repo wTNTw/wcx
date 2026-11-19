@@ -18,6 +18,7 @@ import android.os.IBinder
 import android.os.Looper
 import android.os.Message
 import android.os.PersistableBundle
+import android.os.SystemClock
 import android.os.TestLooperManager
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -46,7 +47,32 @@ object ActivityProxy {
 
     fun installStartupGate(startupGate: () -> Unit): Boolean {
         beforeFirstActivity.compareAndSet(null, startupGate)
-        if (ensureHandlerInterceptor()) return true
+        if (ensureHandlerInterceptor()) {
+            scheduleInstrumentationFallbackAtFront()
+            return true
+        }
+        beforeFirstActivity.compareAndSet(startupGate, null)
+        return false
+    }
+
+    fun awaitStartupGate(
+        startupGate: () -> Unit,
+        timeoutMs: Long,
+        pollMs: Long = 5L,
+    ): Boolean {
+        beforeFirstActivity.compareAndSet(null, startupGate)
+        val deadline = SystemClock.elapsedRealtime() + timeoutMs
+        while (SystemClock.elapsedRealtime() < deadline) {
+            if (ensureHandlerInterceptor()) {
+                scheduleInstrumentationFallbackAtFront()
+                return true
+            }
+            Thread.sleep(pollMs)
+        }
+        if (ensureHandlerInterceptor()) {
+            scheduleInstrumentationFallbackAtFront()
+            return true
+        }
         beforeFirstActivity.compareAndSet(startupGate, null)
         return false
     }
@@ -54,9 +80,9 @@ object ActivityProxy {
     @SuppressLint("PrivateApi", "DiscouragedPrivateApi")
     fun installInstrumentationFallback(): Boolean = synchronized(initLock) {
         if (instrumentationInterceptorInstalled) return true
+        val activityThread = ActivityThread.currentActivityThread() ?: return false
         runCatching {
             val activityThreadClass = Class.forName("android.app.ActivityThread")
-            val activityThread = ActivityThread.currentActivityThread()
             val field = activityThreadClass.getDeclaredField("mInstrumentation")
                 .makeAccessible()
             val instrumentation = field.get(activityThread) as? Instrumentation
@@ -74,23 +100,40 @@ object ActivityProxy {
     @SuppressLint("PrivateApi", "DiscouragedPrivateApi")
     private fun ensureHandlerInterceptor(): Boolean = synchronized(initLock) {
         if (handlerInterceptorInstalled) return true
+        val activityThread = ActivityThread.currentActivityThread() ?: return false
         runCatching {
             val activityThreadClass = Class.forName("android.app.ActivityThread")
-            val activityThread = ActivityThread.currentActivityThread()
             val handler = activityThreadClass.getDeclaredField("mH")
                 .makeAccessible()
-                .get(activityThread) as Handler
+                .get(activityThread) as? Handler
+                ?: return@synchronized false
             val callbackField = Handler::class.java.getDeclaredField("mCallback")
                 .makeAccessible()
             val current = callbackField.get(handler) as? Handler.Callback
             if (current == null || current.javaClass.name != ProxyHandlerCallback::class.java.name) {
-                callbackField.set(handler, ProxyHandlerCallback(current))
+                callbackField.set(handler, ProxyHandlerCallback(handler, current))
             }
             handlerInterceptorInstalled = true
             true
         }.onFailure {
             WeLogger.e(TAG, "failed to install ActivityThread handler interceptor", it)
         }.getOrDefault(false)
+    }
+
+    @SuppressLint("PrivateApi", "DiscouragedPrivateApi")
+    private fun scheduleInstrumentationFallbackAtFront() {
+        val activityThread = ActivityThread.currentActivityThread() ?: return
+        runCatching {
+            val activityThreadClass = Class.forName("android.app.ActivityThread")
+            val handler = activityThreadClass.getDeclaredField("mH")
+                .makeAccessible()
+                .get(activityThread) as? Handler
+                ?: return
+            handler.postAtFrontOfQueue {
+                ensureHandlerInterceptor()
+                installInstrumentationFallback()
+            }
+        }
     }
 
     @SuppressLint("PrivateApi", "DiscouragedPrivateApi")
@@ -251,14 +294,28 @@ object ActivityProxy {
         }
     }
 
-    private class ProxyHandlerCallback(private val next: Handler.Callback?) : Handler.Callback {
+    private class ProxyHandlerCallback(
+        private val hostHandler: Handler,
+        private val next: Handler.Callback?,
+    ) : Handler.Callback {
         override fun handleMessage(msg: Message): Boolean {
             when (msg.what) {
                 100 -> {
+                    installInstrumentationFallback()
                     runBeforeFirstActivity()
                     handleLaunchActivity(msg)     // LAUNCH_ACTIVITY (< Android 9)
                 }
-                159 -> handleExecuteTransaction(msg) // EXECUTE_TRANSACTION (>= Android 9)
+                110 -> {
+                    // BIND_APPLICATION creates mInstrumentation; wrap it at the front of mH
+                    // before any queued EXECUTE_TRANSACTION (159) can run.
+                    hostHandler.postAtFrontOfQueue {
+                        installInstrumentationFallback()
+                    }
+                }
+                159 -> {
+                    installInstrumentationFallback()
+                    handleExecuteTransaction(msg) // EXECUTE_TRANSACTION (>= Android 9)
+                }
             }
             return runCatching { next?.handleMessage(msg) == true }
                 .onFailure { WeLogger.e(TAG, "Next callback failed", it) }
@@ -291,14 +348,35 @@ object ActivityProxy {
             }.onFailure { WeLogger.e(TAG, "handleLaunchActivity error", it) }
         }
 
+        private fun extractTransactionItems(transaction: Any): List<*>? {
+            runCatching {
+                val items = transaction.javaClass.getDeclaredMethod("getTransactionItems")
+                    .makeAccessible()
+                    .invoke(transaction) as? List<*>
+                if (items != null) return items
+            }
+            return runCatching {
+                transaction.javaClass.getDeclaredMethod("getCallbacks")
+                    .makeAccessible()
+                    .invoke(transaction) as? List<*>
+            }.getOrNull()
+        }
+
         private fun handleExecuteTransaction(msg: Message) {
             runCatching {
-                val transaction = msg.obj
-                val callbacks = transaction.javaClass.getDeclaredMethod("getCallbacks")
-                    .makeAccessible()
-                    .invoke(transaction) as? List<*> ?: return
-
-                callbacks.forEach { item ->
+                val transaction = msg.obj ?: return
+                var items = extractTransactionItems(transaction)
+                if (items == null &&
+                    beforeFirstActivity.get() != null &&
+                    transaction.toString().contains("LaunchActivityItem")
+                ) {
+                    // Android 15+ stores items in blocked mTransactionItems while getCallbacks()
+                    // returns null; detect the first LaunchActivityItem via public toString(),
+                    // then re-query after startup unlocks hidden APIs.
+                    runBeforeFirstActivity()
+                    items = extractTransactionItems(transaction)
+                }
+                items?.forEach { item ->
                     if (item != null && item.javaClass.name.contains("LaunchActivityItem")) {
                         runBeforeFirstActivity()
                         val intentField = item.javaClass.getDeclaredField("mIntent")

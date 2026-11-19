@@ -56,9 +56,28 @@ object ZygiskEntry {
     /** libaff_biz 超时（兑底路径）时，等 Application 的上限；池进程/被冻结时会一直等到这里。 */
     private const val FALLBACK_APP_WAIT_MS = 60_000L
 
+    /** postAppSpecialize 返回后等 ActivityThread.main() 创建 mH 的上限与轮询间隔。 */
+    private const val ACTIVITY_THREAD_WAIT_MS = 5_000L
+    private const val ACTIVITY_THREAD_POLL_MS = 5L
+
+    /** 首 Activity 到达早于 libaff_biz 稳定时，ActivityThread 同步等待准备结果的上限。 */
+    private const val ACTIVITY_GATE_WAIT_MS = 5_000L
+
     /** art::init（LSPlant）失败时的重试次数与退避。 */
     private const val LSPLANT_INIT_ATTEMPTS = 3
     private const val LSPLANT_RETRY_DELAY_MS = 3_000L
+
+    private sealed interface DeferredStartupPreparation {
+        data class Ready(
+            val application: Application,
+            val libaffLoaded: Boolean,
+        ) : DeferredStartupPreparation
+
+        data class Failed(
+            val reason: String,
+            val warnOnly: Boolean = false,
+        ) : DeferredStartupPreparation
+    }
 
     private val LIBAFF_BIZ_NEEDLE = "libaff_biz.so".toByteArray(StandardCharsets.US_ASCII)
     private val entryLock = Any()
@@ -167,17 +186,25 @@ object ZygiskEntry {
     }
 
     /**
-     * 主进程延迟启动：等微信把 libaff_biz.so 加载完（它与 LSPlant/Dobby 的 ART hook
-     * 冲突，见 docs/work-items/wechat-8.0.80-startup-abort.md），再初始化 LSPlant 并启动
-     * 模块。失败只打日志，不影响微信。
+     * 主进程延迟启动：先把首 Activity 启动门挂到 ActivityThread.mH 上，再在后台等待
+     * libaff_biz.so 稳定（避开 libowl 与 LSPlant 的冲突），从而消除“LauncherUI 在
+     * libaff_biz 宽限窗口内抢先创建导致启动门漏触发”的竞态。失败只打日志，不影响微信。
      */
     private fun startDeferredStartup(
         service: ZygiskLoaderService,
         bridge: ArtHookBridge,
         apkPath: String,
     ) {
+        if (isEarlyLsplantEnabled()) {
+            Thread({
+                runEarlyDeferredStartup(service, bridge, apkPath)
+            }, "WCX-Defer-${android.os.Process.myPid()}").apply { isDaemon = true }.start()
+            return
+        }
+
+        val gate = MainProcessStartupGate<DeferredStartupPreparation>()
         Thread({
-            runDeferredStartup(service, bridge, apkPath)
+            prepareDeferredStartup(service, bridge, apkPath, gate)
         }, "WCX-Defer-${android.os.Process.myPid()}").apply { isDaemon = true }.start()
     }
 
@@ -189,20 +216,58 @@ object ZygiskEntry {
         value != null && value.isNotBlank() && value != "0"
     }.getOrDefault(false)
 
-    /** 主进程的延迟启动：等 libaff_biz → 安装首 Activity 门 → 按需初始化 LSPlant/模块。 */
-    private fun runDeferredStartup(
+    /** A/B 开关显式开启时保留原早初始化路径，不经过首 Activity 门。 */
+    private fun runEarlyDeferredStartup(
         service: ZygiskLoaderService,
         bridge: ArtHookBridge,
         apkPath: String,
     ) {
         try {
-            // A/B 开关：debug.wcx.early_lsplant=1 时按上游 WeKit 的时序「立即」初始化 LSPlant
-            // （不等 libaff_biz/libowl），用来复核「早期初始化必崩」是否只对本构建成立。
-            val earlyLsplant = isEarlyLsplantEnabled()
-            if (earlyLsplant) {
-                WeLogger.w(TAG, "debug.wcx.early_lsplant=1：跳过 libaff_biz 等待，按上游时序初始化 LSPlant")
+            WeLogger.w(TAG, "debug.wcx.early_lsplant=1：跳过 libaff_biz 等待，按上游时序初始化 LSPlant")
+            StartupPerformance.mark("libaff_ready")
+            WeLogger.i(TAG, "deferred startup: libaff_biz loaded after polling")
+            val app = acquireApplication(APP_WAIT_MS)
+            if (app == null) {
+                WeLogger.e(TAG, "deferred startup: could not acquire Application; module not started")
+                return
             }
-            val loaded = if (earlyLsplant) true else waitForLibaffBiz()
+            if (initializeLsPlant()) {
+                postMainStartup(service, bridge, apkPath, app)
+            } else {
+                reportLsPlantFailure(libaffLoaded = true)
+            }
+        } catch (t: Throwable) {
+            WeLogger.e(TAG, "deferred startup failed", t)
+        }
+    }
+
+    /**
+     * 主进程默认后台准备：在 ActivityThread 创建后立即挂上首 Activity 门（远早于
+     * handleBindApplication 结束和首个 LaunchActivityItem 分发），再等待 libaff_biz
+     * 稳定与 Application 就绪并向启动门发布结果。本方法严禁依赖主线程任务完成。
+     */
+    private fun prepareDeferredStartup(
+        service: ZygiskLoaderService,
+        bridge: ArtHookBridge,
+        apkPath: String,
+        gate: MainProcessStartupGate<DeferredStartupPreparation>,
+    ) {
+        val result = try {
+            val armed = ActivityProxy.awaitStartupGate(
+                startupGate = { runMainStartupGate(service, bridge, apkPath, gate) },
+                timeoutMs = ACTIVITY_THREAD_WAIT_MS,
+                pollMs = ACTIVITY_THREAD_POLL_MS,
+            )
+            if (!armed) {
+                publishPreparation(
+                    gate,
+                    DeferredStartupPreparation.Failed("install_failed"),
+                )
+                return
+            }
+            WeLogger.i(TAG, "startup_gate_installed")
+
+            val loaded = waitForLibaffBiz()
             StartupPerformance.mark("libaff_ready")
             WeLogger.i(
                 TAG,
@@ -220,60 +285,83 @@ object ZygiskEntry {
                         "deferred startup: 宿主 Application 未就绪（疑似池进程或被冻结），本进程不启动模块",
                     )
                 }
-                return
+                DeferredStartupPreparation.Failed(
+                    reason = "application_unavailable",
+                    warnOnly = !loaded,
+                )
+            } else if (!ActivityProxy.installInstrumentationFallback()) {
+                DeferredStartupPreparation.Failed("instrumentation_unavailable")
+            } else {
+                DeferredStartupPreparation.Ready(app, loaded)
             }
-            if (earlyLsplant) {
-                // 保留 A/B 开关的原语义：显式开启时立即初始化，不经过首 Activity 门。
-                if (initializeLsPlant()) {
-                    postMainStartup(service, bridge, apkPath, app)
-                } else {
-                    reportLsPlantFailure(loaded)
-                }
-                return
-            }
-
-            // 背景 BootReceiver 可以先拉起主进程。此时直接装全部 hook 会触发微信 SIGABRT；
-            // 等 importance 进入前台又会晚于 LauncherUI 的首个 onCreate。先只替换
-            // Instrumentation/mH，在 ActivityThread 真正处理首个 Activity transaction 前，
-            // 同步完成 LSPlant + 模块启动，既不碰纯后台启动窗口，也不漏首屏 hook。
-            if (!installMainStartupGate(service, bridge, apkPath, app, loaded)) {
-                WeLogger.e(TAG, "deferred startup: failed to install first-Activity startup gate")
-                return
-            }
-            WeLogger.i(TAG, "deferred startup: 首个 Activity 启动门已安装")
         } catch (t: Throwable) {
-            WeLogger.e(TAG, "deferred startup failed", t)
+            WeLogger.e(TAG, "deferred startup preparation failed", t)
+            DeferredStartupPreparation.Failed("exception:${t.javaClass.simpleName}")
+        }
+        publishPreparation(gate, result)
+    }
+
+    private fun publishPreparation(
+        gate: MainProcessStartupGate<DeferredStartupPreparation>,
+        result: DeferredStartupPreparation,
+    ) {
+        if (gate.publish(result)) {
+            when (result) {
+                is DeferredStartupPreparation.Ready -> WeLogger.i(TAG, "startup_gate_ready")
+                is DeferredStartupPreparation.Failed -> {
+                    val message = "startup_gate_result=prepare_failed reason=${result.reason}"
+                    if (result.warnOnly) {
+                        WeLogger.w(TAG, message)
+                    } else {
+                        WeLogger.e(TAG, message)
+                    }
+                }
+            }
+        } else {
+            WeLogger.w(TAG, "startup_gate_late_result_dropped")
         }
     }
 
-    private fun installMainStartupGate(
+    private fun runMainStartupGate(
         service: ZygiskLoaderService,
         bridge: ArtHookBridge,
         apkPath: String,
-        app: Application,
-        libaffLoaded: Boolean,
-    ): Boolean {
-        val installed = CountDownLatch(1)
-        var success = false
-        Handler(Looper.getMainLooper()).post {
-            success = ActivityProxy.init(app, startupGate = startupGate@{
-                StartupPerformance.mark("activity_gate")
+        gate: MainProcessStartupGate<DeferredStartupPreparation>,
+    ) {
+        StartupPerformance.mark("activity_gate")
+        WeLogger.i(TAG, "startup_gate_activity_arrived")
+        val waitStarted = SystemClock.elapsedRealtime()
+        val preparation = gate.awaitAndConsume(ACTIVITY_GATE_WAIT_MS)
+        val waited = SystemClock.elapsedRealtime() - waitStarted
+        WeLogger.i(TAG, "startup_gate_wait_ms=$waited")
+
+        when (preparation) {
+            null -> WeLogger.e(TAG, "startup_gate_result=prepare_failed reason=timeout")
+            is DeferredStartupPreparation.Failed -> WeLogger.e(
+                TAG,
+                "startup_gate_aborted reason=${preparation.reason}",
+            )
+            is DeferredStartupPreparation.Ready -> {
                 WeLogger.i(TAG, "deferred startup: 首个 Activity 即将创建，开始初始化 LSPlant")
                 if (!initializeLsPlantOffMainThread()) {
-                    reportLsPlantFailure(libaffLoaded)
-                    return@startupGate
+                    reportLsPlantFailure(preparation.libaffLoaded)
+                    WeLogger.e(TAG, "startup_gate_result=lsplant_failed")
+                    return
                 }
                 try {
                     UnifiedEntryPoint.prepareClassLoaderBridge()
-                    StartupAgent.startup(service, bridge, apkPath, app)
+                    StartupAgent.startup(
+                        service,
+                        bridge,
+                        apkPath,
+                        preparation.application,
+                    )
+                    WeLogger.i(TAG, "startup_gate_result=started")
                 } catch (t: Throwable) {
-                    WeLogger.e(TAG, "deferred startup: module start before first Activity failed", t)
+                    WeLogger.e(TAG, "startup_gate_result=startup_failed", t)
                 }
-            })
-            installed.countDown()
+            }
         }
-        awaitUninterruptibly(installed)
-        return success
     }
 
     /** LSPlant may suspend ART; keep that work off ActivityThread while its transaction waits. */
