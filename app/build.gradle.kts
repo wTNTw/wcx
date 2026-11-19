@@ -411,7 +411,6 @@ dependencies {
     implementation("com.android.tools.smali:smali-baksmali:3.0.9")
     implementation("com.highcapable.kavaref:kavaref-core:1.1.0")
     implementation("com.jakewharton.android.repackaged:dalvik-dx:16.0.1")
-    implementation("com.alibaba.fastjson2:fastjson2:2.0.61.android8")
     implementation("androidx.navigationevent:navigationevent:1.1.2")
     implementation("androidx.navigationevent:navigationevent-compose:1.1.2")
     implementation("org.jetbrains.kotlinx:kotlinx-collections-immutable:0.5.1")
