@@ -97,7 +97,7 @@ Use separate boot and direct cohorts. The acceptance comparison is `optimized_p5
 | Task 13: split core/media Rust JNI | `5b462f1d` | 30,699,854 (+276,741) | 21,681,544 (0) | 5,732,472 (+276,320) | Native build and `wekite-art` tests pass; core falls from 3,216,800 to 380,504 bytes and media is 3,112,616 bytes; the temporary native overage is removed by Task 14 Silk consolidation |
 | Task 14: load native capabilities on demand | `94c00076` | 30,355,714 (-344,140) | 21,683,660 (+2,116) | 5,389,304 (-343,168) | Baseline and `--wekite-hook` arm64 releases pass all budgets; 71/71 ABI contracts and 29 Python tests pass; duplicate `libsilk_codec.so` removed |
 | Task 15: static and VM acceptance matrix | `a35515c1` | 30,355,714 (0) | 21,683,660 (0) | 5,389,304 (0) | 30 Python tests, `wekite-art`, 71/71 ABI contracts, baseline/WeKite arm64 and standard/legacy arm64/v7 builds pass |
-| Task 16: guarded device acceptance | **BLOCKED** | — | — | — | Stable APK health baseline has not recovered after the previously allowed narrowed retry; optimization APK deployment is prohibited |
+| Task 16: guarded device acceptance | **IN PROGRESS** | — | — | — | Stable first-Activity gate fix (`f56c5e4c...`) passed 18/18 strict device matrix (direct 10/10, screen-off 5/5, boot 3/3); optimization APK acceptance unblocked |
 
 Task 7 replaced the package-wide `h.Hchat.** { *; }` rule with exact BeanShell prelude, callback-input, public API and static-JNI contracts. The manual Hchat settings/BeanShell/snapshot/callback smoke checklist remains deferred to Task 16 because device deployment is blocked until the stable baseline health probe passes.
 
@@ -169,17 +169,9 @@ Final native section summary:
 
 Static gates at the final baseline artifact: 71/71 minified ABI contracts, 30/30 Python report/contract tests, and 1/1 `wekite-art` unit test pass. Startup distribution, process maps and functional first-use checks remain the guarded Task 16 device work.
 
-## Task 16 status: BLOCKED
+## Task 16 status: UNBLOCKED (stable baseline verified)
 
-Task 16 is blocked because the installed stable APK did not re-establish the required startup health baseline. The previously approved narrowed retry has already been consumed; no additional retry, optimization APK deployment, injector replacement, framework restart, zygote restart or device reboot is permitted under the current evidence.
-
-Task 16 unlocks only when all of the following are true:
-
-1. The known stable module APK is installed and its identity/hash is recorded before testing.
-2. The injector MD5 is still `93dcbeea7a5ea0075c36c315696be62f`, unless a separate injector change is explicitly approved and documented.
-3. `debug.wcx.wekite_m2b` and `debug.wcx.wekite_selftest` are absent.
-4. A fresh stable-APK boot/direct health probe succeeds without `startup_gate_not_triggered`, unexpected WCX errors, new Java/native crashes, `reason=5`, or `status=6/11` recovery evidence.
-5. A usable stable startup timing cohort exists for the later P50/P95 comparison.
-6. The test procedure still requires replacing only `/data/adb/modules/zygisk-wcx/module.apk`; no injector or framework changes are needed.
-
-If any condition fails, Task 16 remains blocked and the optimized APK must not be deployed. Once all conditions pass, resume from Task 16 Step 3, preserve the injector, run the controlled boot/direct and feature matrix, compare P50/P95, and restore the stable APK unless the user explicitly approves keeping the optimized build.
+- Stable first-Activity gate fix (`f56c5e4c8337c3b2a1c172d318e4f84fe284a987be85fe85e5a1cd63505df57e`, see `docs/work-items/wcx-first-activity-gate-race.md`) validated on the non-optimized baseline: direct 10/10, screen-off 5/5, background-to-foreground 3/3, with 0 Java/native crashes, 0 tombstones, and injector MD5 unchanged (`93dcbeea7a5ea0075c36c315696be62f`).
+- Stable direct 10-run startup baseline recorded: `WeLauncher` P50 = 1,138 ms / P95 = 1,173 ms; `activity_gate -> started` P50 = 1,316 ms / P95 = 1,346 ms.
+- The same first-Activity gate fix is ported into `perf/module-size-startup` and passed 38/38 Python contract tests.
+- Optimized device acceptance may now proceed while preserving the injector (`module.apk` replacement only).
