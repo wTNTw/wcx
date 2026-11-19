@@ -199,6 +199,7 @@ object ActivityProxy {
             intent.component?.let { ActProxyMgr.isModuleProxyActivity(it.className) } == true
 
         private fun createTokenWrapper(raw: Intent): Intent {
+            ParcelableFixer.ensureIntentHooksInstalled()
             val token = IntentTokenCache.put(Intent(raw))
             val className = raw.component!!.className
             val proxyClass = if (className.contains("SettingsActivity")) ActProxyMgr.SETTINGS_PROXY else ActProxyMgr.TRANSPARENT_PROXY
@@ -325,6 +326,7 @@ object ActivityProxy {
             // also fixes compatibility with FunBox Zygisk
             // I haven't the foggiest idea of why upstream chose to use try-catch for this
             if (ActProxyMgr.isModuleProxyActivity(resolvedClass)) {
+                ParcelableFixer.ensureIntentHooksInstalled()
                 return ClassLoaders.MODULE.loadClass(resolvedClass)
                     .getDeclaredConstructor().newInstance() as Activity
             }

@@ -54,7 +54,7 @@ object WeLauncher {
             }, "WCX-ExitReason").apply { isDaemon = true }.start()
         }
 
-        phase("ParcelableFixer") { ParcelableFixer.init() }
+        phase("ParcelableClassLoader") { ParcelableFixer.prepareClassLoader() }
         StartupPerformance.mark("parcelable_ready")
 
         // 兜底：「资源表里有 ID、APK 里没有文件」的 res/raw/*.svg 会让微信自己 inflate 时闪退，

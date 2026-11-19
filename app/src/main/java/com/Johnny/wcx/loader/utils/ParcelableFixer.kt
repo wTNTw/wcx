@@ -19,18 +19,25 @@ object ParcelableFixer {
     lateinit var hybridClassLoader: ClassLoader
         private set
 
-    private var initialized = false
+    private var classLoaderPrepared = false
+    private var intentHooksInstalled = false
 
-    @Suppress("unused")
-    fun init() {
-        if (initialized) return
-        initialized = true
-
+    @Synchronized
+    fun prepareClassLoader() {
+        if (classLoaderPrepared) return
         hybridClassLoader = object : ClassLoader(ClassLoaders.HOST) {
             override fun findClass(name: String): Class<*> = ClassLoaders.MODULE.loadClass(name)
         }
+        classLoaderPrepared = true
+    }
 
-        hookIntentMethods()
+    @Synchronized
+    fun ensureIntentHooksInstalled() {
+        prepareClassLoader()
+        if (intentHooksInstalled) return
+        val installed = hookIntentMethods()
+        intentHooksInstalled = true
+        if (installed) WeLogger.i(TAG, "Intent hooks installed at module Activity boundary")
     }
 
     private fun fixIntentExtrasClassLoader(intent: Intent?) {
@@ -45,7 +52,7 @@ object ParcelableFixer {
         return ActivityLauncher.isModuleActivity(className)
     }
 
-    private fun hookIntentMethods() {
+    private fun hookIntentMethods(): Boolean {
         val hook = object : HookCallback() {
             override fun beforeHookedMethod(param: HookParam) {
                 (param.thisObject as? Intent)?.let { fixIntentExtrasClassLoader(it) }
@@ -59,7 +66,7 @@ object ParcelableFixer {
             }
         }
 
-        runCatching {
+        return runCatching {
             Intent::class.reflekt().apply {
                 firstMethod {
                     name = "getExtras"
@@ -103,6 +110,6 @@ object ParcelableFixer {
                     parameters(BString, Class::class)
                 }.hookDirectly(hook)
             }
-        }.onFailure { WeLogger.w(TAG, "failed to hook some Intent methods") }
+        }.onFailure { WeLogger.w(TAG, "failed to hook some Intent methods") }.isSuccess
     }
 }
