@@ -25,7 +25,7 @@ class ZygiskNativePayload(val apk: File, private val dataDir: File) {
         if (!libraryDir.exists() && !libraryDir.mkdirs()) {
             error("cannot create Zygisk native-library directory: $libraryDir")
         }
-        // 每次换 payload（模块升级）都会有一个新的解包目录，一个版本约 4.4MB。
+        // 每次换 payload（模块升级）都会有一个新的解包目录。
         // 之前旧的从不清理，实测积累到 99MB/22 个目录，这里只保留当前版本。
         // 正在运行的旧进程的 .so 已 mmap 完成，删除目录不会影响它们。
         pruneNativeExtractionDirs(nativeRoot, currentDirName)
@@ -37,8 +37,8 @@ class ZygiskNativePayload(val apk: File, private val dataDir: File) {
             "androidx.graphics.path",
             "dexkit",
             "mmkv",
-            "silk_codec",
             "termux",
+            "wekit_media",
             "wekit_native",
         )
         for (name in names) {
@@ -47,22 +47,16 @@ class ZygiskNativePayload(val apk: File, private val dataDir: File) {
             // 冷启动优化：目标已存在且大小一致时直接复用（目录名里带 APK 版本标记，
             // 升级模块后路径会变，自然重新解出）
             val cached = File(libraryDir, fileName)
-            if (cached.isFile && cached.length() == entry.size) {
-                libraries[name] = cached
-                when (name) {
-                    "androidx.graphics.path", "dexkit", "wekit_native", "silk_codec" ->
-                        System.load(cached.absolutePath)
-                }
-                continue
+            val library = if (cached.isFile && cached.length() == entry.size) {
+                cached
+            } else {
+                extractLibrary(archive, entry, libraryDir, fileName)
             }
-            val extracted = extractLibrary(archive, entry, libraryDir, fileName)
-            libraries[name] = extracted
-            // MMKV loads through its callback; executable artifacts must never be dlopen-ed.
-            when (name) {
-                "androidx.graphics.path", "dexkit", "wekit_native", "silk_codec" -> System.load(extracted.absolutePath)
-            }
+            libraries[name] = library
+            // Startup loads only the core. Other capabilities are dlopen-ed on first use.
+            if (name == "wekit_native") System.load(library.absolutePath)
         }
-        for (name in listOf("dexkit", "wekit_native")) {
+        for (name in listOf("dexkit", "wekit_media", "wekit_native")) {
             require(name in libraries) { "Zygisk payload is missing lib$name.so for $abi" }
         }
         libraries

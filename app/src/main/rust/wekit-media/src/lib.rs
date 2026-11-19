@@ -50,23 +50,50 @@ pub unsafe extern "C" fn Java_com_Johnny_wcx_features_items_chat_MarkdownRenderi
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn Java_com_Johnny_wcx_utils_AudioUtils_anyToSilk(
+pub extern "C" fn Java_com_Johnny_wcx_utils_AudioUtils_anyToSilkNative(
     env: *mut RawJNIEnv,
     _thiz: jobject,
-    any_path: jstring,
+    input_path: jstring,
     silk_path: jstring,
+    sample_rate: jint,
 ) -> jboolean {
-    logi!("converting any to silk...");
-    with_jstring(env, any_path, |any| {
-        with_jstring(env, silk_path, |silk| {
-            logi!("converting {} to {}", any, silk);
-            match audio_utils::any_to_silk(any, silk) {
-                Ok(_) => {
-                    logi!("any_to_silk succeeded");
-                    JNI_TRUE
-                }
+    with_jstring(env, input_path, |input| {
+        with_jstring(
+            env,
+            silk_path,
+            |silk| match audio_utils::any_to_silk_at_rate(input, silk, sample_rate.max(0) as u32) {
+                Ok(()) => JNI_TRUE,
                 Err(err) => {
-                    logi!("any_to_silk failed: {:?}", err);
+                    loge!("any_to_silk failed: {:?}", err);
+                    JNI_FALSE
+                }
+            },
+        )
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn Java_com_Johnny_wcx_utils_AudioUtils_pcmToSilkNative(
+    env: *mut RawJNIEnv,
+    _thiz: jobject,
+    pcm_path: jstring,
+    silk_path: jstring,
+    silk_sample_rate: jint,
+    pcm_sample_rate: jint,
+    channels: jint,
+) -> jboolean {
+    with_jstring(env, pcm_path, |pcm| {
+        with_jstring(env, silk_path, |silk| {
+            match audio_utils::pcm_file_to_silk(
+                pcm,
+                silk,
+                silk_sample_rate.max(0) as u32,
+                pcm_sample_rate.max(0) as u32,
+                channels.max(0) as usize,
+            ) {
+                Ok(()) => JNI_TRUE,
+                Err(err) => {
+                    loge!("pcm_to_silk failed: {:?}", err);
                     JNI_FALSE
                 }
             }
@@ -75,23 +102,19 @@ pub extern "C" fn Java_com_Johnny_wcx_utils_AudioUtils_anyToSilk(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn Java_com_Johnny_wcx_utils_AudioUtils_silkToPcm(
+pub extern "C" fn Java_com_Johnny_wcx_utils_AudioUtils_silkToPcmNative(
     env: *mut RawJNIEnv,
     _thiz: jobject,
     silk_path: jstring,
     pcm_path: jstring,
+    sample_rate: jint,
 ) -> jboolean {
-    logi!("converting silk to pcm...");
     with_jstring(env, silk_path, |silk| {
         with_jstring(env, pcm_path, |pcm| {
-            logi!("converting {} to {}", silk, pcm);
-            match audio_utils::silk_to_pcm(silk, pcm, 24000) {
-                Ok(_) => {
-                    logi!("silk_to_pcm succeeded");
-                    JNI_TRUE
-                }
+            match audio_utils::silk_to_pcm(silk, pcm, sample_rate) {
+                Ok(()) => JNI_TRUE,
                 Err(err) => {
-                    logi!("silk_to_pcm failed: {:?}", err);
+                    loge!("silk_to_pcm failed: {:?}", err);
                     JNI_FALSE
                 }
             }
@@ -100,21 +123,19 @@ pub extern "C" fn Java_com_Johnny_wcx_utils_AudioUtils_silkToPcm(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn Java_com_Johnny_wcx_utils_AudioUtils_pcmToMp3(
+pub extern "C" fn Java_com_Johnny_wcx_utils_AudioUtils_pcmToMp3Native(
     env: *mut RawJNIEnv,
     _thiz: jobject,
     pcm_path: jstring,
     mp3_path: jstring,
+    sample_rate: jint,
 ) -> jboolean {
-    logi!("converting pcm to mp3...");
     with_jstring(env, pcm_path, |pcm| {
         with_jstring(env, mp3_path, |mp3| {
-            logi!("converting {} to {}", pcm, mp3);
-            if audio_utils::pcm_to_mp3(pcm, mp3, 24000, 128) {
-                logi!("pcm_to_mp3 succeeded");
+            if audio_utils::pcm_to_mp3(pcm, mp3, sample_rate.max(0) as u32, 128) {
                 JNI_TRUE
             } else {
-                logi!("pcm_to_mp3 failed");
+                loge!("pcm_to_mp3 failed");
                 JNI_FALSE
             }
         })
@@ -122,21 +143,47 @@ pub extern "C" fn Java_com_Johnny_wcx_utils_AudioUtils_pcmToMp3(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn Java_com_Johnny_wcx_utils_AudioUtils_getDurationMs(
+pub extern "C" fn Java_com_Johnny_wcx_utils_AudioUtils_anyToPcmNative(
+    env: *mut RawJNIEnv,
+    _thiz: jobject,
+    input_path: jstring,
+    pcm_path: jstring,
+) -> jint {
+    with_jstring(env, input_path, |input| {
+        with_jstring(env, pcm_path, |pcm| {
+            match audio_utils::any_to_pcm_file(input, pcm) {
+                Ok(sample_rate) => sample_rate.min(jint::MAX as u32) as jint,
+                Err(err) => {
+                    loge!("any_to_pcm failed: {:?}", err);
+                    -1
+                }
+            }
+        })
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn Java_com_Johnny_wcx_utils_AudioUtils_getFileTypeNative(
+    env: *mut RawJNIEnv,
+    _thiz: jobject,
+    path: jstring,
+) -> jint {
+    with_jstring(env, path, |path| {
+        audio_utils::detect_file_type(path).unwrap_or(0)
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn Java_com_Johnny_wcx_utils_AudioUtils_getDurationMsNative(
     env: *mut RawJNIEnv,
     _thiz: jobject,
     path: jstring,
 ) -> jlong {
-    logi!("reading audio duration...");
-    with_jstring(env, path, |p| match audio_utils::get_audio_duration_ms(p) {
-        Ok(value) => {
-            logi!("get_audio_duration_ms succeeded: {value}");
-            value
-        }
-        Err(err) => {
+    with_jstring(env, path, |path| {
+        audio_utils::get_audio_duration_ms(path).unwrap_or_else(|err| {
             loge!("get_audio_duration_ms failed: {:?}", err);
             0
-        }
+        })
     })
 }
 

@@ -407,7 +407,7 @@ public class ModuleEntry implements IXposedHookLoadPackage {
             // 1. 加载 Native 库（DexKit）
             NativeLibraryLoader nativeLibraryLoader = new NativeLibraryLoader();
             nativeLibraryLoader.loadDexKit(hostContext, getClass().getClassLoader());
-            nativeLibraryLoader.loadSilkCodec(hostContext, getClass().getClassLoader());
+            // Media/Silk is loaded by the compatibility facade on first audio use.
 
             // 2. 创建模块自身 Context
             Context moduleContext = createModuleContext(hostContext);
@@ -533,6 +533,7 @@ public class ModuleEntry implements IXposedHookLoadPackage {
     }
 
     private DexKitBridge createDexKitBridge(ClassLoader classLoader, String apkPath) {
+        com.Johnny.wcx.loader.utils.NativeLoader.INSTANCE.ensureDexKitLoaded();
         synchronized (DEXKIT_CREATE_LOCK) {
             String key = apkPath != null ? apkPath : "";
             DexKitBridge cached = DEXKIT_BRIDGES.get(key);

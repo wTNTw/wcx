@@ -41,6 +41,7 @@ import com.Johnny.wcx.features.api.core.WeMessageApi
 import com.Johnny.wcx.features.api.core.models.MessageInfo
 import com.Johnny.wcx.features.core.ClickableFeature
 import com.Johnny.wcx.features.core.Feature
+import com.Johnny.wcx.loader.utils.NativeLoader
 import com.Johnny.wcx.preferences.WePrefs
 import com.Johnny.wcx.ui.content.AlertDialogContent
 import com.Johnny.wcx.ui.content.TextButton
@@ -171,6 +172,7 @@ object MarkdownRendering : ClickableFeature(), IResolveDex {
                             // 兜底异常捕获，防止单条 Hook 异常导致微信主线程崩溃
                         }
                     } else {
+                        NativeLoader.ensureMediaLoaded()
                         val html = convertMarkdownToHtmlNative(processedText)
 
                         if (html != null) {

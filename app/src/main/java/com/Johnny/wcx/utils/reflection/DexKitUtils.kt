@@ -1,5 +1,6 @@
 ﻿package com.Johnny.wcx.utils.reflection
 
+import com.Johnny.wcx.loader.utils.NativeLoader
 import com.Johnny.wcx.utils.HostInfo
 import com.Johnny.wcx.utils.WeLogger
 import kotlinx.coroutines.CoroutineScope
@@ -35,7 +36,7 @@ private object DexKitHolder {
     /** Direct bridge access without lease accounting. */
     fun peek(): DexKitBridge = synchronized(lock) {
         cancelIdleCloseLocked()
-        bridge ?: DexKitBridge.create(HostInfo.appInfo.sourceDir).also { bridge = it }
+        bridge ?: createBridge().also { bridge = it }
     }
 
     fun acquire(): DexKitBridge = synchronized(lock) {
@@ -45,11 +46,16 @@ private object DexKitHolder {
         val acquired = if (current?.isValid == true) {
             current
         } else {
-            DexKitBridge.create(HostInfo.appInfo.sourceDir).also { bridge = it }
+            createBridge().also { bridge = it }
         }
 
         activeLeaseCount++
         acquired
+    }
+
+    private fun createBridge(): DexKitBridge {
+        NativeLoader.ensureDexKitLoaded()
+        return DexKitBridge.create(HostInfo.appInfo.sourceDir)
     }
 
     fun release() = synchronized(lock) {

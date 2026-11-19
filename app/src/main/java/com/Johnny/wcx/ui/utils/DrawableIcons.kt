@@ -8,13 +8,17 @@ import android.graphics.PixelFormat
 import android.graphics.drawable.Drawable
 import androidx.core.graphics.PathParser
 import androidx.core.graphics.withSave
+import com.Johnny.wcx.loader.utils.NativeLoader
 
 abstract class VectorPathDrawable(
     pathData: String,
     color: Int = Color.WHITE
 ) : Drawable() {
 
-    protected val path = PathParser.createPathFromPathData(pathData)
+    protected val path = run {
+        NativeLoader.ensureGraphicsPathLoaded()
+        PathParser.createPathFromPathData(pathData)
+    }
 
     protected val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL

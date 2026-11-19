@@ -107,9 +107,15 @@ pub fn resample_to(samples: &[i16], from_rate: u32, to_rate: u32) -> Vec<i16> {
         .collect()
 }
 
-pub fn pcm_bytes_to_silk(pcm: &[i16], mut out: impl Write) -> Result<()> {
-    const SAMPLE_RATE: i32 = 24000;
-    const FRAME_SIZE: usize = (SAMPLE_RATE as usize * SILK_FRAME_MS as usize) / 1000; // 480 samples/frame
+pub fn pcm_bytes_to_silk(pcm: &[i16], out: impl Write) -> Result<()> {
+    pcm_bytes_to_silk_at_rate(pcm, out, 24000)
+}
+
+pub fn pcm_bytes_to_silk_at_rate(pcm: &[i16], mut out: impl Write, sample_rate: u32) -> Result<()> {
+    if !matches!(sample_rate, 8000 | 12000 | 16000 | 24000) {
+        bail!("Unsupported SILK sample rate: {}", sample_rate);
+    }
+    let frame_size = (sample_rate as usize * SILK_FRAME_MS as usize) / 1000;
 
     // WeChat-specific: prepend 0x02 before the SILK header
     out.write_all(&[0x02])?;
@@ -132,9 +138,9 @@ pub fn pcm_bytes_to_silk(pcm: &[i16], mut out: impl Write) -> Result<()> {
     }
 
     // Apply encoder params
-    enc_ctrl.API_sampleRate = SAMPLE_RATE;
-    enc_ctrl.maxInternalSampleRate = SAMPLE_RATE;
-    enc_ctrl.packetSize = FRAME_SIZE as i32;
+    enc_ctrl.API_sampleRate = sample_rate as i32;
+    enc_ctrl.maxInternalSampleRate = sample_rate as i32;
+    enc_ctrl.packetSize = frame_size as i32;
     enc_ctrl.bitRate = 25000;
     enc_ctrl.packetLossPercentage = 0;
     enc_ctrl.complexity = 2;
@@ -142,17 +148,17 @@ pub fn pcm_bytes_to_silk(pcm: &[i16], mut out: impl Write) -> Result<()> {
     enc_ctrl.useDTX = 0;
 
     // Encode frames
-    let mut frame_buf = vec![0i16; FRAME_SIZE];
+    let mut frame_buf = vec![0i16; frame_size];
     let mut out_buf = vec![0u8; 1024]; // output buffer for each frame
 
     let mut offset = 0;
     while offset < pcm.len() {
-        let end = (offset + FRAME_SIZE).min(pcm.len());
+        let end = (offset + frame_size).min(pcm.len());
         let frame_len = end - offset;
 
         // Copy samples and pad last frame with zeros
         frame_buf[..frame_len].copy_from_slice(&pcm[offset..end]);
-        if frame_len < FRAME_SIZE {
+        if frame_len < frame_size {
             frame_buf[frame_len..].fill(0);
         }
 
@@ -162,7 +168,7 @@ pub fn pcm_bytes_to_silk(pcm: &[i16], mut out: impl Write) -> Result<()> {
                 enc_state_ptr,
                 &enc_ctrl,
                 frame_buf.as_ptr(),
-                FRAME_SIZE as i32,
+                frame_size as i32,
                 out_buf.as_mut_ptr(),
                 &mut n_bytes_out,
             )
@@ -174,21 +180,115 @@ pub fn pcm_bytes_to_silk(pcm: &[i16], mut out: impl Write) -> Result<()> {
 
         out.write_all(&(n_bytes_out as i16).to_le_bytes())?;
         out.write_all(&out_buf[..n_bytes_out as usize])?;
-        offset += FRAME_SIZE;
+        offset += frame_size;
     }
 
     Ok(())
 }
 
-pub fn any_to_silk(mp3_path: &str, silk_path: &str) -> Result<()> {
-    let (pcm, src_rate) = any_to_pcm_mono(mp3_path)?;
+pub fn any_to_silk(input_path: &str, silk_path: &str) -> Result<()> {
+    any_to_silk_at_rate(input_path, silk_path, 24000)
+}
+
+pub fn any_to_silk_at_rate(input_path: &str, silk_path: &str, sample_rate: u32) -> Result<()> {
+    let (pcm, src_rate) = any_to_pcm_mono(input_path)?;
     logi!("any_to_pcm_mono done");
-    let pcm = resample_to(&pcm, src_rate, 24000);
+    let pcm = resample_to(&pcm, src_rate, sample_rate);
     logi!("resample_to done");
     let out_file = File::create(silk_path)?;
-    pcm_bytes_to_silk(&pcm, out_file)?;
+    pcm_bytes_to_silk_at_rate(&pcm, out_file, sample_rate)?;
     logi!("encode_to_silk done");
     Ok(())
+}
+
+pub fn pcm_file_to_silk(
+    pcm_path: &str,
+    silk_path: &str,
+    silk_rate: u32,
+    pcm_rate: u32,
+    channels: usize,
+) -> Result<()> {
+    if pcm_rate == 0 || channels == 0 {
+        bail!(
+            "Invalid PCM format: rate={}, channels={}",
+            pcm_rate,
+            channels
+        );
+    }
+    let bytes = std::fs::read(pcm_path)?;
+    if bytes.len() % 2 != 0 {
+        bail!("PCM input has an odd byte count");
+    }
+    let interleaved = bytes
+        .chunks_exact(2)
+        .map(|chunk| i16::from_le_bytes([chunk[0], chunk[1]]))
+        .collect::<Vec<_>>();
+    let mono = if channels == 1 {
+        interleaved
+    } else {
+        interleaved
+            .chunks(channels)
+            .map(|frame| {
+                let sum = frame.iter().map(|&sample| sample as i64).sum::<i64>();
+                (sum / frame.len() as i64).clamp(i16::MIN as i64, i16::MAX as i64) as i16
+            })
+            .collect()
+    };
+    let resampled = resample_to(&mono, pcm_rate, silk_rate);
+    pcm_bytes_to_silk_at_rate(&resampled, File::create(silk_path)?, silk_rate)
+}
+
+pub fn any_to_pcm_file(input_path: &str, pcm_path: &str) -> Result<u32> {
+    let (pcm, sample_rate) = any_to_pcm_mono(input_path)?;
+    let mut output = File::create(pcm_path)?;
+    for sample in pcm {
+        output.write_all(&sample.to_le_bytes())?;
+    }
+    Ok(sample_rate)
+}
+
+pub fn detect_file_type(path: &str) -> Result<i32> {
+    let mut file = File::open(path)?;
+    let mut header = [0u8; 16];
+    let count = file.read(&mut header)?;
+    let header = &header[..count];
+    if header.starts_with(SILK_MAGIC)
+        || header
+            .get(1..)
+            .is_some_and(|tail| tail.starts_with(SILK_MAGIC))
+    {
+        return Ok(1);
+    }
+    if header.starts_with(b"ID3")
+        || (header.len() >= 2 && header[0] == 0xff && header[1] & 0xe0 == 0xe0)
+    {
+        return Ok(2);
+    }
+    if header.starts_with(b"RIFF") && header.get(8..12) == Some(b"WAVE") {
+        return Ok(3);
+    }
+    if header.starts_with(b"fLaC") {
+        return Ok(4);
+    }
+    if header.starts_with(b"OggS") {
+        return Ok(5);
+    }
+    let extension = Path::new(path)
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    Ok(match extension.as_str() {
+        "mp3" => 2,
+        "wav" => 3,
+        "flac" => 4,
+        "ogg" | "opus" => 5,
+        "pcm" => 6,
+        "m4a" | "aac" => 7,
+        "mp4" | "mov" => 8,
+        _ if header.get(4..8) == Some(b"ftyp") => 8,
+        _ => 0,
+    })
 }
 
 const SILK_MAGIC: &[u8] = b"#!SILK_V3";

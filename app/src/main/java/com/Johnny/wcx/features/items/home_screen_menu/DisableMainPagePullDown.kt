@@ -15,6 +15,7 @@ import dev.ujhhgtg.reflekt.reflekt
 import com.Johnny.wcx.features.api.ui.WeHomeScreenPopupMenuApi
 import com.Johnny.wcx.features.core.Feature
 import com.Johnny.wcx.features.core.SwitchFeature
+import com.Johnny.wcx.loader.utils.NativeLoader
 import com.Johnny.wcx.preferences.WePrefs
 import com.Johnny.wcx.ui.utils.InjectedUiTheme
 import com.Johnny.wcx.utils.WeLogger
@@ -49,7 +50,10 @@ object MiniProgramIcon : Drawable() {
         color = Color.White.toArgb()
     }
 
-    private val path = androidx.core.graphics.PathParser.createPathFromPathData(pathData)
+    private val path = run {
+        NativeLoader.ensureGraphicsPathLoaded()
+        androidx.core.graphics.PathParser.createPathFromPathData(pathData)
+    }
 
     override fun draw(canvas: android.graphics.Canvas) {
         val bounds = bounds

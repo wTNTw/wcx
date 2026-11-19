@@ -108,10 +108,9 @@ object HchatBootstrap {
                 val moduleClassLoader: ClassLoader = HchatBootstrap::class.java.classLoader
                     ?: ClassLoaders.MODULE
 
-                // 1. Native 库：dexkit 必需；silk 可选（语音编码，失败只降级不影响脚本）。
+                // 1. DexKit 在创建 bridge 前加载；media/Silk 延迟到首次音频调用。
                 val nll = NativeLibraryLoader()
                 nll.loadDexKit(hostContext, moduleClassLoader)
-                runCatching { nll.loadSilkCodec(hostContext, moduleClassLoader) }
 
                 // 2. 模块自身 Context（上游用固定包名 h.Hchat；WCX 模块包名不同，用 PackageNames.MODULE）。
                 val moduleContext: Context = runCatching {

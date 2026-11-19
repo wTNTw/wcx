@@ -28,21 +28,23 @@ public class NativeLibraryLoader {
     private static final String TAG = "[Hchat:NativeLoader]";
     private static final Object EXTRACTION_LOCK = new Object();
     private static final NativeLoadCache LOADED_LIBRARIES = new NativeLoadCache();
-    private static final String DEXKIT_SO = "libdexkit.so";
-    private static final String DEXKIT_LIB = "dexkit";
-    private static final String SILK_CODEC_SO = "libsilk_codec.so";
-    private static final String SILK_CODEC_LIB = "silk_codec";
     private static final String CRASH_GUARD_SO = "libhchat_crash.so";
     private static final String CRASH_GUARD_LIB = "hchat_crash";
     private static final String TERMUX_SO = "libtermux.so";
     private static final String TERMUX_LIB_PATH_PROPERTY = "hchat.termux.lib.path";
 
     public void loadDexKit(Context ctx, ClassLoader moduleClassLoader) {
-        loadLibrary(ctx, moduleClassLoader, DEXKIT_SO, DEXKIT_LIB, false);
+        com.Johnny.wcx.loader.utils.NativeLoader.INSTANCE.ensureDexKitLoaded();
     }
 
     public boolean loadSilkCodec(Context ctx, ClassLoader moduleClassLoader) {
-        return loadLibrary(ctx, moduleClassLoader, SILK_CODEC_SO, SILK_CODEC_LIB, true);
+        try {
+            com.Johnny.wcx.loader.utils.NativeLoader.INSTANCE.ensureMediaLoaded();
+            return true;
+        } catch (Throwable error) {
+            h.Hchat.utils.HLog.e(TAG + " libwekit_media.so 加载失败: " + error.getMessage(), error);
+            return false;
+        }
     }
 
     public boolean loadCrashGuard(Context ctx, ClassLoader moduleClassLoader) {

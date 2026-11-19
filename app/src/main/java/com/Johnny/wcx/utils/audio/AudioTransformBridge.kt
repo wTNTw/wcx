@@ -21,12 +21,7 @@ open class AudioTransformBridge(
         private val SUPPORTED_SILK_HZ = setOf(8000, 12000, 16000, DEFAULT_HZ)
     }
 
-    private val silkCodec: SilkCodec by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
-        // native 库仅在 arm64-v8a 提供；加载失败时 callInt/callLong 的 runCatching 会兜底
-        // 捕获 UnsatisfiedLinkError，相关函数返回错误码而非崩溃。
-        runCatching { System.loadLibrary("silk_codec") }
-        SilkCodec()
-    }
+    private val silkCodec: SilkCodec by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { SilkCodec() }
 
     private fun readField(target: Any?, fieldName: String): Any? = runCatching {
         if (target == null) return@runCatching null

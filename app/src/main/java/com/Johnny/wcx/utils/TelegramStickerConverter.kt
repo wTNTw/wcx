@@ -1,5 +1,6 @@
 package com.Johnny.wcx.utils
 
+import com.Johnny.wcx.loader.utils.NativeLoader
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
@@ -12,6 +13,7 @@ import kotlin.io.path.isRegularFile
 
 object TelegramStickerConverter {
     fun tgsToGif(input: Path, output: Path): Result<Unit> = runCatching {
+        NativeLoader.ensureMediaLoaded()
         output.parent?.createDirectories()
         tgsToGifNative(input.toString(), output.toString())?.let(::error)
         require(output.isRegularFile() && output.fileSize() > 0L) { "TGS 转换未生成 GIF" }
@@ -24,6 +26,7 @@ object TelegramStickerConverter {
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
             currentCoroutineContext().ensureActive()
+            NativeLoader.ensureMediaLoaded()
             output.parent?.createDirectories()
             webmToGifNative(
                 input.toString(),
