@@ -87,6 +87,8 @@
 
 ## 4. 装配 ZIP 并验证失败行为
 
+已在 Debian 完成[探针嵌包及正式包静态预检](../../../zygisk/README.md)：签名探针 APK 内嵌后字节不变，坏 ELF、版本不一致、两类 Xposed 声明、非法归档路径、探针误用正式预检和缺失输入均被拒绝。探针没有安装本次嵌包产物；以下正式构建步骤仍依赖独立后端。
+
 - [ ] 在 `zygisk/build.py` 实现 `build --output <zip>` 与 `pack --apk <apk> --loader <so> --output <zip>`。`build` 显式调用任务 3 的构建目标，并用 SDK 声明的 NDK CMake 工具链编译任务 2 的 loader。`pack` 不编译，不遍历历史产物；从 APK 的 `aapt dump badging` 取版本，确保有一个 ARM64 payload；用 NDK `llvm-readelf` 检查 SO 为 ELF64/AArch64 且导出公共模块入口。检查 APK/ELF 失败则退出非零，原有输出不变。
 - [ ] 用 `wcx_zygisk` 模块 ID 渲染 `module.prop`，版本从 payload 派生。按 WeKite 参考契约打包 `module.prop`、`customize.sh`、`zygisk/arm64-v8a.so`、`payload/wcx.apk`；参考 Magisk 官方模板确认安装入口。APK 内容原样写进 ZIP；写同目录临时 ZIP，经 CRC 和条目校验后原子重命名到 `--output`。不加入设备安装命令、自动更新地址、SELinux 放宽配置或常驻服务。
 - [ ] 在远端用真实输入及坏输入验证打包命令。以下负例使用临时路径，不污染有效产物：
