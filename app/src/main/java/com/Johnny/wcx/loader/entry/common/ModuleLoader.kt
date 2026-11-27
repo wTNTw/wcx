@@ -3,6 +3,8 @@ package com.Johnny.wcx.loader.entry.common
 import com.Johnny.wcx.features.core.FeaturesProvider
 import com.Johnny.wcx.loader.abc.IHookBridge
 import com.Johnny.wcx.loader.abc.ILoaderService
+import com.Johnny.wcx.loader.entry.xp51.Xp51HookImpl
+import com.Johnny.wcx.loader.startup.StartupAgent
 import com.Johnny.wcx.loader.startup.UnifiedEntryPoint
 import com.Johnny.wcx.utils.WeLogger
 
@@ -47,7 +49,13 @@ object ModuleLoader {
 
         WeLogger.i(TAG, "loading in entry point ${loaderService.entryPointName}")
         runCatching {
-            UnifiedEntryPoint.entry(loaderService, hookBridge, initialClassLoader, modulePath)
+            // Older entry points can omit the bridge but have historically used legacy Xposed for startup hooks.
+            val startupBridge = hookBridge ?: Xp51HookImpl.INSTANCE
+            UnifiedEntryPoint.entry(initialClassLoader, startupBridge) { application ->
+                runCatching {
+                    StartupAgent.startup(loaderService, hookBridge, modulePath, application)
+                }.onFailure { WeLogger.e(TAG, "StartupAgent failed", it) }
+            }
         }.onFailure { WeLogger.e(TAG, "UnifiedEntryPoint failed", it) }
     }
 
