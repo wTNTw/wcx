@@ -1,30 +1,81 @@
-# WCX Zygisk 打包与验收
+# WCX Zygisk 部署
 
-目前只有自有 APK 探针和 ZIP 预检工具，没有可用于微信的独立 Hook 后端或正式 WCX Zygisk ZIP。普通 `standard` / `legacy` 的构建、签名和入口不变。
+本目录包含 WCX 的 Zygisk 部署：ARM64 native loader、上游运行时导入、Root 管理器模块模板、打包与校验工具。
 
-## 在 Debian 验证打包
+普通 `standard` / `legacy` APK 的构建、签名、入口和发布流程不变。Zygisk payload 是独立产物，不能与原 APK 混用。
+
+## 目录
+
+| 路径 | 作用 |
+| --- | --- |
+| `native/` | ARM64 loader：Zygisk 生命周期、目标 allow-list companion、payload/DEX bootstrap、LSPlant 接入、库映射隐藏 |
+| `backend/README.md` | 上游来源、许可证、逐文件导入清单、排除项与风险 |
+| `module/` | 三种管理器的模块模板（`module.prop.in`、`customize.sh`、`uninstall.sh`、KernelSU/APatch 的 `config.sh`/`action.sh`/`webroot/`） |
+| `package_zip.py` | 显式输入的打包与校验命令 |
+| `tests/` | 归档结构与打包原子的单元测试（不需要 Android SDK） |
+| `smoke/`、`independent-hook-probe/` | 既有的日志探针与可调试 APK Hook 探针，不参与正式产物 |
+
+## 构建
+
+需要：JDK 21、Android SDK（platform 37.0、build-tools 37.0.0、NDK 30.0.14904198）、Rust + `aarch64-linux-android` target、CMake ≥ 3.28、Ninja、Python 3。
 
 ```bash
 export ANDROID_HOME=/opt/android-sdk
-bash zygisk/smoke/build.sh dist/zygisk-probe
-python3 zygisk/package_zip.py pack-probe \
-  --apk dist/zygisk-probe/wcx-zygisk-smoke.apk \
-  --module dist/zygisk-probe/wcx-zygisk-smoke-module.zip \
-  --output dist/zygisk-probe/wcx-zygisk-packaging-probe.zip
-python3 zygisk/package_zip.py verify --profile probe \
-  dist/zygisk-probe/wcx-zygisk-packaging-probe.zip
+export PATH="$HOME/.cargo/bin:$PATH"
+
+# 一次性：拉取固定版本的 LSPlant / XZ Embedded（含 DexBuilder 依赖）
+sh zygisk/native/prepare-deps.sh
+
+# 1. loader（输出 zygisk/arm64-v8a.so）
+sh zygisk/native/build.sh dist/zygisk
+
+# 2. payload APK（只取 arm64-v8a 的 legacy 变体）
+bash gradlew :app:assembleLegacyRelease -PwcxZygisk=true
+# -> app/build/outputs/apk/legacy/release/app-legacy-arm64-v8a-release*.apk
+
+# 3. 三种管理器模块包
+for manager in magisk kernelsu apatch; do
+  python3 zygisk/package_zip.py pack \
+    --apk app/build/outputs/apk/legacy/release/app-legacy-arm64-v8a-release.apk \
+    --loader dist/zygisk/zygisk/arm64-v8a.so \
+    --manager "$manager" \
+    --output "dist/wcx-zygisk-$manager.zip"
+done
 ```
 
-`pack-probe` 将探针 APK 原样放入 `payload/probe.apk`，保留独立模块 ID `wcx_zygisk_probe`；无论成功与否都不调用 ADB，不安装任何东西。探针 loader 只记录自有测试 APK 的回调，不加载嵌入的 APK，也不包含 WCX 或微信功能。写入前会校验临时 ZIP；失败不覆盖已有产物。
+`pack` 只接受显式路径，不会在 `app/build/outputs` 里挑选历史产物。校验失败时不会覆盖已有 ZIP。
 
-## 正式 ZIP 的前置检查
+`-PwcxZygisk=true` 只在该次调用中把 `app/src/zygisk/java` 加入 `main`、并从资源中排除 `assets/xposed_init`。不带该属性时构建输入与任务图与之前一致。
 
-独立后端通过验收并产出正式 ZIP 后，可以执行：
+## 校验
 
 ```bash
-python3 zygisk/package_zip.py verify --profile release dist/wcx-zygisk-arm64.zip
+python3 -m unittest discover -s zygisk/tests -v          # 归档规则与打包原子性
+python3 zygisk/package_zip.py verify <zip> --profile magisk
 ```
 
-此命令只读取产物。它检查模块 ID、归档布局和完整性、原生 loader 的 ARM64 ELF 与 Zygisk 入口，以及 payload 的包名、签名、版本、所需 ARM64 库条目和 Xposed 声明。该预检不验证发行者身份、安装脚本行为、后端安全性或真机运行效果，也不产生正式 ZIP。
+`verify` 检查模块 ID/版本、归档路径（拒绝重复、穿越、符号链接）、安装与卸载脚本的安全前提、loader 的 ELF64/AArch64 与 `zygisk_module_entry` 导出，以及 payload 的包名、签名、版本、ARM64 库集合与 Xposed 元数据缺失。它不验证安装脚本在真机上的行为，也不构成运行时证明。
 
-在构建或安装正式模块之前，须先在自有非调试 APK 上验证独立后端不会绕过安全检查。正式包才进入 KernelSU 安装与回退验收；不以探针或 LSPosed APK 替代。参见[后端验证报告](../docs/superpowers/reports/2026-11-27-wcx-zygisk-backends.md)。
+## 目标选择
+
+- **KernelSU / APatch**：模块页面刷新后列出各 Android 用户下的微信实例，新发现的实例默认关闭；启用后该实例的主进程与 `:...` 子进程都会被注入。列表保存在 `/data/adb/wcx_zygisk/injection-targets.tsv`，卸载时只删除该模块自己的状态。
+- **Magisk**：固定 `com.tencent.mm` 主进程及其 `:...` 子进程，不提供 WebUI。
+
+三种管理器都只接受 `com.tencent.mm` / `com.tencent.mm.*`，其他包、系统进程和未启用实例一律不初始化。
+
+## 已知边界
+
+- 仅 ARM64、仅微信。
+- Zygisk 路径会执行上游的 hidden-API 豁免与 `app_qqprotect` 删除，并对 WCX 自己的 payload 库做映射重映射以隐藏路径；这些行为已记录在 `backend/README.md`，不是可选装饰。
+- 不要对同一微信实例同时启用 WCX 的 LSPosed 作用域与 Zygisk 模块。
+- 停用/卸载后按管理器提示重启以恢复未注入状态。
+
+## 验证状态
+
+| 项目 | 状态 |
+| --- | --- |
+| loader 编译（AArch64 ELF、导出符号） | 已在构建机通过 |
+| payload APK 构建（无 Xposed 元数据） | 已在构建机通过 |
+| 归档规则单元测试 | 通过 |
+| 三份 ZIP 静态校验 | 见本轮构建记录 |
+| 真机安装、目标启停、子进程注入、回退 | **未验证** |

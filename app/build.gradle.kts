@@ -107,7 +107,10 @@ android {
     sourceSets["main"].jniLibs.directories += "src/main/jniLibs"
 
     if (zygiskPayload) {
+        // AGP 9 keeps Kotlin and Java source directories separate; the Zygisk
+        // sources are Kotlin, so both are registered.
         sourceSets["main"].java.srcDir("src/zygisk/java")
+        sourceSets["main"].kotlin.srcDir("src/zygisk/java")
         // The loader is packaged separately as zygisk/arm64-v8a.so; the packer
         // takes the arm64-v8a payload split by explicit path.
         lint { checkReleaseBuilds = false }
