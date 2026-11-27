@@ -31,3 +31,9 @@ debuggable=true  xposed_bridge=absent attach_result=io_exception
 2. `NativeLoader`、资源访问和设置页入口都要独立验证。Zygisk 路径不得运行现有 Xposed 专属的隐藏 API 豁免、保护目录删除或反检测逻辑，不改普通 APK 行为。
 3. 后端须先在自有测试应用验证方法与构造器、before/after 及优先级、参数和结果变更、异常、原始调用与解除。未满足前不生成或标记可用于 WCX 的 payload/ZIP。
 4. Windows ADB 当前仅有 ARM64 / Android 16 的 KernelSU 设备，未发现 Magisk CLI。Magisk 验收保持待办；不能把 KernelSU 结果作为 Magisk 的通过证据。
+
+## KernelSU 正式版验收状态
+
+- **设备就绪，正式版阻塞。** 只读复核为 ARM64、Android 16（API 36）、KernelSU，微信版本为 8.0.80。此前两个探针 APK 和临时 Zygisk 模块均已卸载。未安装新产物，未改动手机配置。
+- **已有证据**：日志探针验证了 KernelSU 环境中的公共 Zygisk 回调与卸载回退；ART TI 探针验证了自有可调试 APK 的独立 Hook。两项都不能证明正式 WCX 启动。
+- **验收前提**：后端须在非调试发布环境下按既定安全边界工作，并与 WCX 的完整启动路径兼容。当前没有通过这个前提的后端或正式 ZIP，不进入正式版安装、设置页启动和卸载回归测试。
