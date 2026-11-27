@@ -26,6 +26,12 @@
             android:name="xposedsharedprefs"
             tools:node="remove" />
 
+        <!-- Provided by the libxposed service library; the payload is never
+             bound by an Xposed framework. -->
+        <provider
+            android:name="io.github.libxposed.service.XposedProvider"
+            tools:node="remove" />
+
         <activity android:name=".activity.MainActivity">
             <intent-filter>
                 <category

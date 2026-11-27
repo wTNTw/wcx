@@ -52,14 +52,17 @@ REQUIRED_NATIVE_LIBS = {
     "libmmkv.so",
     "libandroidx.graphics.path.so",
 }
+# Declarations that make an APK an Xposed module. Package-visibility <queries>
+# entries and the LSPosed settings-shortcut category are deliberately not here:
+# they do not make the payload loadable by a framework.
 XPOSED_MANIFEST_MARKERS = {
     "xposedmodule",
     "xposeddescription",
     "xposedminversion",
     "xposedscope",
     "xposedsharedprefs",
-    "de.robv.android.xposed.category.MODULE_SETTINGS",
 }
+XPOSED_SERVICE_MARKER = "io.github.libxposed.service.XposedProvider"
 WECHAT_PACKAGE_PREFIX = "com.tencent.mm"
 
 
@@ -206,6 +209,10 @@ def verify_apk(apk, expected_package, release, tools):
     require(
         not any(f'"{marker}"' in manifest for marker in XPOSED_MANIFEST_MARKERS),
         "payload manifest contains Xposed module declarations",
+    )
+    require(
+        XPOSED_SERVICE_MARKER not in manifest,
+        "payload manifest exposes the libxposed service provider",
     )
     badging = run(aapt2, "dump", "badging", apk)
     package = re.search(
