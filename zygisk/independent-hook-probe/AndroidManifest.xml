@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="dev.wcx.independenthook.probe"
+    android:versionCode="1"
+    android:versionName="0.1">
+    <application android:label="WCX Independent Hook Probe" android:debuggable="true"
+        android:extractNativeLibs="true" android:allowBackup="false">
+        <activity android:name=".MainActivity" android:exported="true" />
+    </application>
+</manifest>

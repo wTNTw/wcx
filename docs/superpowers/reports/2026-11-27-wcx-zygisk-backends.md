@@ -21,6 +21,10 @@ debuggable=true  xposed_bridge=absent attach_result=io_exception
 
 前者被策略拒绝；后者没有触发同一策略错误，但仍因 `IOException` 未能加载 agent。这不是 Java hook 成功的证据。两个 APK 的签名和 SHA-256 已校验，测试结束后应用已卸载。没有重启、改动 root 模块或调整微信作用域。
 
+## 自有可调试 APK 的正向验证
+
+[`zygisk/independent-hook-probe/`](../../../zygisk/independent-hook-probe/README.md) 在 Debian 构建，在同一 ARM64 / Android 16 设备上验证了真实 ART TI 回调：测试进程不可见 `XposedBridge`，构造器和方法进入/退出可观测，异常不被吞掉；修改自有方法的参数后结果从 `10` 变为 `15`，关闭订阅后恢复 `10` 且回调计数不再增加。不使用 Zygisk 或私有 ART 接口；没有改动现有模块，测试 APK 已卸载。正向结果只适用于明确启用调试的自有 APK，不改变上面的正式版限制。
+
 ## 仍需满足的 WCX 启动条件
 
 1. `UnifiedEntryPoint` 在发布 `StartupInfo.hookBridge` 之前就通过 `HookUtils` 调用 `XposedBridge`；仅提供一个 `IHookBridge` 实例不够。`WeLauncher` 后续也直接使用 Xposed 原始调用。仅有 `compileOnly` 的 API JAR 不提供运行时实现。
