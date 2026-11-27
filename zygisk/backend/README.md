@@ -1,6 +1,6 @@
 # WCX Zygisk 上游运行时导入清单
 
-本文件记录 `zygisk` 分支从 WeKit Zygisk 运行时选择导入的组件、它们的实际行为、WCX 需要的改动以及明确排除的部分。它只描述代码审计结果，不构成任何设备验证结论。
+本文件记录 `zygisk` 分支从 WeKit Zygisk 运行时选择导入的组件、它们的实际行为、WCX 需要的改动以及明确排除的部分。它只描述代码审计与构建结果，不构成任何设备验证结论。
 
 ## 1. 固定来源
 
@@ -8,92 +8,86 @@
 | --- | --- |
 | 上游仓库 | `https://github.com/Ujhhgtg/WeKit` |
 | 固定提交 | `b51532bf3427348af824d7d704e55081fac9ca55` |
-| 子项目路径 | `wekit-zygisk/`（native + template）、`app/src/main/java/dev/ujhhgtg/wekit/loader/entry/zygisk/` |
-| 审计方式 | 克隆该提交后本地静态阅读，未执行上游二进制 |
+| 导入目标 | `zygisk/native/`（crate `wcx-zygisk`，产物 `libwcx_zygisk.so`） |
+| 子模块 | `third_party/lsplant` @ `d8b5d1dbb664abc606644036822e4bb64547edf6`、`third_party/xz-embedded` @ `ae63ae3a36ed01724674e8f3d750dc47bf125410` |
 
-审计提交处 `wekit-zygisk/` 不含 `Cargo.lock`；依赖版本由 `native/Cargo.toml` 的宽松声明决定（`libc = "0.2"`、`jni = "0.22"`、`anyhow = "1"`、`sha2 = "0.11"`、`zip = "2.4.2"`、构建期 `cmake = "0.1"`）。导入时必须补一份锁定文件，否则同一提交两次构建可能得到不同 native 产物。
+依赖版本由工作区 `Cargo.lock` 固定（`zygisk/native` 是 workspace member）。上游该提交没有锁定文件，这一项是 WCX 增补。
 
 ### 许可证
 
-| 组件 | 许可证 | 来源 |
-| --- | --- | --- |
-| LSPlant | LGPL-3.0 | `third_party/lsplant` 子模块，`LSPosed/LSPlant` |
-| XZ Embedded | 0BSD | `third_party/xz-embedded` 子模块，`tukaani-project/xz-embedded` |
-| Rust crates | Apache-2.0 / MIT（按 crate） | crates.io，需随锁定文件逐项登记 |
-| 上游 Rust 代码与模板 | 跟随 WeKit 仓库许可证 | 导入时需确认并保留原始声明 |
+| 组件 | 许可证 |
+| --- | --- |
+| LSPlant | LGPL-3.0（静态链接进 loader） |
+| XZ Embedded | 0BSD |
+| Rust crates（`libc`/`jni`/`anyhow`/`sha2`/`zip`/`cmake`） | Apache-2.0 或 MIT，逐项见 `Cargo.lock` |
 
-LGPL-3.0 的静态链接会影响 WCX 的分发义务（提供对应源码/可重链接对象）。这一点在导入前必须由项目负责人确认，不应默默带过。
+LSPlant 为 LGPL-3.0 且静态链接，分发时必须提供对应源码与可重链接材料。本项目按 LGPL 合规处理（用户已确认）。
 
 ## 2. 原生模块清单
 
-| 上游文件 | 行数 | 职责 | WCX 处理 |
-| --- | --- | --- | --- |
-| `native/src/lib.rs` | 65 | 导出 `zygisk_module_entry` / `zygisk_companion_entry`，注册 `ModuleAbi`（`api_version: 4`） | 保留；改为 WCX 模块入口与状态对象 |
-| `native/src/zygisk.rs` | 119 | 官方 Zygisk API 的 `#[repr(C)]` 重声明（`ApiTable` 10 字段、`ModuleAbi`、`AppSpecializeArgs`） | 保留；与锁定头文件逐字段对照 |
-| `native/src/lifecycle.rs` | 312 | `preAppSpecialize` 目标判定 + 模块目录 FD；`postAppSpecialize` 发布 APK、建 `InMemoryDexClassLoader`、初始化 ART、trust DEX、回调 Java 入口；`preServerSpecialize` 退出 | 保留结构；目标判定与进程范围按 WCX 规则 |
-| `native/src/companion.rs` | 488 | root companion：注入 allow-list 判定 + (上游) Telegram 会话/数据库 | 仅保留 allow-list 判定路径；Telegram 全部移除 |
-| `native/src/protocol.rs` | 172 | companion 二进制协议常量与 fd 读写 | 保留 allow-list 所需子集 |
-| `native/src/payload.rs` | 198 | 按内容哈希发布 APK 到 app 私有目录（0600 临时 → 0400 最终、原子 rename），并创建 `InMemoryDexClassLoader` | 保留语义，路径改为 WCX 子目录 |
-| `native/src/apk.rs` | 222 | 从 APK 读 DEX；上限 `MAX_APK_BYTES=256MiB`、`MAX_DEX_BYTES=64MiB`、`MAX_TOTAL_DEX_BYTES=256MiB` | 保留 |
-| `native/src/art/mod.rs` | 301 | ART 初始化、符号解析回调、`MakeDexFileTrusted`、`hook_method`/`deoptimize`/`allocate_instance` | 保留；LSPlant 版本固定 |
-| `native/src/art/elf.rs` | 632 | 解析 `libart.so` ELF，按符号名解析 ART 内部符号 | 保留 |
-| `native/src/art/inline_hook/{mod,aarch64,memory}.rs` | — | ARM64 入口 inline hook：备份、near veneer、指令重定位、页权限切换 | 保留（这是 LSPlant 的必要前提） |
-| `native/src/natives.rs` | 467 | `RegisterNatives` 注册 bridge 与 ZygiskEntry native 方法；含 `nativeHideLoadedModuleLibraries` 与 Telegram JNI | 保留 bridge/entry 注册；删除 Telegram JNI |
-| `native/src/so_hider.rs` | 223 | `/proc/self/maps` 解析 + memfd/mprotect/MAP_FIXED 段重映射 | 保留但收窄匹配（见第 4 节） |
-| `native/src/logging.rs` | 60 | logcat 输出 | 保留，标签改为 WCX |
-| `native/cpp/lsplant_bridge.cpp` | — | LSPlant 的 C ABI 桥（`wekit_lsplant_init/hook/deoptimize/make_dex_file_trusted`） | 保留，改名 |
-| `native/CMakeLists.txt`、`build.rs` | — | 静态链接 LSPlant/DexBuilder/libc++/compiler-rt；仅 `arm64-v8a` | 保留，路径与命名调整 |
-| `native/tests/` | — | 宿主机重定位测试（Unicorn） | 保留 |
+| 文件 | 职责 | WCX 改动 |
+| --- | --- | --- |
+| `src/lib.rs` | 导出 `zygisk_module_entry` / `zygisk_companion_entry`，注册 `ModuleAbi`（`api_version: 4`） | 类型改名 `WcxModule`；删除 Telegram socket 全局 |
+| `src/zygisk.rs` | 官方 Zygisk API 的 `#[repr(C)]` 重声明 | 未改动 |
+| `src/lifecycle.rs` | `preAppSpecialize` 目标判定 + 模块目录 FD；`postAppSpecialize` 发布 APK、建 `InMemoryDexClassLoader`、初始化 ART、trust DEX、回调 Java 入口；`preServerSpecialize` dlclose | 删除 Telegram 协商；入口类改为 `com.Johnny.wcx...ZygiskEntry` |
+| `src/companion.rs` | root companion：注入 allow-list 判定 | **重写**：只保留 allow-list 查询；新增严格包名/进程名判定与单元测试 |
+| `src/protocol.rs` | companion 二进制协议 | 删除 Telegram 常量与未使用助手 |
+| `src/payload.rs` | 按内容哈希发布 APK（0600 临时 → 0400 最终、原子 rename） | 临时文件前缀 `.wcx-bootstrap-` |
+| `src/apk.rs` | 从 APK 读 DEX（APK ≤256MiB，单 DEX ≤64MiB，合计 ≤256MiB） | 未改动 |
+| `src/art/mod.rs` | ART 初始化、符号解析回调、`MakeDexFileTrusted`、hook/deoptimize/allocate | 未改动 |
+| `src/art/elf.rs` | 解析 `libart.so` 取 ART 内部符号 | 未改动 |
+| `src/art/inline_hook/*` | ARM64 入口 inline hook（备份、near veneer、重定位、页权限） | memfd 名称改为 `wcx-inline-hook` |
+| `src/natives.rs` | `RegisterNatives`：bridge 与 ZygiskEntry | 删除 Telegram JNI 与相关注册；库隐藏改为接收目录参数 |
+| `src/so_hider.rs` | `/proc/self/maps` 解析 + 段重映射 | **重写**：精确目录 + 文件名白名单、重映射前复核、失败报告 |
+| `src/logging.rs` | logcat 输出 | 日志前缀 `WcxZygisk:` |
+| `cpp/lsplant_bridge.cpp` | LSPlant 的 C ABI 桥 | 符号改为 `wcx_lsplant_*` |
+| `CMakeLists.txt`、`build.rs` | 静态链接 LSPlant/DexBuilder/libc++/compiler-rt；仅 `arm64-v8a` | 目标与变量改名 |
 
 ## 3. Kotlin 侧清单
 
-| 上游文件 | 行数 | 职责 | WCX 处理 |
-| --- | --- | --- | --- |
-| `loader/entry/zygisk/ArtHookBridge.kt` | 140 | `IHookBridge` 实现，转调 `ArtHookBridgeRuntime` | 重写为 WCX 包名下的等价实现 |
-| `loader/entry/zygisk/ArtHookBridgeRuntime.kt` | 282 | 回调注册表、优先级、原方法调用、备份等待 | 同上 |
-| `loader/entry/zygisk/ZygiskEntry.kt` | 203 | `init(processName, dataDir, apkPath)`：校验包名、`nativeInitialize`、注册 `LoadedApk.createAppFactory` 与 `AppComponentFactory.instantiateClassLoader` hook、启动模块 | 同上，改调 WCX `ModuleLoader` |
-| `loader/entry/zygisk/ZygiskLoaderService.kt` | 42 | `ILoaderService` 实现 | 同上 |
-| `loader/entry/zygisk/ZygiskTelegramRootClient.kt` | 79 | Telegram root companion 客户端 | **排除** |
-| `loader/utils/NativeLoader.kt`（`configureZygiskPayload` 等） | — | 从 Zygisk 发布的 APK 加载 native 库（`check(!nativeLibrariesLoaded)`） | WCX 需等价改造，否则 `System.loadLibrary` 找不到库 |
+| 文件 | 职责 |
+| --- | --- |
+| `app/src/zygisk/java/.../ArtHookBridge.kt` | `IHookBridge` 实现（转调 runtime），并实现 `IModuleLibraryHider` |
+| `app/src/zygisk/java/.../ArtHookBridgeRuntime.kt` | 回调注册表、优先级、原方法调用、备份等待 |
+| `app/src/zygisk/java/.../ZygiskEntry.kt` | native 调用的入口：校验包名、注册 bridge native、`configurePayload`、hook `LoadedApk.createAppFactory` 与 `AppComponentFactory.instantiateClassLoader`、交给 `ModuleLoader` |
+| `app/src/zygisk/java/.../ZygiskLoaderService.kt` | `ILoaderService` 实现 |
+| `app/src/zygisk/java/.../ZygiskNativePayload.kt` | 从 payload APK 解出 `.so` 到 app 私有目录并 `System.load` |
+| `app/src/main/java/.../NativePayloadSource.kt` | main 侧的中性接口，使普通 APK 不引用 Zygisk 代码 |
+| `app/src/main/java/.../IModuleLibraryHider.kt` | 同上：库隐藏能力的可选接口 |
+
+`NativeLoader` 由「类初始化即 `System.loadLibrary`」改为按需加载，并支持 payload 来源；`HybridClassLoader` 增加 `moduleClassLoader` 以处理 `InMemoryDexClassLoader`；`UnifiedEntryPoint` 在检测到该 loader 时登记它。Xposed 路径行为保持不变。
 
 ## 4. 与安全/诊断相关的实际行为
 
-以下是审计中逐条确认的行为，导入后仍然生效，必须在支持文档中如实披露：
+以下行为在 WCX 中仍然生效，必须在支持文档中如实披露（用户已确认按上游保留）：
 
-1. **隐藏 API 豁免**：`StartupAgent.ensureHiddenApiAccess()`（上游第 54 行调用）在检测不到 `ContextImpl.mActivityToken`/`mToken` 时执行 `HiddenApiBypass.setHiddenApiExemptions("L")`。上游把它放在共享启动路径，Zygisk 也会执行。
-2. **宿主保护目录删除**：同一启动流程第 67 行 `deleteRecursively()` 删除 `app_qqprotect`。
-3. **模块 DEX trust**：`art::trust_class_loader` 反射读取 `BaseDexClassLoader.pathList` → `DexPathList.dexElements` → `DexPathList$Element.dexFile` → `DexFile.mCookie`，再调 `lsplant::MakeDexFileTrusted`。任一 DexFile 失败即整体失败。
-4. **ART 私有符号解析**：`art::elf::ArtSymbolResolver::load()` 解析 `libart.so`，供 LSPlant 解析内部符号；`ART_SYMBOLS` 与 `INITIALIZED` 都是 `OnceLock`，**初始化失败会被缓存，本进程不会重试**。
-5. **代码改写**：`art/inline_hook/*` 会改写 ART 函数入口，分配可执行代码，切换页权限，保留备份不释放；不使用信号，不暂停其他线程。
-6. **库路径隐藏（`so_hider`）**：`natives.rs` 第 73–76 行对 `libdexkit.so`、`libwekit_native.so`、`libmmkv.so` 三个名字调用 `hide_path`；`so_hider.rs` 第 69 行用 `e.path.contains(needle)` 做**子串匹配**，第 127/137 行用 `MAP_PRIVATE | MAP_FIXED` **无条件覆盖**原映射。`inline_hook/memory.rs` 则刻意只用 `MAP_FIXED_NOREPLACE` 且注释明确"绝不用 MAP_FIXED"——两套内存子系统策略不一致。
-7. **companion 目标判定**：`companion.rs` 第 49 行 `process_name == pkg || process_name.starts_with(pkg + ":")`，并额外要求 `enabled == "1"`、`pkg.starts_with("com.tencent.mm")`、`uid / 100000 == 行内 user`。目标文件为固定路径 `/data/adb/wekit_zygisk/injection-targets.tsv`。
-8. **payload 发布**：内容哈希命名、`O_NOFOLLOW`、0600/0400 权限、先解码 DEX 再原子 rename。
+1. **隐藏 API 豁免**：`XposedStartup.ensureHiddenApiAccess()` 在检测不到 `ContextImpl.mActivityToken`/`mToken` 时执行 `HiddenApiBypass.setHiddenApiExemptions("L")`。Zygisk 路径同样执行。
+2. **宿主保护目录删除**：同一启动流程删除 `app_qqprotect`。
+3. **模块 DEX trust**：`art::trust_class_loader` 反射读取 `DexFile.mCookie` 后调用 `lsplant::MakeDexFileTrusted`；任一 DexFile 失败即整体失败。
+4. **ART 私有符号解析**：解析 `libart.so` 供 LSPlant 使用；`INITIALIZED`/`ART_SYMBOLS` 为 `OnceLock`，**初始化失败在本进程内不会重试**。
+5. **代码改写**：`art/inline_hook/*` 改写 ART 函数入口并保留备份，不安装信号、不暂停其他线程；`memory.rs` 只用 `MAP_FIXED_NOREPLACE`。
+6. **库路径隐藏**：`so_hider` 以「payload 目录 + 白名单文件名」精确匹配（`libwekit_native.so`、`libdexkit.so`、`libmmkv.so`），重映射前复核段未变化，失败只影响该段并返回 `-1`。上游按裸库名子串匹配且无条件 `MAP_FIXED`，WCX 收窄了这两点。
+7. **companion 判定**：只回答「该 UID + 进程名是否启用」。包名必须是 `com.tencent.mm` 或以 `com.tencent.mm.` 开头（上游仅 `starts_with`，会匹配 `com.tencent.mmx`，WCX 已修）；进程名必须是包名本身或以 `<package>:` 开头。
 
-## 5. WCX 必须修正的三处
+## 5. 明确排除
 
-| 问题 | 上游现状 | WCX 要求 |
-| --- | --- | --- |
-| `so_hider` 匹配过宽 | 子串匹配裸库名 | 改为规范化绝对路径精确匹配，只覆盖 WCX 自身的 loader/payload 库；同名但来自其他模块/应用的库不得命中 |
-| `so_hider` 覆盖语义 | `MAP_FIXED` 无条件替换 | 保留原段的起止与保护属性（含 BTI/MTE），失败时安全放弃该段并记录；重复调用不得破坏映射 |
-| 依赖版本不锁 | 无 `Cargo.lock` | 提交锁定文件并记录每个 crate 版本与校验和 |
+- Telegram 会话协商、包发现、`cache4.db`/WAL/SHM 读取，及对应 JNI 与 Kotlin 客户端。
+- 宽松 SELinux 规则：`sepolicy.rule` 未导入，模块不含该文件。
+- 任意文件复制、命令执行或其他应用数据访问的 companion 命令。
 
-## 6. 明确排除
+## 6. 实测结果（构建机，非真机）
 
-- `companion.rs` 的 Telegram 会话协商、包发现、`cache4.db`/WAL/SHM 读取。
-- `natives.rs` 中 `nativeHasTelegramRootCompanion` / `nativeListTelegramInstances` / `nativeCopyTelegramDatabaseSnapshot`。
-- `ZygiskTelegramRootClient.kt`。
-- 上游 `template/sepolicy.rule`（该提交为空文件）：WCX 不新增 SELinux 规则。
-- WebUI 的日志导出以外不新增命令入口；WebUI 不做任意命令执行。
+在 Debian 13 构建机（JDK 21、SDK platform 37.0、build-tools 37.0.0、NDK 30.0.14904198、Rust 1.102 nightly、CMake 3.31.6、Ninja 1.12.1）上：
 
-## 7. 待决问题
+- `sh zygisk/native/prepare-deps.sh`：拉取并检出两个子模块及 DexBuilder/parallel-hashmap。
+- `sh zygisk/native/build.sh`：编译通过；`zygisk/arm64-v8a.so` 为 ELF64/AArch64/DYN，导出 `zygisk_module_entry` 与 `zygisk_companion_entry`。
+- payload APK（`-PwcxZygisk=true`、legacy flavor、arm64-v8a）构建通过，含 Zygisk 入口类、无 `assets/xposed_init`、无 `META-INF/xposed/`、manifest 无 Xposed 声明与 libxposed provider。
+- 三种管理器 ZIP 由 `package_zip.py pack` 生成并通过 `verify`（模块 ID/版本、归档路径、安装脚本前提、loader ELF 与导出、payload 包名/签名/版本/ARM64 库集合）。
+- 宿主机单元测试：归档规则与打包原子性共 17 项通过。
 
-上游共享启动路径（第 54、67 行）把隐藏 API 豁免与 `app_qqprotect` 删除放在 Zygisk 也会走到的位置。这与实现计划 Task 3 Step 4「这两步只留在 Xposed 路径」直接冲突，需要明确取舍后才能写启动代码。
+**未验证**：真机安装、Zygisk 生命周期回调、LSPlant 初始化与 DEX trust、hook 语义、`so_hider` 实际映射效果、目标启停、子进程注入、停用/卸载回退。构建成功不等于运行时可用。
 
-## 8. 未验证事项
+## 7. 已知限制
 
-本文件仅基于源码阅读。以下均未执行，不能视为通过：
-
-- 未编译 native runtime（本机无 Rust/NDK/CMake）。
-- 未运行宿主机重定位测试。
-- 未在真机验证 ART 初始化、DEX trust、hook 语义或 `so_hider` 效果。
-- 未验证任何管理器的安装脚本。
+- payload 由测试密钥签名时仅用于构建校验；正式发布必须使用项目固定签名 keystore。
+- 目前只编译 `arm64-v8a`；payload APK 的 `armeabi-v7a` 分片不参与打包。
