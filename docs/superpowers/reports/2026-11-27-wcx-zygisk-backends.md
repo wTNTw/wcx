@@ -27,7 +27,7 @@ debuggable=true  xposed_bridge=absent attach_result=io_exception
 
 ## 仍需满足的 WCX 启动条件
 
-1. `UnifiedEntryPoint` 在发布 `StartupInfo.hookBridge` 之前就通过 `HookUtils` 调用 `XposedBridge`；仅提供一个 `IHookBridge` 实例不够。`WeLauncher` 后续也直接使用 Xposed 原始调用。仅有 `compileOnly` 的 API JAR 不提供运行时实现。
+1. `8421818` 后，`UnifiedEntryPoint` 的最早两个生命周期回调已改用显式传入的 `IHookBridge`。`WeLauncher` 的资源 Hook 和资源缺失兜底仍依赖 Xposed，不能仅靠替换入口就启动全部功能。仅有 `compileOnly` 的 API JAR 不提供运行时实现。
 2. `NativeLoader`、资源访问和设置页入口都要独立验证。Zygisk 路径不得运行现有 Xposed 专属的隐藏 API 豁免、保护目录删除或反检测逻辑，不改普通 APK 行为。
 3. 后端须先在自有测试应用验证方法与构造器、before/after 及优先级、参数和结果变更、异常、原始调用与解除。未满足前不生成或标记可用于 WCX 的 payload/ZIP。
 4. Windows ADB 当前仅有 ARM64 / Android 16 的 KernelSU 设备，未发现 Magisk CLI。Magisk 验收保持待办；不能把 KernelSU 结果作为 Magisk 的通过证据。
@@ -49,6 +49,13 @@ debuggable=true  xposed_bridge=absent attach_result=io_exception
 - 在 ARM64 / Android 16 / KernelSU 手机上以普通应用 UID 运行，`XposedBridge` 不可见，SELinux 保持 `Enforcing`。只用普通应用动态加载接口检查 `libart.so` 可见性，没有扫描或跨越加载命名空间。调用 `lsplant::Init` 时显式拒绝原生符号解析和代码改写；没有授予隐藏 API 豁免、标记受信任 DEX、装载 root 模块或编辑系统设置。
 - 普通动态加载返回 `library "libart.so" not found`（指该进程的正常加载路径，不是设备不存在 ART）。LSPlant 到达了原生解析阶段，返回 `Failed to find GetMethodShorty`、`Failed to init art method`；探针记录 `init=false stopped_by_probe=true resolver_requested=true code_change_requests=0`。这**不是**隐藏字段访问被系统拒绝，也不证明 LSPlant 在提供完整解析与安装器时必然失败；它证明本次限定路径没能完成初始化，没有执行 Hook、原方法调用或解除测试。
 - 临时 APK 已卸载；未改动微信或现有模块。该结果不构成 LSPlant 后端通过或 WCX 正式版验收。
+
+## WeKit 桥接的无绕过接入检查
+
+- 本地 `bootstrap-release.apk` 显示版本 `git+454e8fd6`（SHA-256 `41d6ed2234d74a2284c70a481a50a178cc06b42e7131cef1130f9b61170208a5`）。在 WeKit、WeKite、WCX 的公开仓库未找到与它匹配的源码提交；搜索到的同前缀提交属于不相关仓库。不能用其他版本源码替代该二进制的审计。
+- [WeKit 公开源码 `b51532b`](https://github.com/Ujhhgtg/WeKit/blob/b51532bf3427348af824d7d704e55081fac9ca55/wekit-zygisk/native/src/lifecycle.rs#L223-L251) 的原生启动要求 LSPlant 初始化及模块 DEX 信任两项都成功，否则在调用 Java `ZygiskEntry.init` 前直接退出。只关库隐藏不会改变这个前置条件。该版本调用的 LSPlant 也明确记录了隐藏 API 访问前提。
+- [WeKite `19bffe4`](https://github.com/SymonChu/WeKite/blob/19bffe4c98c8ccd966de47a4ebd059dc2a6286d8/app/src/main/java/com/github/wekite/loader/entry/zygisk/ArtHookBridge.kt#L461) 则在生成 Java Hook 桥接时把 DEX 信任成功作为断言。这两个可审查版本并不是关闭相关路径后仍能直接工作的候选。
+- 本轮为静态前置检查。未修改候选二进制、未构建正式 WCX Zygisk ZIP，也未在手机安装引导包、探针或 LSPosed 版 APK。只有可审查候选先满足无绕过条件，才能进行仅 Zygisk 的 WCX 安装验收。
 
 ## KernelSU 正式版验收状态
 
