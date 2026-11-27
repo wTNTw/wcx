@@ -4,6 +4,7 @@ import com.Johnny.wcx.features.core.FeaturesProvider
 import com.Johnny.wcx.loader.abc.IHookBridge
 import com.Johnny.wcx.loader.abc.ILoaderService
 import com.Johnny.wcx.loader.entry.xp51.Xp51HookImpl
+import com.Johnny.wcx.loader.startup.ModuleLoadStatus
 import com.Johnny.wcx.loader.startup.StartupAgent
 import com.Johnny.wcx.loader.startup.UnifiedEntryPoint
 import com.Johnny.wcx.utils.WeLogger
@@ -47,16 +48,31 @@ object ModuleLoader {
         savedHookBridge = hookBridge
         savedHostDataDir = hostDataDir
 
-        WeLogger.i(TAG, "loading in entry point ${loaderService.entryPointName}")
+        val entryPoint = runCatching { loaderService.entryPointName }.getOrNull()
+            ?.takeIf { it.isNotBlank() } ?: loaderService.javaClass.name
+        val framework = if (hookBridge == null) "Xposed（兼容入口）" else {
+            runCatching { hookBridge.frameworkName }.getOrNull()?.takeIf { it.isNotBlank() }
+        }
+        ModuleLoadStatus.waitingForHost(entryPoint, framework)
+        WeLogger.i(TAG, "loading in entry point $entryPoint (framework=${framework ?: "unknown"})")
         runCatching {
             // Older entry points can omit the bridge but have historically used legacy Xposed for startup hooks.
             val startupBridge = hookBridge ?: Xp51HookImpl.INSTANCE
             UnifiedEntryPoint.entry(initialClassLoader, startupBridge) { application ->
+                val recording = ModuleLoadStatus.beginInitialization()
                 runCatching {
                     StartupAgent.startup(loaderService, hookBridge, modulePath, application)
-                }.onFailure { WeLogger.e(TAG, "StartupAgent failed", it) }
+                }.onSuccess {
+                    if (recording) ModuleLoadStatus.loaded()
+                }.onFailure {
+                    if (recording) ModuleLoadStatus.failed(ModuleLoadStatus.FailureStage.INITIALIZE_MODULE, it)
+                    WeLogger.e(TAG, "StartupAgent failed", it)
+                }
             }
-        }.onFailure { WeLogger.e(TAG, "UnifiedEntryPoint failed", it) }
+        }.onFailure {
+            ModuleLoadStatus.failed(ModuleLoadStatus.FailureStage.REGISTER_LIFECYCLE, it)
+            WeLogger.e(TAG, "UnifiedEntryPoint failed", it)
+        }
     }
 
     /**

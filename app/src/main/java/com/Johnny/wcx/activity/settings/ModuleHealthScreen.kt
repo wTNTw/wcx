@@ -59,6 +59,7 @@ import com.Johnny.wcx.features.core.FeaturesProvider
 import com.Johnny.wcx.features.core.SwitchFeature
 import com.Johnny.wcx.features.items.contacts.HideContacts
 import com.Johnny.wcx.features.items.moments.BatchDeleteMoments
+import com.Johnny.wcx.loader.startup.ModuleLoadStatus
 import com.Johnny.wcx.preferences.WePrefs
 import com.Johnny.wcx.utils.android.showToast
 import com.Johnny.wcx.utils.crash.ExitReasonRecorder
@@ -1131,12 +1132,48 @@ private fun networkSection(context: Context): List<HealthItem> {
     }
 }
 
-/**
- * 运行环境：系统版本 / CPU 架构 / 当前进程。
- *
- * 这三项决定了「模块能不能装得上」——低版本系统缺 API、x86 设备没有对应 native 库、
- * 子进程里大部分 Hook 本来就不安装。区分清楚可以避免把环境限制误判成功能失效。
- */
+private fun moduleLoadHealthItem(section: String): HealthItem {
+    val load = ModuleLoadStatus.snapshot
+    val status = when (load.state) {
+        ModuleLoadStatus.State.NOT_OBSERVED -> "未观测到加载"
+        ModuleLoadStatus.State.WAITING_FOR_HOST -> "等待宿主回调"
+        ModuleLoadStatus.State.INITIALIZING -> "正在初始化"
+        ModuleLoadStatus.State.LOADED -> "启动完成"
+        ModuleLoadStatus.State.FAILED -> "启动失败"
+    }
+    val detail = if (load.state == ModuleLoadStatus.State.NOT_OBSERVED) {
+        "当前进程没有加载记录。独立 APK 不能读取微信进程的启动状态，也不能据此判断微信未加载。" +
+            "如果微信内无法打开本页，请查看微信进程的运行日志（ModuleLoader）。"
+    } else {
+        buildString {
+            append("只报告本进程实际收到的加载入口，不依据管理器是否安装来推断。\n")
+            append("框架：").append(load.framework ?: "未报告").append('\n')
+            append("入口：").append(load.entryPoint ?: "未报告").append('\n')
+            append("状态：").append(status)
+            if (load.state == ModuleLoadStatus.State.LOADED) {
+                append("\n这只表示启动流程返回，不代表每项功能都已可用。")
+            }
+            load.failure?.let { failure ->
+                val stage = when (failure.stage) {
+                    ModuleLoadStatus.FailureStage.REGISTER_LIFECYCLE -> "注册启动回调"
+                    ModuleLoadStatus.FailureStage.INITIALIZE_MODULE -> "模块初始化"
+                }
+                append("\n失败阶段：").append(stage)
+                append("\n失败原因：").append(failure.reason)
+            }
+        }
+    }
+    return HealthItem(
+        label = "当前加载模式",
+        section = section,
+        value = load.framework?.let { "$it · $status" } ?: status,
+        ok = load.state == ModuleLoadStatus.State.LOADED,
+        detail = detail,
+        inactive = load.state != ModuleLoadStatus.State.FAILED && load.state != ModuleLoadStatus.State.LOADED,
+    )
+}
+
+/** 运行环境：系统版本、CPU 架构、当前进程以及本进程实际观测到的加载状态。 */
 private fun environmentSection(context: Context): List<HealthItem> {
     val section = "运行环境"
     val out = mutableListOf<HealthItem>()
@@ -1167,12 +1204,14 @@ private fun environmentSection(context: Context): List<HealthItem> {
         inactive = !main,
     )
 
-    // 注入方式：运行时识别（比扫管理器包名准），覆盖 LSPatch 内置 / 免 Root 虚拟容器 / Root 框架
+    out += moduleLoadHealthItem(section)
+
+    // 环境特征、跨进程缓存及已安装管理器仅作线索，不能确认本次加载。
     val frameworks = ModuleDiagnostics.installedFrameworks(context)
     val injection = ModuleDiagnostics.detectInjection(context)
     out += HealthItem(
-        "注入方式", section, injection.method, injection.kind != "未知",
-        injection.detail + "\n\n已装的框架管理器：" +
+        "加载环境线索", section, injection.method, injection.kind != "未知",
+        "以下仅为环境线索，不是当前进程的加载结果。\n\n" + injection.detail + "\n\n已装的框架管理器：" +
             (if (frameworks.isEmpty()) "无"
             else frameworks.joinToString("、") { it.label + " v" + it.version }) +
             "\n\n识别列表之外的方案（比如修改版安装包自带的注入器）功能却正常时，" +
