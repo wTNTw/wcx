@@ -32,8 +32,19 @@ debuggable=true  xposed_bridge=absent attach_result=io_exception
 3. 后端须先在自有测试应用验证方法与构造器、before/after 及优先级、参数和结果变更、异常、原始调用与解除。未满足前不生成或标记可用于 WCX 的 payload/ZIP。
 4. Windows ADB 当前仅有 ARM64 / Android 16 的 KernelSU 设备，未发现 Magisk CLI。Magisk 验收保持待办；不能把 KernelSU 结果作为 Magisk 的通过证据。
 
+## 补充筛查：发布态的替代方案
+
+| 候选 | 结果 |
+| --- | --- |
+| [Android `profileable`](https://developer.android.com/guide/topics/manifest/profileable-element) | 允许发布包开放本地性能分析，不等于允许附加 JVMTI agent。用自有 APK 实测：Manifest 同时为 `android:debuggable=false` 和 `<profileable android:shell="true" />`，Android 16 上公开附加接口仍返回 `SecurityException`。APK 在 Debian 构建并核验 Manifest、签名与 SHA-256，没有打包 agent；测试结束已卸载。 |
+| [Pine](https://github.com/canyie/pine/blob/216d910f18b18430a5d21c510affb221a9833a55/README.md) | 文档所列支持上限为 Android 15 Beta 4，且默认关闭隐藏 API 限制。未找到其在保留安全检查的情况下支持该 Android 16 发布环境的验证，因此未引入。 |
+| [SandHook](https://github.com/asLody/SandHook/tree/16a59fa0eef011ca202814311b362a8a3bcda412) / [Epic](https://github.com/tiann/epic/blob/c67d0d3e3769c19119465784a579c659dd88c4ce/README.md) | 已公布的支持均只到 Android 11，不能作为当前 Android 16 验收的后端。 |
+| [AGP 构建期插桩](https://developer.android.com/reference/tools/gradle-api/8.13/com/android/build/api/variant/Instrumentation) 或宿主显式插件接口 | 适合自有、可重新构建或主动开放接口的宿主；不能直接拦截未修改的微信发布 APK 的任意 Java 方法。 |
+
+本轮没有确认新的正式版候选。没有为获取 Hook 能力修改微信 APK、系统策略或现有模块，不以测试探针作为正式发布 ZIP。
+
 ## KernelSU 正式版验收状态
 
-- **设备就绪，正式版阻塞。** 只读复核为 ARM64、Android 16（API 36）、KernelSU，微信版本为 8.0.80。此前两个探针 APK 和临时 Zygisk 模块均已卸载。未安装新产物，未改动手机配置。
+- **设备就绪，正式版阻塞。** 只读复核为 ARM64、Android 16（API 36）、KernelSU，微信版本为 8.0.80。Zygisk 实现已启用，临时探针 APK 和临时 Zygisk 模块均已卸载。未安装正式产物，未改动手机配置。当前微信 8.0.80 也在仓库文档所列的 8.0.69–8.0.79 验收范围之外，需单独验证适配，不能直接计为已支持版本。
 - **已有证据**：日志探针验证了 KernelSU 环境中的公共 Zygisk 回调与卸载回退；ART TI 探针验证了自有可调试 APK 的独立 Hook。两项都不能证明正式 WCX 启动。
 - **验收前提**：后端须在非调试发布环境下按既定安全边界工作，并与 WCX 的完整启动路径兼容。当前没有通过这个前提的后端或正式 ZIP，不进入正式版安装、设置页启动和卸载回归测试。
