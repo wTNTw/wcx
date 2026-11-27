@@ -99,4 +99,8 @@ bc73a465…e30a680 wcx-zygisk-apatch.zip
 
 隔离性证据（同一轮构建）：payload APK 含 7 处 `ZygiskEntry` 引用；不带属性的普通 legacy / standard APK 均为 0 处；普通 legacy 仍有 `assets/xposed_init`，standard 仍有 3 个 `META-INF/xposed/*`。
 
-**未验证（不得视为可用）**：真机安装、Zygisk 生命周期回调、LSPlant 初始化与 DEX trust、hook 语义、`so_hider` 实际映射效果、目标启停、`:` 子进程注入、停用/卸载与重启回退。缺少这些证据时，本项目只报告构建与静态校验结果。
+### 真机结果（KernelSU / Android 16 / 微信 8.0.80）：失败
+
+- 安装、模块激活、默认不注入、`config.sh` 扫描与启停：通过。禁用目标后微信立即恢复。
+- 启用目标后：微信进程在 attach 阶段死亡，`SIGILL` 命中 `libart.so art::ClassLinker::VisiblyInitializedCallback::MarkVisiblyInitialized+20`，栈上是 LSPlant 桥与 inline-hook 重定位的匿名可执行段（详见 `backend/README.md` 与后端报告）。
+- 因此**当前产物不可用**：hook 后端与该 ART 构建不兼容。未验证项（hook 语义、`so_hider` 实际映射、子进程注入稳定性、卸载回退）在修复前不必再测。

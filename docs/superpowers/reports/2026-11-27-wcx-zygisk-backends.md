@@ -76,3 +76,37 @@ debuggable=true  xposed_bridge=absent attach_result=io_exception
 - 上游共享启动路径仍调用 `HiddenApiBypass.setHiddenApiExemptions("L")` 并删除 `app_qqprotect`，Zygisk 路径同样执行。
 
 **状态：** 上述均为静态结论。本机无 Rust/NDK/CMake，未编译 runtime，未运行重定位测试，未做任何真机验证。此前的「未找到符合首版无绕过约束的后端」结论因范围调整而失效，但**新的验收结论仍未产生**。
+
+## 附：KernelSU 真机运行结果（2026-11-27，失败）
+
+**环境**：OnePlus PJZ110，Android 16（API 36），`arm64-v8a`，KernelSU + Zygisksu，微信 `com.tencent.mm` **8.0.80**（超出仓库文档的 8.0.69–8.0.79 支持范围）。已装 `wekite_zygisk` 但目标列表为空；WCX 未以 APK 形式安装，故 LSPosed 侧不存在双重注入。
+
+**安装与默认行为（通过）**
+
+- `ksud module install wcx-zygisk-kernelsu.zip` 成功：模块暂存到 `modules_update`，重启后 `zygisk/arm64-v8a.so`（766 976 B）与 `module.apk`（44 892 894 B）就位。
+- 目标为空时启动微信：主进程、`:push`、`:appbrand0/1` 正常运行，logcat 中无任何 `WcxZygisk` 记录 → 未注入，fail-closed 生效。
+
+**目标启用与注入（失败）**
+
+`config.sh refresh` → 发现 `0 com.tencent.mm 0`；`set 0 com.tencent.mm 1` 后强停并重启微信，进程在 attach 阶段死亡：
+
+```text
+W ActivityManager: Process ProcessRecord{... 25330:com.tencent.mm/u0a514} failed to attach
+I ActivityManager: Killing 25330:com.tencent.mm/u0a514 (adj -10000): start timeout
+```
+
+`/data/tombstones/tombstone_02`、`tombstone_03`（同一时刻两次，均为 `usap64`，uid 10514）：
+
+```text
+signal 4 (SIGILL), code 1 (ILL_ILLOPC), fault addr 0x000000737fa01064
+#00 pc 0x401064  libart.so (art::ClassLinker::VisiblyInitializedCallback::MarkVisiblyInitialized(art::Thread*)+20)
+#01 pc 0x0903e4  <anonymous:2ef0373000>
+#02 pc 0x15d63c  <anonymous:2ef05ed000>
+#03 pc 0x7b9f58  libart.so (art::ClassLinker::MakeInitializedClassesVisiblyInitialized(art::Thread*, bool)+148)
+```
+
+`#01`/`#02` 是匿名可执行段，即 LSPlant 生成的桥与 inline-hook 重定位代码。崩溃发生在 app zygote（`usap64`）执行 ART 类初始化路径时，属于导入的 ARM64 inline-hook 后端与该设备 ART 构建不兼容，而不是伴随脚本或目标判定问题。
+
+**回退（通过）**：`config.sh set 0 com.tencent.mm 0` 后强停并重启微信，主进程与 `:push`、`:appbrand*` 全部恢复，无需重启设备。模块仍处于安装但目标关闭状态。
+
+**结论**：构建与静态校验通过，但**真机运行不可用**。在修复 ART inline-hook 与该 ART 构建的兼容性（或换用其他 LSPlant/重定位实现）并复测之前，本分支不应产出可发布 ZIP。证据文件保存在设备外的构建工作区（`tombstone_02`、`tombstone_03`）。

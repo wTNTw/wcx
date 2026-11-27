@@ -141,8 +141,11 @@ cmd_refresh() {
     [ "$users" -gt 0 ] || { rm -f "$scan" "$enabled"; fail "no Android user could be scanned"; }
 
     merged=$STATE_DIR/.merged.$$
-    sort -u -k1,1n -k2,2 "$scan" | awk -F '\t' -v OFS='\t' '
-        NR == FNR { on[$0] = 1; next }
+    # FILENAME (not NR == FNR) decides which input is which: on a fresh install
+    # the previous state is empty, and NR == FNR would then also match the first
+    # scanned line and silently publish an empty list.
+    sort -u -k1,1n -k2,2 "$scan" | awk -F '\t' -v OFS='\t' -v enabled_file="$enabled" '
+        FILENAME == enabled_file { on[$0] = 1; next }
         { print $1, $2, (($1 "\t" $2) in on ? "1" : "0") }' "$enabled" - > "$merged" ||
         { rm -f "$scan" "$enabled" "$merged"; fail "cannot merge scan results"; }
     publish "$merged"
