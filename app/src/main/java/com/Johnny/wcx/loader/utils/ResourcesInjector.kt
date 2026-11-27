@@ -34,7 +34,10 @@ object ResourcesInjector {
         resources ?: return
         if (hasModuleRes(resources)) return
 
-        val modulePath = StartupInfo.modulePath
+        val modulePath = StartupInfo.modulePath ?: run {
+            WeLogger.w(TAG, "skipping module resources: module APK path is unavailable")
+            return
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             injectResGte30(resources, modulePath)
         } else {

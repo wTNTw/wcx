@@ -5,8 +5,8 @@ import com.Johnny.wcx.loader.abc.IHookBridge
 import com.Johnny.wcx.loader.abc.ILoaderService
 import com.Johnny.wcx.loader.entry.xp51.Xp51HookImpl
 import com.Johnny.wcx.loader.startup.ModuleLoadStatus
-import com.Johnny.wcx.loader.startup.StartupAgent
 import com.Johnny.wcx.loader.startup.UnifiedEntryPoint
+import com.Johnny.wcx.loader.startup.XposedStartup
 import com.Johnny.wcx.utils.WeLogger
 
 object ModuleLoader {
@@ -61,7 +61,7 @@ object ModuleLoader {
             UnifiedEntryPoint.entry(initialClassLoader, startupBridge) { application ->
                 val recording = ModuleLoadStatus.beginInitialization()
                 runCatching {
-                    StartupAgent.startup(loaderService, hookBridge, modulePath, application)
+                    XposedStartup.startup(loaderService, hookBridge, modulePath, application)
                 }.onSuccess {
                     if (recording) ModuleLoadStatus.loaded()
                 }.onFailure {

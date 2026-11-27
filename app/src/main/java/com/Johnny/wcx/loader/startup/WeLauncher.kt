@@ -30,7 +30,8 @@ import com.Johnny.wcx.utils.reflection.int
 
 object WeLauncher {
 
-    fun init(context: Context) {
+    /** Launches the existing Xposed features; not part of shared host setup. */
+    internal fun init(context: Context) {
         WeLogger.d(TAG, "loading in process name=${TargetProcesses.currentName}, type=${TargetProcesses.currentType}")
 
         // 尽早接管未捕获异常：模块后台线程/协程抛异常时只记录、不结束宿主进程，
