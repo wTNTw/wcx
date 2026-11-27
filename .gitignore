@@ -39,3 +39,6 @@ local.properties
 dist/
 .worktrees/
 /zygisk/dist/
+
+__pycache__/
+*.pyc
