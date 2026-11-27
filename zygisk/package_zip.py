@@ -65,6 +65,12 @@ XPOSED_MANIFEST_MARKERS = {
 XPOSED_SERVICE_MARKER = "io.github.libxposed.service.XposedProvider"
 WECHAT_PACKAGE_PREFIX = "com.tencent.mm"
 
+# The payload variant and the ordinary legacy release share an output path, so a
+# plain `assembleLegacyRelease` can silently overwrite the payload. Every release
+# payload must therefore still contain the Zygisk entry class descriptor.
+ZYGISK_ENTRY_DESCRIPTOR = b"loader/entry/zygisk/ZygiskEntry"
+DEX_NAME = re.compile(r"classes[0-9]*\.dex")
+
 
 class VerificationError(Exception):
     pass
@@ -199,6 +205,7 @@ def verify_apk(apk, expected_package, release, tools):
         libs = {n for n in names if n.startswith("lib/") and n.endswith(".so")}
         require(all(n.startswith("lib/arm64-v8a/") for n in libs), "payload contains a non-ARM64 library")
         if release:
+            check_zygisk_entry(archive)
             require("resources.arsc" in names, "release payload is missing resources.arsc")
             require(
                 {f"lib/arm64-v8a/{name}" for name in REQUIRED_NATIVE_LIBS} <= libs,
@@ -224,6 +231,17 @@ def verify_apk(apk, expected_package, release, tools):
         "release payload is debuggable",
     )
     return package[3], package[2]
+
+
+def check_zygisk_entry(archive):
+    """Reject an APK that was built without -PwcxZygisk=true."""
+    for name in archive.namelist():
+        if DEX_NAME.fullmatch(name) and ZYGISK_ENTRY_DESCRIPTOR in archive.read(name):
+            return
+    raise VerificationError(
+        "payload does not contain the Zygisk entry class "
+        "(ordinary APK built without -PwcxZygisk=true?)"
+    )
 
 
 def verify_loader(loader, tools):

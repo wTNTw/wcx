@@ -270,6 +270,27 @@ class PackTests(unittest.TestCase):
             )
 
 
+class ZygiskEntryTests(unittest.TestCase):
+    """The release payload check must catch an ordinary legacy APK."""
+
+    def test_payload_without_entry_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temp:
+            apk = Path(temp) / "plain.apk"
+            with zipfile.ZipFile(apk, "w") as zf:
+                zf.writestr("classes.dex", b"ordinary classes")
+            with self.assertRaises(pz.VerificationError) as caught:
+                pz.check_zygisk_entry(zipfile.ZipFile(apk))
+            self.assertIn("Zygisk entry", str(caught.exception))
+
+    def test_payload_with_entry_is_accepted(self):
+        with tempfile.TemporaryDirectory() as temp:
+            apk = Path(temp) / "payload.apk"
+            with zipfile.ZipFile(apk, "w") as zf:
+                zf.writestr("classes.dex", b"no entry here")
+                zf.writestr("classes2.dex", b"Lcom/Johnny/wcx/loader/entry/zygisk/ZygiskEntry;")
+            pz.check_zygisk_entry(zipfile.ZipFile(apk))
+
+
 class TemplateTests(unittest.TestCase):
     """The shipped templates must satisfy the same rules the packer enforces."""
 
