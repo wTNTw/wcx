@@ -193,3 +193,13 @@ FeaturesLoader: enabling all hook items took 68.663802ms
 ### 结论
 
 Zygisk 部署在当前设备上**可以运行**，前提是同一微信实例只有一个 ART 注入器。剩余待办是设置入口与更细的功能回归，不再是「无法启动」。
+
+## 附：设置入口（Zygisk 专用常驻入口）
+
+排查结论：WCX 在微信内的设置入口来自 `features/items/home_screen_menu/ModuleSettings`（首页右上角「+」菜单里的「WCX」项），它是 `SwitchFeature`，`defaultEnabled = false`。正常（APK）部署下用户可以从应用图标打开设置再开启它；**Zygisk payload 没有应用图标**，于是形成死锁：进不去设置 → 无法开启入口 → 更进不去设置。
+
+处理：新增 `app/src/zygisk/java/com/Johnny/wcx/loader/entry/zygisk/ZygiskMenuEntry.kt`，作为 `ApiFeature`（始终启用）向 `WeHomeScreenPopupMenuApi` 注册一个常驻「WCX」菜单项，点击调用 `WeSettingsInjector.openSettingsDialog`。该文件只在 `-PwcxZygisk=true` 时进入 payload；当用户以后手动开启原 `ModuleSettings` 时，新入口让位（`isActive` 时返回空列表），不会出现两个同名项。
+
+状态：代码完成、payload 构建通过（payload 内含新入口标记）。**端到端验证未完成** —— 需要一次 zygote 未崩溃的干净启动（见上节），当时设备进入异常状态，微信的 MAIN/LAUNCHER intent 无法解析（`am start` 返回 `Error type 3`），故未能确认「+」菜单里出现该项。
+
+设备侧排查记录：在 `touch /data/adb/modules/wcx_zygisk/disable` 停用本模块后重启，微信依旧 `No activity found`，说明该现象与本模块无关；同期 `logcat -b crash` 有 `init` 的 `SIGABRT` 记录，`screencap` 返回全黑帧（屏幕状态报告为 ON）。这些问题超出本模块范围，需要单独恢复设备。
