@@ -17,7 +17,9 @@ class ZygiskLoaderService(
     private val modulePath: String,
 ) : ILoaderService {
 
-    private const val TAG = "ZygiskLoader"
+    private companion object {
+        const val TAG = "ZygiskLoader"
+    }
 
     override val entryPointName: String = "com.Johnny.wcx.loader.entry.zygisk.ZygiskEntry"
 
