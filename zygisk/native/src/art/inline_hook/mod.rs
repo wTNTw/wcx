@@ -182,6 +182,27 @@ fn install(target: usize, replacement: usize) -> Result<usize> {
         .try_reserve(1)
         .context("reserve inline hook record")?;
     replace_code(target, &hook.original, &hook.patch)?;
+    let patch_words: Vec<String> = hook
+        .patch
+        .chunks_exact(4)
+        .map(|c| format!("{:08x}", u32::from_le_bytes([c[0], c[1], c[2], c[3]])))
+        .collect();
+    let after = memory::read(target, 24, true).unwrap_or_default();
+    let after_words: Vec<String> = after
+        .chunks_exact(4)
+        .map(|c| format!("{:08x}", u32::from_le_bytes([c[0], c[1], c[2], c[3]])))
+        .collect();
+    let backup_bytes = memory::read(backup, 24, false).unwrap_or_default();
+    let backup_words: Vec<String> = backup_bytes
+        .chunks_exact(4)
+        .map(|c| format!("{:08x}", u32::from_le_bytes([c[0], c[1], c[2], c[3]])))
+        .collect();
+    crate::logi!(
+        "WcxZygisk: inline hook applied target={target:#x} patch=[{}] then=[{}] backup=[{}]",
+        patch_words.join(" "),
+        after_words.join(" "),
+        backup_words.join(" ")
+    );
     backend.hooks.insert(target, hook);
     Ok(backup)
 }
