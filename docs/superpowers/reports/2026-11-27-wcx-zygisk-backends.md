@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | [公共 Zygisk API v5](https://github.com/topjohnwu/zygisk-module-sample/blob/8ce26128f81baaed0b969aaf7f52f886b61af4ab/module/jni/zygisk.hpp) | 提供生命周期回调及 JNI/PLT 拦截，没有任意 Java 方法与构造器的 hook 接口。 | 保留为 loader 的模块入口，不当作 `IHookBridge` 后端。 |
 | [Android ART TI / JVMTI](https://source.android.com/docs/core/runtime/art-ti) | 官方仅支持附加到应用开发者启用调试的进程。ARM64 / Android 16 实机对照验证相符。 | 只用于自有可调试应用，不能作为 WCX 正式版的后端。 |
-| [LSPlant](https://github.com/LSPosed/LSPlant/blob/3a240637e621677457c202150100d3ebcab924c6/README.md) | LGPL-3.0；公开接口记录了方法 hook、解除和去优化，初始化仍需调用方提供原生 inline hook 和 ART 内部符号解析。 | 未集成、未实测。它不是现成的 `IHookBridge`，也没有在本项目的兼容性及不绕过安全检查的约束下通过验证。 |
+| [LSPlant](https://github.com/LSPosed/LSPlant/blob/3a240637e621677457c202150100d3ebcab924c6/README.md) | LGPL-3.0；公开接口记录了方法 hook、解除和去优化，初始化仍需调用方提供原生 inline hook 和 ART 内部符号解析。 | 未集成。已在自有非调试 APK 实测 6.4 的初始化边界；在不提供私有符号解析和代码改写的情况下，未通过启动前提检查（见下）。 |
 
 ## ART TI 真机对照
 
@@ -42,6 +42,13 @@ debuggable=true  xposed_bridge=absent attach_result=io_exception
 | [AGP 构建期插桩](https://developer.android.com/reference/tools/gradle-api/8.13/com/android/build/api/variant/Instrumentation) 或宿主显式插件接口 | 适合自有、可重新构建或主动开放接口的宿主；不能直接拦截未修改的微信发布 APK 的任意 Java 方法。 |
 
 本轮没有确认新的正式版候选。没有为获取 Hook 能力修改微信 APK、系统策略或现有模块，不以测试探针作为正式发布 ZIP。
+
+## LSPlant 6.4：自有非调试 APK 实机诊断
+
+- Debian 使用 Maven Central 的 `org.lsposed.lsplant:lsplant-standalone:6.4`，AAR SHA-256 为 `5ffc352d937968397db86cabf074039c305014863a130015eaa70b056b080406`，对应[上游源码标签](https://github.com/LSPosed/LSPlant/tree/v6.4)。构建并核验了签名、哈希和 Manifest `android:debuggable=false`。
+- 在 ARM64 / Android 16 / KernelSU 手机上以普通应用 UID 运行，`XposedBridge` 不可见，SELinux 保持 `Enforcing`。只用普通应用动态加载接口检查 `libart.so` 可见性，没有扫描或跨越加载命名空间。调用 `lsplant::Init` 时显式拒绝原生符号解析和代码改写；没有授予隐藏 API 豁免、标记受信任 DEX、装载 root 模块或编辑系统设置。
+- 普通动态加载返回 `library "libart.so" not found`（指该进程的正常加载路径，不是设备不存在 ART）。LSPlant 到达了原生解析阶段，返回 `Failed to find GetMethodShorty`、`Failed to init art method`；探针记录 `init=false stopped_by_probe=true resolver_requested=true code_change_requests=0`。这**不是**隐藏字段访问被系统拒绝，也不证明 LSPlant 在提供完整解析与安装器时必然失败；它证明本次限定路径没能完成初始化，没有执行 Hook、原方法调用或解除测试。
+- 临时 APK 已卸载；未改动微信或现有模块。该结果不构成 LSPlant 后端通过或 WCX 正式版验收。
 
 ## KernelSU 正式版验收状态
 
