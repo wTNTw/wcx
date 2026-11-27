@@ -159,3 +159,37 @@ WCX 的启动与功能代码仍直接引用 `de.robv.android.xposed.*`（`app/li
 ### 环境状态备注
 
 联调期间出现过两次与 WCX 无关的 `zygote64` 崩溃（`selinux_android_setcontext(... "oplusgame_app" ...)` 失败，`com.oplus.cosa`）。zygote 重启后 KernelSU 不再重新注入，表现为「本 boot 所有模块的 loader 均无日志」。排查注入类问题时需先确认 zygote 是否发生过重启。
+
+## 附：Xposed 兼容层落地后的真机结果（成功）
+
+上一节记录的 `NoClassDefFoundError: Lde/robv/android/xposed/XC_MethodHook` 已通过**运行期兼容层**解决：`app/src/zygisk/java/de/robv/android/xposed/` 提供与 `xposed-api-82.jar` 二进制兼容的 `XposedBridge` / `XC_MethodHook` / `XC_MethodReplacement` / `XposedHelpers` / `XCallback` / `XC_LoadPackage` 等，全部转发到 `IHookBridge`。该目录只在 `-PwcxZygisk=true` 时进入 payload，普通 APK 不受影响。
+
+兼容层用 **Java** 编写，而不是 Kotlin：Kotlin 源码会遮蔽 compileOnly jar 里的同名 Java 类，导致 `param.result` 这类属性语法失效（`Unresolved reference 'result'`），而 Java 影子类保持了与 jar 一致的互操作规则。
+
+### 实测（OnePlus PJZ110 / Android 16 / KernelSU / 微信 8.0.80）
+
+```text
+WcxZygisk: preAppSpecialize OK for com.tencent.mm[:push|:appbrand0|:appbrand1]
+WcxZygisk: LSPlant initialized
+WcxZygisk: trusted 1 DexFile(s) for class loader ...
+ZygiskEntry: hooked AppComponentFactory.instantiateClassLoader on android.app.AppComponentFactory
+UnifiedEntryPoint: hooking Application.attachBaseContext
+UnifiedEntryPoint: Application.attachBaseContext invoked, hooking Instrumentation.callApplicationOnCreate
+StartupAgent: hid loaded module libraries
+FeaturesLoader: enabling all hook items took 68.663802ms
+```
+
+- 微信主进程与 `:push`、`:appbrand0`、`:appbrand1` 四个进程同时注入并正常运行（`do_epoll_wait`，无死转）。
+- WCX 功能生效：`FeaturesLoader` 完成启用；例如 `SkipRewardedAds` 实际改写 `WAGameAd.js` / `WAAppAd.js` 并收到 bridge 事件。
+- `so_hider` 生效：`remapped 9 segment(s)`，随后 `/proc/<pid>/maps` 中 `wcx-native` 路径计数为 **0**。
+- 无 `E WCX` 级错误；微信界面正常（截图确认会话列表与「我」页面）。
+- 普通变体回归：`standard` 仍含 `assets/xposed_init` + 3 个 `META-INF/xposed/*`，`legacy` 仍含 `assets/xposed_init`，两者都不含 Zygisk 代码。
+
+### 仍未观察到的部分
+
+- WCX 在微信内的**设置入口**没有出现在「我」或「设置」页面（截图核对）。启动链路与功能 hook 均正常，因此问题在 UI 入口注入这一段，需要单独排查（可能与 `HostInfo.isModule` 判定有关：payload 未以 APK 形式安装）。
+- 未验证：hook 解绑/热重载、更新 payload 后的行为、子进程内的功能完整性、停用/卸载后的回退。
+
+### 结论
+
+Zygisk 部署在当前设备上**可以运行**，前提是同一微信实例只有一个 ART 注入器。剩余待办是设置入口与更细的功能回归，不再是「无法启动」。
