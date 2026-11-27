@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <title>WCX Zygisk</title>
+    <link rel="stylesheet" href="css/app.css" />
+  </head>
+  <body>
+    <main class="page">
+      <header class="header">
+        <div>
+          <p class="eyebrow">WCX</p>
+          <h1>Zygisk 注入目标</h1>
+        </div>
+        <div class="counter"><span id="enabled-count">0</span><span>已启用</span></div>
+      </header>
+
+      <section class="toolbar">
+        <button id="refresh" class="primary" type="button">扫描已安装实例</button>
+        <button id="export" class="secondary" type="button">查看日志</button>
+      </section>
+
+      <p class="hint">
+        启用一个实例会同时注入它的主进程和 <code>:...</code> 子进程。同一实例不要再开启
+        WCX 的 LSPosed 作用域。新发现的实例默认关闭。
+      </p>
+
+      <section>
+        <div id="status" class="status" role="status">正在读取…</div>
+        <ul id="targets" class="targets" hidden></ul>
+      </section>
+
+      <section id="log-panel" class="log-panel" hidden>
+        <div class="log-head">
+          <code>/data/adb/wcx_zygisk/webui.log</code>
+          <button id="close-log" class="secondary" type="button">关闭</button>
+        </div>
+        <pre id="log" class="log">尚未加载</pre>
+      </section>
+    </main>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script type="module" src="js/app.js"></script>
+  </body>
+</html>

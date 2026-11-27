@@ -1,0 +1,6 @@
+id=wcx_zygisk
+name=WCX (Zygisk / @MANAGER@)
+version=@VERSION_NAME@
+versionCode=@VERSION_CODE@
+author=WCX
+description=WCX Zygisk deployment (@MANAGER@). Injects the enabled WeChat instances into their main and child processes. KernelSU/APatch select targets in the module WebUI; Magisk always targets com.tencent.mm. Do not keep the WCX LSPosed scope enabled for the same instance.

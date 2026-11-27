@@ -189,7 +189,7 @@ impl CodeMemory {
         let raw_fd = unsafe {
             libc::syscall(
                 libc::SYS_memfd_create,
-                c"wekit-inline-hook".as_ptr(),
+                c"wcx-inline-hook".as_ptr(),
                 libc::MFD_CLOEXEC,
             )
         };

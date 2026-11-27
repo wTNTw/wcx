@@ -142,3 +142,11 @@
     java.lang.String m;
     java.lang.String d;
 }
+
+# ── Zygisk payload entry ─────────────────────────────────────────────────────
+# ZygiskEntry and ArtHookBridge are resolved by FQN from native
+# (postAppSpecialize / RegisterNatives), so R8 must keep their names and all
+# members. The same rule covers the callback runtime, whose "callback" method is
+# looked up reflectively by the bridge.
+-keep class com.Johnny.wcx.loader.entry.zygisk.** { *; }
+-keep class com.Johnny.wcx.loader.utils.ZygiskNativePayload { *; }

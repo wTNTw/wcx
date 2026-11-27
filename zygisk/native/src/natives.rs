@@ -161,7 +161,7 @@ pub unsafe fn register_hook_bridge_natives(env: *mut RawJNIEnv, class_loader: jo
     let class = load_class_from_loader(
         env,
         class_loader,
-        "dev.ujhhgtg.wekit.loader.entry.zygisk.ArtHookBridge",
+        "com.Johnny.wcx.loader.entry.zygisk.ArtHookBridge",
     );
     if class.is_null() {
         loge!("WcxZygisk: failed to load ArtHookBridge class");
