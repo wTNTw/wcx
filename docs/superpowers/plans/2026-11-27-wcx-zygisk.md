@@ -55,14 +55,17 @@
 
 ## 2. 验证 loader 与桥接可行性（发布阻断点）
 
-- [ ] 盘点现有依赖：`UnifiedEntryPoint.entry()` 的启动 hook 走 `HookUtils.kt`，其中 `hookAfterDirectly` 仍直接调用 `XposedBridge.hookMethod`；`app/libs/xposed-api-82.jar` 只是 `compileOnly`。下列命令列出直接依赖，不能用一个空壳 `IHookBridge` 或打包编译期 stub 来通过构建。
+**Debian 预检（源码 `2917cce`）：** x86_64 主机可用 JDK 21、SDK 37.0、NDK 30 和 Rust ARM64 target；`adb devices -l` 无设备，未安装 Android 模拟器和系统镜像。该提交还没有 Zygisk loader。将当前源码和 API JAR 从 Git 树传到 Debian 后，无 Xposed 类路径的 JVM 找不到 `XposedBridge`，而 `javap -c` 确认编译期 JAR 的 `hookMethod` 只会抛出 `RuntimeException("Stub!")`。因此直接复用当前入口或把 stub 打入 payload 都不能提供运行时桥接。这是依赖验证，不是 Android 上的启动测试。Windows ADB 已识别一台 ARM64 / Android 16 手机，但设备当前使用 KernelSU + Zygisk 实现，LSPosed 与 WeKite Zygisk 模块均启用，不能作为本计划的 Magisk / 无 LSPosed 验收环境。现有模块和微信作用域保持原样。
+
+- [x] 盘点现有依赖：`UnifiedEntryPoint.entry()` 的启动 hook 走 `HookUtils.kt`，其中 `hookAfterDirectly` 仍直接调用 `XposedBridge.hookMethod`；`app/libs/xposed-api-82.jar` 只是 `compileOnly`。下列命令列出直接依赖，不能用一个空壳 `IHookBridge` 或打包编译期 stub 来通过构建。
 
   ```bash
   git grep -l -E 'XposedBridge|XposedHelpers|XC_MethodHook' -- app/src/main/java
   git grep -n -E 'compileOnly.*xposed|ensureHiddenApiAccess|app_qqprotect' -- app/build.gradle.kts app/src/main/java
   ```
 
-- [ ] 固定来自 Magisk 官方示例的公共 API 头文件与许可证，把 loader 限定为 NDK `arm64-v8a`，先做只记录启动状态的冒烟模块，在用户控制的测试进程验证匹配、忽略其他进程、模块禁用后的行为。此阶段不调用 WCX、不改宿主安全逻辑；原生库输出路径为 `zygisk/native/build/libwcx_zygisk.so`。
+- [x] 在 [`zygisk/smoke/`](../../../zygisk/smoke/README.md) 维护独立的日志探针，锁定官方公共 Zygisk API v5 头文件和 SHA-256。已在 Debian 构建并校验 APK 签名、ZIP 结构、ARM64 ELF 及 `zygisk_module_entry`。在 Android 16 / ARM64 / KernelSU 手机的自有测试进程中，同一 PID 先记录 `probe_post_app_specialize`，后记录 `probe_app_started xposed_bridge=absent`；卸载探针模块并重启后只剩应用侧日志，随后也卸载了探针 APK。这不是 WCX 启动或 Magisk 兼容性的证据。
+- [ ] 在启用 Magisk/Zygisk 的 ARM64 设备上重复日志探针与卸载回归，单独记录 Magisk 版本和非目标进程检查结果。今后实际 loader 原生库输出路径为 `zygisk/native/build/libwcx_zygisk.so`，不复用日志探针模块 ID 或产物。
 - [ ] 在测试进程验证候选 Java hook 后端的最低能力：方法/构造器，优先级与 before/after，修改参数和结果，异常传递，调用原方法与解除 hook。实现代码必须有明确许可证和固定来源。确认 APK 内运行时依赖来自实现库，不是 Xposed 编译期 stub；如果后端不可用或必须依靠安全检查绕过，记录阻塞，不把冒烟模块标为可用的 WCX ZIP。
 - [ ] 梳理进入设置页前必经的直接 Xposed 调用、`NativeLoader` 的 DexKit/MMKV/`wekit_native` 查找、模块资源以及 `WeLauncher` 的功能初始化。只选择能由兼容层真实满足的调用；不支持的可选功能从 payload 的可用范围中剔除并列清单。启动路径若仍强依赖尚未实现的调用，停在独立 ZIP/基线验证，不标记 Zygisk 版可用。
 

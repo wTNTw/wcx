@@ -1,0 +1,6 @@
+id=wcx_zygisk_probe
+name=WCX Zygisk Smoke Probe
+version=0.1
+versionCode=1
+author=WCX
+description=Log-only Zygisk callback test for dev.wcx.zygisk.probe. Does not load WCX or target WeChat.
