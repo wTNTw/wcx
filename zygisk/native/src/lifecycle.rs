@@ -127,6 +127,18 @@ pub unsafe fn do_pre_app_specialize(module: &mut WcxModule, args: *mut AppSpecia
     logi!("WcxZygisk: preAppSpecialize OK for {nice_name}");
 }
 
+
+/// Looks for a foreign Xposed/LSPosed runtime already mapped into this process.
+fn foreign_framework_marker() -> Option<&'static str> {
+    const MARKERS: &[&str] = &["liblspd.so", "libxposed.so", "liblspd_", "lsposed"];
+    let maps = std::fs::read("/proc/self/maps").ok()?;
+    let text = String::from_utf8_lossy(&maps).to_ascii_lowercase();
+    MARKERS
+        .iter()
+        .find(|marker| text.contains(**marker))
+        .copied()
+}
+
 pub unsafe fn do_post_app_specialize(module: &mut WcxModule, _args: *const AppSpecializeArgs) {
     if !module.enabled {
         return;
@@ -162,6 +174,17 @@ pub unsafe fn do_post_app_specialize(module: &mut WcxModule, _args: *const AppSp
             return;
         }
     };
+
+    // Another Xposed/LSPosed framework in this process also inline-hooks ART.
+    // Two hookers on the same function corrupt each other's rejoin point, so
+    // WCX must not start here; the manager still sees a clean failure instead
+    // of a process-wide SIGILL.
+    if let Some(marker) = foreign_framework_marker() {
+        loge!(
+            "WcxZygisk: refusing to initialise: another Xposed/LSPosed framework is present ({marker})"
+        );
+        return;
+    }
 
     // Build InMemoryDexClassLoader
     let fns = *module.env;
@@ -276,4 +299,16 @@ pub unsafe fn do_post_app_specialize(module: &mut WcxModule, _args: *const AppSp
 
 pub unsafe fn do_pre_server_specialize(module: &mut WcxModule, _args: *mut ServerSpecializeArgs) {
     (*module.api).set_option(DLCLOSE_MODULE_LIBRARY);
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn marker_list_covers_known_frameworks() {
+        // The helper scans /proc/self/maps of the *host* process, so only the
+        // marker list itself is unit-testable here.
+        const MARKERS: &[&str] = &["liblspd.so", "libxposed.so", "liblspd_", "lsposed"];
+        assert!(MARKERS.contains(&"liblspd.so"));
+        assert!(MARKERS.iter().any(|m| m.contains("lspd")));
+    }
 }
