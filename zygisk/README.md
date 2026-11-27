@@ -72,10 +72,25 @@ python3 zygisk/package_zip.py verify <zip> --profile magisk
 
 ## 验证状态
 
-| 项目 | 状态 |
+在 Debian 13 构建机（JDK 21、SDK platform 37.0、build-tools 37.0.0、NDK 30.0.14904198、Rust 1.102 nightly、CMake 3.31.6、Ninja 1.12.1）上实测：
+
+| 项目 | 结果 |
 | --- | --- |
-| loader 编译（AArch64 ELF、导出符号） | 已在构建机通过 |
-| payload APK 构建（无 Xposed 元数据） | 已在构建机通过 |
-| 归档规则单元测试 | 通过 |
-| 三份 ZIP 静态校验 | 见本轮构建记录 |
-| 真机安装、目标启停、子进程注入、回退 | **未验证** |
+| `prepare-deps.sh`（LSPlant/XZ/DexBuilder） | 通过 |
+| loader 编译：ELF64 / AArch64 / DYN，导出 `zygisk_module_entry` + `zygisk_companion_entry` | 通过 |
+| payload APK（`-PwcxZygisk=true`，legacy，arm64-v8a） | 通过；含 Zygisk 入口类，无 `assets/xposed_init`、无 `META-INF/xposed/`、manifest 无 Xposed 声明与 libxposed provider |
+| 三份管理器 ZIP（pack + verify） | 通过 |
+| 归档规则与打包原子性单元测试（17 项） | 通过 |
+| 普通 `standard` / `legacy` 回归 | 通过：standard 仍含 `assets/xposed_init` + 3 个 `META-INF/xposed/*`，legacy 仍含 `assets/xposed_init`；manifest 仍声明 Xposed 模块 |
+
+参考哈希（本轮构建，payload 由**测试密钥**签名，非发布签名）：
+
+```text
+8d73bcb4…6967536  app-legacy-arm64-v8a-release.apk
+1bc59684…b765b0b4  zygisk/arm64-v8a.so
+04f60edc…2dcbabf  wcx-zygisk-magisk.zip
+7d6e9d09…4a3e2ed  wcx-zygisk-kernelsu.zip
+8d53dfe9…1805a1f  wcx-zygisk-apatch.zip
+```
+
+**未验证（不得视为可用）**：真机安装、Zygisk 生命周期回调、LSPlant 初始化与 DEX trust、hook 语义、`so_hider` 实际映射效果、目标启停、`:` 子进程注入、停用/卸载与重启回退。缺少这些证据时，本项目只报告构建与静态校验结果。
