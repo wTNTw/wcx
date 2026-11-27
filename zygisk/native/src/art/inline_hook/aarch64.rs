@@ -23,6 +23,39 @@ pub enum Error {
     Memory(String),
 }
 
+/// Recognises an absolute-jump entry trampoline installed by another framework:
+/// `ldr xN, [pc, #imm]` followed by `br xN`. Returns the total footprint in
+/// bytes (header + literal) when the pattern matches.
+///
+/// Such a trampoline belongs to whoever installed it. Relocating only its first
+/// instructions and resuming at our own patch end would land inside its literal
+/// pool, so callers must not treat it as an ordinary prologue.
+pub fn foreign_trampoline_len(words: &[u32]) -> Option<usize> {
+    if words.len() < 2 {
+        return None;
+    }
+    let load = words[0];
+    // LDR (literal) 64-bit: opc=01, V=0, and the destination is a GPR.
+    if load & 0xff00_0000 != 0x5800_0000 {
+        return None;
+    }
+    let register = load & 31;
+    let branch = words[1];
+    // BR Xn with the same register.
+    if branch & 0xffff_fc1f != 0xd61f_0000 || branch & 31 != register {
+        return None;
+    }
+    let literal_offset = sx((load >> 5) & 0x7ffff, 19) * 4;
+    if literal_offset < 8 {
+        return None;
+    }
+    let total = literal_offset as usize + 8;
+    if total % 4 != 0 || total > 64 {
+        return None;
+    }
+    Some(total)
+}
+
 pub fn landing_pad(word: u32) -> bool {
     // PACIASP/PACIBSP are also guarded-page landing instructions. Replacing one
     // requires a BTI at the original address; signing itself runs in the backup.
@@ -321,4 +354,50 @@ pub fn relocate(
     }
     jump(&mut code, destination, source_end, &mut relay)?;
     Ok(code)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Observed on a retail device: another framework's 24-byte entry
+    /// trampoline in front of `art::ClassLinker::VisiblyInitializedCallback::
+    /// MarkVisiblyInitialized`.
+    const FOREIGN: [u32; 6] = [0x5800_0091, 0xd61f_0220, NOP, NOP, 0x7eff_5608, 0x0000_0031];
+    const PROLOGUE: [u32; 5] = [
+        0xd503_233f, // paciasp
+        0xd104_43ff, // sub sp, sp, #0x110
+        0xa90b_7bfd,
+        0xa90c_6ffc,
+        0xa90d_67fa,
+    ];
+
+    #[test]
+    fn detects_absolute_jump_trampoline() {
+        assert_eq!(foreign_trampoline_len(&FOREIGN), Some(24));
+    }
+
+    #[test]
+    fn treats_ordinary_prologue_as_hookable() {
+        assert_eq!(foreign_trampoline_len(&PROLOGUE), None);
+    }
+
+    #[test]
+    fn rejects_ldr_br_with_mismatched_register() {
+        let words = [0x5800_0091, 0xd61f_0020, NOP, NOP];
+        assert_eq!(foreign_trampoline_len(&words), None);
+    }
+
+    #[test]
+    fn rejects_short_or_truncated_input() {
+        assert_eq!(foreign_trampoline_len(&[0x5800_0091]), None);
+        assert_eq!(foreign_trampoline_len(&[]), None);
+    }
+
+    #[test]
+    fn rejects_impossible_literal_offset() {
+        // imm19 = 0 (literal immediately after the LDR) is not a trampoline.
+        let words = [0x5800_0011, 0xd61f_0220, NOP, NOP];
+        assert_eq!(foreign_trampoline_len(&words), None);
+    }
 }

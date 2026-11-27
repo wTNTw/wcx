@@ -169,6 +169,21 @@ fn install(target: usize, replacement: usize) -> Result<usize> {
             words.join(" ")
         );
     }
+    // Refuse to instrument a function that another framework already
+    // trampolined. Relocating part of that trampoline and resuming after our
+    // own, shorter patch would continue inside its literal pool.
+    if let Ok(bytes) = memory::read(target, 16, true) {
+        let words: Vec<u32> = bytes
+            .chunks_exact(4)
+            .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+            .collect();
+        if let Some(len) = aarch64::foreign_trampoline_len(&words) {
+            crate::loge!(
+                "WcxZygisk: refusing to hook {target:#x}: {len}-byte trampoline belongs to another framework"
+            );
+            bail!("target already trampolined by another framework");
+        }
+    }
     let hook = prepare(target, replacement)?;
     crate::logi!(
         "WcxZygisk: inline hook target={target:#x} patch_len={} backup={:#x}",
