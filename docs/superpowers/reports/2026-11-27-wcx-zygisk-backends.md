@@ -110,3 +110,52 @@ signal 4 (SIGILL), code 1 (ILL_ILLOPC), fault addr 0x000000737fa01064
 **回退（通过）**：`config.sh set 0 com.tencent.mm 0` 后强停并重启微信，主进程与 `:push`、`:appbrand*` 全部恢复，无需重启设备。模块仍处于安装但目标关闭状态。
 
 **结论**：构建与静态校验通过，但**真机运行不可用**。在修复 ART inline-hook 与该 ART 构建的兼容性（或换用其他 LSPlant/重定位实现）并复测之前，本分支不应产出可发布 ZIP。证据文件保存在设备外的构建工作区（`tombstone_02`、`tombstone_03`）。
+
+## 附：真机联调记录（2026-11-27 晚，KernelSU）
+
+环境：OnePlus PJZ110、Android 16（API 36）、KernelSU + Zygisksu、微信 `com.tencent.mm` 8.0.80。
+
+### 已打通的链路
+
+1. `ksud module install` → 暂存 → 重启后 loader 与 payload 就位。
+2. 默认（无目标）不注入：微信主进程与子进程正常运行，无任何 loader 日志。
+3. `config.sh refresh/list/set` 正常；新目标默认关闭。
+4. 启用目标后：`preAppSpecialize OK for com.tencent.mm`，以及 `:push`、`:appbrand0`、`:appbrand1` 均被选中 —— 目标匹配与子进程覆盖符合设计。
+5. payload 按内容哈希发布到 app 私有目录，`InMemoryDexClassLoader` 建立成功。
+6. LSPlant 初始化成功（6 个 ART inline hook，`patch_len=8`，入口原本干净），模块 DEX trust 成功。
+7. `ZygiskEntry.init` 运行，hook 住 `AppComponentFactory.instantiateClassLoader`，拿到微信真实 `PathClassLoader`，交给 `ModuleLoader`。
+
+### 本轮修掉的真实缺陷
+
+| 缺陷 | 现象 | 修复 |
+| --- | --- | --- |
+| `config.sh` 用 `awk 'NR==FNR'` 区分两个输入 | 全新安装时状态文件为空，扫描行被当成第一个文件，目标列表永远为空 | 改用 `FILENAME` 判断 |
+| `adb push` 覆盖模块文件后 SELinux 标签变成 `adb_data_file` | 微信进程 `cannot open module.apk: Permission denied` | `chcon u:object_r:system_file:s0` + 0644 |
+| `HybridClassLoader` 用 `loadClass` 回查 payload loader，而该 loader 的 parent 已被指向 Hybrid | 主线程无限递归类加载，进程 114% CPU 挂死 | 反射调用 `ClassLoader.findClass`（不经父委派）+ 线程内重入保护 |
+| `so_hider` 只比对 `/data/user/0/<pkg>` | 实际映射路径是 `/data/data/<pkg>`，一个段都没命中 | 同时接受规范路径别名 |
+| 外来 entry trampoline 被当作普通序言搬迁 | `SIGILL` 落在对方跳板的字面量里 | 检测 `ldr xN,#imm; br xN` 跳板并拒绝 hook |
+
+### 仍未通过的一步
+
+启动推进到 `WeLauncher` 之前即失败：
+
+```text
+E WCX: ModuleLoader: StartupAgent failed
+E WCX: java.lang.NoClassDefFoundError: Failed resolution of: Lde/robv/android/xposed/XC_MethodHook;
+```
+
+WCX 的启动与功能代码仍直接引用 `de.robv.android.xposed.*`（`app/libs/xposed-api-82.jar` 只是 `compileOnly`）。Zygisk 进程里没有该框架，因此需要一层运行期兼容实现（`XposedBridge` / `XC_MethodHook` / `XposedHelpers` 等映射到 `IHookBridge`），或把这些调用点改为走 `IHookBridge`。这是下一步的工作量主体。
+
+### 兼容性约束（实测）
+
+微信进程里同时存在其他 ART hooker 时，WCX 的 entry 补丁会被后来者按自己的跳板长度覆盖，重入点落进对方字面量 → `SIGILL`。本轮复现过的注入者：
+
+- LSPosed：两个启用且作用域含微信的模块（取消微信作用域后消失）
+- `FunBox For Zygisk`（`/data/adb/funbox/enablewx` 存在即注入微信）
+- `zygisk-module-xfingerprint-pay-all`（`scope.applied` 中 `wechat=keep`）
+
+因此 WCX Zygisk 要求**同一微信实例上只有一个 ART 注入器**；这与设计里「不要同时开启 LSPosed 版」一致，但范围更大：其他模块的注入同样会触发冲突。
+
+### 环境状态备注
+
+联调期间出现过两次与 WCX 无关的 `zygote64` 崩溃（`selinux_android_setcontext(... "oplusgame_app" ...)` 失败，`com.oplus.cosa`）。zygote 重启后 KernelSU 不再重新注入，表现为「本 boot 所有模块的 loader 均无日志」。排查注入类问题时需先确认 zygote 是否发生过重启。
