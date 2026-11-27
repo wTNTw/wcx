@@ -59,6 +59,27 @@ pub fn parse_maps_line(line: &[u8]) -> Option<MapEntry> {
     })
 }
 
+/// A directory may be reachable through more than one spelling
+/// (`/data/user/0/<pkg>` and `/data/data/<pkg>` are the same directory). Both
+/// the given path and its canonical form are accepted so an exact match does
+/// not silently miss every segment.
+fn directory_spellings(dir: &str) -> Vec<String> {
+    let mut spellings = vec![dir.to_owned()];
+    if let Ok(canonical) = std::fs::canonicalize(dir) {
+        if let Some(canonical) = canonical.to_str() {
+            if canonical != dir {
+                spellings.push(canonical.to_owned());
+            }
+        }
+    }
+    spellings
+}
+
+/// Matches `<dir>/<allow-listed library>` for any accepted spelling of `dir`.
+pub fn is_wcx_library_in_any(path: &str, dirs: &[String]) -> bool {
+    dirs.iter().any(|dir| is_wcx_library(path, dir))
+}
+
 /// True when `path` is exactly `<dir>/<allow-listed library>`.
 ///
 /// The comparison is on the canonical directory plus an exact file name, so a
@@ -183,9 +204,10 @@ pub fn hide_libraries_in_dir(dir: &str) -> i32 {
         loge!("WcxZygisk: so_hider: refusing non-absolute payload directory");
         return -1;
     }
+    let spellings = directory_spellings(dir);
     let entries: Vec<MapEntry> = read_maps()
         .into_iter()
-        .filter(|e| is_wcx_library(&e.path, dir))
+        .filter(|e| is_wcx_library_in_any(&e.path, &spellings))
         .collect();
     if entries.is_empty() {
         logw!("WcxZygisk: so_hider: no payload library mapped in {dir}");
@@ -246,6 +268,17 @@ mod tests {
         assert!(!is_wcx_library(&format!("{DIR}/../arm64/libdexkit.so"), DIR));
         assert!(!is_wcx_library("libdexkit.so", DIR));
         assert!(!is_wcx_library(&format!("{DIR}/libdexkit.so"), ""));
+    }
+
+    #[test]
+    fn accepts_alias_spelling_of_the_same_directory() {
+        let alias = "/data/data/com.tencent.mm/files/.wcx-native/payload/arm64".to_owned();
+        let spellings = vec![DIR.to_owned(), alias.clone()];
+        assert!(is_wcx_library_in_any(
+            &format!("{alias}/libdexkit.so"),
+            &spellings
+        ));
+        assert!(!is_wcx_library_in_any(&format!("{alias}/libhchat_crash.so"), &spellings));
     }
 
     #[test]
