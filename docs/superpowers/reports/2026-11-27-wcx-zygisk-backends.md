@@ -62,3 +62,17 @@ debuggable=true  xposed_bridge=absent attach_result=io_exception
 - **设备就绪，正式版阻塞。** 只读复核为 ARM64、Android 16（API 36）、KernelSU，微信版本为 8.0.80。Zygisk 实现已启用，临时探针 APK 和临时 Zygisk 模块均已卸载。未安装正式产物，未改动手机配置。当前微信 8.0.80 也在仓库文档所列的 8.0.69–8.0.79 验收范围之外，需单独验证适配，不能直接计为已支持版本。
 - **已有证据**：日志探针验证了 KernelSU 环境中的公共 Zygisk 回调与卸载回退；ART TI 探针验证了自有可调试 APK 的独立 Hook。两项都不能证明正式 WCX 启动。
 - **验收前提**：后端须在非调试发布环境下按既定安全边界工作，并与 WCX 的完整启动路径兼容。当前没有通过这个前提的后端或正式 ZIP，不进入正式版安装、设置页启动和卸载回归测试。
+
+## 附：上游 WeKit 运行时源码审计（`b51532b`）
+
+范围由用户确认扩大为「完整移植 WeKit Zygisk 运行时 + 全部微信子进程 + `so_hider`」，排除 Telegram root companion 与数据库访问。逐文件清单、许可证、行为与排除项见 [`zygisk/backend/README.md`](../../../zygisk/backend/README.md)。
+
+**审计事实（仅源码阅读）：**
+
+- 上游 `native/Cargo.toml` 使用宽松版本声明且该提交无 `Cargo.lock`；LSPlant 为 LGPL-3.0 并静态链接。导入前需锁定依赖并确认分发义务。
+- `art::init` 解析 `libart.so` 私有符号后调用 LSPlant；`INITIALIZED`/`ART_SYMBOLS` 为 `OnceLock`，初始化失败在本进程内不可重试。
+- `art::trust_class_loader` 通过反射读取 `DexFile.mCookie` 后调用 `MakeDexFileTrusted`，任一 DexFile 失败即整体失败。
+- `so_hider` 用裸库名子串匹配（`libdexkit.so`、`libwekit_native.so`、`libmmkv.so`）并以 `MAP_FIXED` 覆盖映射；同提交的 `art/inline_hook/memory.rs` 明确只用 `MAP_FIXED_NOREPLACE`，两者策略不一致。
+- 上游共享启动路径仍调用 `HiddenApiBypass.setHiddenApiExemptions("L")` 并删除 `app_qqprotect`，Zygisk 路径同样执行。
+
+**状态：** 上述均为静态结论。本机无 Rust/NDK/CMake，未编译 runtime，未运行重定位测试，未做任何真机验证。此前的「未找到符合首版无绕过约束的后端」结论因范围调整而失效，但**新的验收结论仍未产生**。
