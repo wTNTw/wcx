@@ -67,6 +67,7 @@
 - [x] 在 [`zygisk/smoke/`](../../../zygisk/smoke/README.md) 维护独立的日志探针，锁定官方公共 Zygisk API v5 头文件和 SHA-256。已在 Debian 构建并校验 APK 签名、ZIP 结构、ARM64 ELF 及 `zygisk_module_entry`。在 Android 16 / ARM64 / KernelSU 手机的自有测试进程中，同一 PID 先记录 `probe_post_app_specialize`，后记录 `probe_app_started xposed_bridge=absent`；卸载探针模块并重启后只剩应用侧日志，随后也卸载了探针 APK。这不是 WCX 启动或 Magisk 兼容性的证据。
 - [ ] 在启用 Magisk/Zygisk 的 ARM64 设备上重复日志探针与卸载回归，单独记录 Magisk 版本和非目标进程检查结果。今后实际 loader 原生库输出路径为 `zygisk/native/build/libwcx_zygisk.so`，不复用日志探针模块 ID 或产物。
 - [ ] 在测试进程验证候选 Java hook 后端的最低能力：方法/构造器，优先级与 before/after，修改参数和结果，异常传递，调用原方法与解除 hook。实现代码必须有明确许可证和固定来源。确认 APK 内运行时依赖来自实现库，不是 Xposed 编译期 stub；如果后端不可用或必须依靠安全检查绕过，记录阻塞，不把冒烟模块标为可用的 WCX ZIP。
+  已完成候选筛查与 ART TI 真机对照，详见[独立后端验证报告](../reports/2026-11-27-wcx-zygisk-backends.md)。公共 Zygisk API 缺少通用 Java hook，公开 JVMTI 接口拒绝非 debuggable APK；尚无后端通过上述接口验证，此项保持未完成。
 - [ ] 梳理进入设置页前必经的直接 Xposed 调用、`NativeLoader` 的 DexKit/MMKV/`wekit_native` 查找、模块资源以及 `WeLauncher` 的功能初始化。只选择能由兼容层真实满足的调用；不支持的可选功能从 payload 的可用范围中剔除并列清单。启动路径若仍强依赖尚未实现的调用，停在独立 ZIP/基线验证，不标记 Zygisk 版可用。
 
 ## 3. 增加独立 ARM64 payload
