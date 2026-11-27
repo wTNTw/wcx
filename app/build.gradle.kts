@@ -69,7 +69,10 @@ android {
     //              META-INF/xposed/*), placed in the `standard` flavor source set.
     //  - legacy:   omits both, so frameworks with poor libxposed compatibility fall
     //              back to the traditional de.robv entry (Xp51HookEntry via
-    //              assets/xposed_init, which lives in `main` and is shared by both).
+    //              assets/xposed_init, which lives in `src/xposed` and is shared by both).
+    //
+    // assets/xposed_init intentionally is not in `main`: the Zygisk payload
+    // (built with -PwcxZygisk=true) must not advertise any Xposed entry point.
     flavorDimensions += "entrypoint"
     productFlavors {
         create("standard") {
@@ -86,7 +89,27 @@ android {
         }
     }
 
+    sourceSets["standard"].assets.srcDir("src/xposed/assets")
+    sourceSets["legacy"].assets.srcDir("src/xposed/assets")
+
     sourceSets["main"].jniLibs.directories += "src/main/jniLibs"
+
+    // The Zygisk deployment adds its entry, bridge and payload support to the
+    // `main` source set only when explicitly requested, so ordinary builds keep
+    // exactly the same inputs and task graph. Build a payload with
+    //   ./gradlew :app:assembleLegacyRelease -PwcxZygisk=true
+    // (the `legacy` flavor already excludes META-INF/xposed/*).
+    val zygiskPayload = providers.gradleProperty("wcxZygisk")
+        .map(String::toBoolean)
+        .orElse(false)
+        .get()
+    if (zygiskPayload) {
+        sourceSets["main"].java.srcDir("src/zygisk/java")
+        // The loader is packaged separately as zygisk/arm64-v8a.so; the packer
+        // takes the arm64-v8a payload split by explicit path.
+        lint { checkReleaseBuilds = false }
+        logger.lifecycle("WCX Zygisk payload build enabled (arm64-v8a only)")
+    }
 
     var foundKeystore = false
 

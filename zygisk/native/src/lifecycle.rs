@@ -5,7 +5,9 @@
 // `postAppSpecialize` (APK publication, in-memory DEX bootstrap), and
 // `preServerSpecialize` (dlclose — module does not inject into system_server).
 
-use crate::protocol::{COMPANION_ENABLED, COMPANION_REQUEST_ENABLED, read_u8_from_fd, write_u8_to_fd};
+use crate::protocol::{
+    COMPANION_ENABLED, COMPANION_REQUEST_ENABLED, read_u8_from_fd, write_string_to_fd, write_u8_to_fd,
+};
 use crate::zygisk::{ApiTable, AppSpecializeArgs, DLCLOSE_MODULE_LIBRARY, ServerSpecializeArgs};
 use crate::{loge, logi};
 use jni::sys::{JNIEnv as RawJNIEnv, jobject, jstring};

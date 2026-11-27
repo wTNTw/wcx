@@ -6,6 +6,12 @@ object HybridClassLoader : ClassLoader(ClassLoaders.BOOT) {
 
     private val bootClassLoader = ClassLoaders.BOOT
     lateinit var moduleParentClassLoader: ClassLoader
+    /**
+     * The module's own loader when it cannot be reached through
+     * [moduleParentClassLoader] (the Zygisk payload is loaded by an
+     * `InMemoryDexClassLoader` whose parent is the system loader).
+     */
+    var moduleClassLoader: ClassLoader? = null
     lateinit var hostClassLoader: ClassLoader
     val additionalLoaders = mutableListOf<ClassLoader>()
 
@@ -19,8 +25,12 @@ object HybridClassLoader : ClassLoader(ClassLoaders.BOOT) {
                 return bootClassLoader.loadClass(name.removePrefix(PREFIX_BOOT))
             }
             name.startsWith(PREFIX_MODULE) -> {
+                val moduleName = name.removePrefix(PREFIX_MODULE)
+                moduleClassLoader?.let {
+                    runCatching { return it.loadClass(moduleName) }
+                }
                 if (::moduleParentClassLoader.isInitialized) {
-                    return moduleParentClassLoader.loadClass(name.removePrefix(PREFIX_MODULE))
+                    return moduleParentClassLoader.loadClass(moduleName)
                 }
                 throw ClassNotFoundException("Forced MODULE route failed: moduleParentClassLoader is not initialized. Class: $name")
             }
@@ -35,6 +45,12 @@ object HybridClassLoader : ClassLoader(ClassLoaders.BOOT) {
         try {
             return bootClassLoader.loadClass(name)
         } catch (_: ClassNotFoundException) {}
+
+        moduleClassLoader?.let {
+            try {
+                return it.loadClass(name)
+            } catch (_: ClassNotFoundException) {}
+        }
 
         if (::moduleParentClassLoader.isInitialized) {
             try {

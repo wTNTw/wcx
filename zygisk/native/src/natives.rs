@@ -75,24 +75,39 @@ extern "C" fn jni_hide_loaded_module_libraries(
     _class: jclass,
     directory: jstring,
 ) -> jboolean {
-    if directory.is_null() {
+    if env.is_null() || directory.is_null() {
         return JNI_FALSE;
     }
+    unsafe {
+        let dir = match jstring_to_string(env, directory) {
+            Some(s) => s,
+            None => return JNI_FALSE,
+        };
+        if dir.is_empty() {
+            return JNI_FALSE;
+        }
+        if crate::so_hider::hide_libraries_in_dir(&dir) >= 0 {
+            JNI_TRUE
+        } else {
+            JNI_FALSE
+        }
+    }
+}
+
+/// Read a JNI string without trusting it: returns `None` on allocation failure
+/// or invalid UTF-8.
+unsafe fn jstring_to_string(env: *mut RawJNIEnv, s: jstring) -> Option<String> {
     let fns = *env;
-    let chars = ((*fns).v1_6.GetStringUTFChars)(env, directory, std::ptr::null_mut());
+    let chars = ((*fns).v1_6.GetStringUTFChars)(env, s, std::ptr::null_mut());
     if chars.is_null() {
-        return JNI_FALSE;
+        return None;
     }
-    let dir = match CStr::from_ptr(chars as *const c_char).to_str() {
-        Ok(s) => s.to_owned(),
-        Err(_) => String::new(),
-    };
-    ((*fns).v1_6.ReleaseStringUTFChars)(env, directory, chars);
-    if dir.is_empty() {
-        return JNI_FALSE;
-    }
-    let ok = crate::so_hider::hide_libraries_in_dir(&dir) >= 0;
-    if ok { JNI_TRUE } else { JNI_FALSE }
+    let value = CStr::from_ptr(chars as *const c_char)
+        .to_str()
+        .ok()
+        .map(str::to_owned);
+    ((*fns).v1_6.ReleaseStringUTFChars)(env, s, chars);
+    value
 }
 
 // ── ZygiskEntry JNI implementations ──────────────────────────────────────────
