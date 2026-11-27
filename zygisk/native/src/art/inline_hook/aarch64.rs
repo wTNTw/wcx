@@ -41,8 +41,8 @@ pub fn foreign_trampoline_len(words: &[u32]) -> Option<usize> {
     }
     let register = load & 31;
     let branch = words[1];
-    // BR Xn with the same register.
-    if branch & 0xffff_fc1f != 0xd61f_0000 || branch & 31 != register {
+    // BR Xn with the same register (Rn is bits[9:5]).
+    if branch & 0xffff_fc1f != 0xd61f_0000 || (branch >> 5) & 31 != register {
         return None;
     }
     let literal_offset = sx((load >> 5) & 0x7ffff, 19) * 4;
