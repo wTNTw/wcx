@@ -32,18 +32,22 @@ sh zygisk/native/build.sh dist/zygisk
 # 2. payload APK（只取 arm64-v8a 的 legacy 变体）
 bash gradlew :app:assembleLegacyRelease -PwcxZygisk=true
 # -> app/build/outputs/apk/legacy/release/app-legacy-arm64-v8a-release*.apk
+#
+# 立刻取出 payload：不带属性的普通 legacy release 构建会写到同一路径，把它覆盖成
+# 不含 Zygisk 入口的普通 APK。打包器会拒绝这种 APK，但别让构建顺序成为唯一防线。
+cp app/build/outputs/apk/legacy/release/app-legacy-arm64-v8a-release.apk dist/zygisk/payload.apk
 
 # 3. 三种管理器模块包
 for manager in magisk kernelsu apatch; do
   python3 zygisk/package_zip.py pack \
-    --apk app/build/outputs/apk/legacy/release/app-legacy-arm64-v8a-release.apk \
+    --apk dist/zygisk/payload.apk \
     --loader dist/zygisk/zygisk/arm64-v8a.so \
     --manager "$manager" \
     --output "dist/wcx-zygisk-$manager.zip"
 done
 ```
 
-`pack` 只接受显式路径，不会在 `app/build/outputs` 里挑选历史产物。校验失败时不会覆盖已有 ZIP。
+`pack` 只接受显式路径，不会在 `app/build/outputs` 里挑选历史产物。它会拒绝不含 Zygisk 入口类的 APK（即未带 `-PwcxZygisk=true` 构建的普通包），校验失败时不会覆盖已有 ZIP。
 
 `-PwcxZygisk=true` 只在该次调用中把 `app/src/zygisk/java` 加入 `main`、并从资源中排除 `assets/xposed_init`。不带该属性时构建输入与任务图与之前一致。
 
