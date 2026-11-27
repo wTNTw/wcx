@@ -91,8 +91,10 @@ object WeHomeScreenPopupMenuApi : ApiFeature(), IResolveDex {
     }
 
     override fun onEnable() {
+        WeLogger.d(TAG, "installing home menu hooks (providers=${providers.snapshot().size})")
         // WeChat 8.0.70 moved this to com.tencent.mm.ui.HomeUI
         methodAddItem.hookAfter {
+            WeLogger.d(TAG, "addItem hook fired (providers=${providers.snapshot().size})")
             var thisObj = thisObject
 
             if (thisObj.javaClass.simpleName == "HomeUI") {

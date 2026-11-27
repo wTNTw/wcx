@@ -29,7 +29,10 @@ import de.robv.android.xposed.XC_MethodHook
 )
 object ZygiskMenuEntry : ApiFeature(), WeHomeScreenPopupMenuApi.IMenuItemsProvider {
 
+    private const val TAG = "ZygiskMenuEntry"
+
     override fun onEnable() {
+        com.Johnny.wcx.utils.WeLogger.i(TAG, "registering Zygisk settings entry")
         WeHomeScreenPopupMenuApi.addProvider(this)
     }
 
@@ -38,6 +41,10 @@ object ZygiskMenuEntry : ApiFeature(), WeHomeScreenPopupMenuApi.IMenuItemsProvid
     }
 
     override fun getMenuItems(param: XC_MethodHook.MethodHookParam): List<WeHomeScreenPopupMenuApi.MenuItem> {
+        com.Johnny.wcx.utils.WeLogger.i(
+            TAG,
+            "getMenuItems requested; regular entry active=${ModuleSettings.isActive}",
+        )
         // The user may still enable the regular entry from settings; never show two.
         if (ModuleSettings.isActive) return emptyList()
         return listOf(
