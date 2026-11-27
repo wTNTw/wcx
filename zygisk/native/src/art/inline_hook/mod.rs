@@ -154,7 +154,27 @@ fn install(target: usize, replacement: usize) -> Result<usize> {
     if backend.hooks.contains_key(&target) {
         bail!("address already hooked");
     }
+    // Diagnostic: record what the entry already contains. A foreign absolute
+    // jump trampoline (`ldr xN,#imm; br xN; ...; .quad target`) must not be
+    // relocated blindly, because resuming after our shorter patch would land
+    // inside its literal pool.
+    if let Ok(bytes) = memory::read(target, 32, true) {
+        let words: Vec<String> = bytes
+            .chunks_exact(4)
+            .take(5)
+            .map(|c| format!("{:08x}", u32::from_le_bytes([c[0], c[1], c[2], c[3]])))
+            .collect();
+        crate::logi!(
+            "WcxZygisk: inline hook target={target:#x} entry=[{}]",
+            words.join(" ")
+        );
+    }
     let hook = prepare(target, replacement)?;
+    crate::logi!(
+        "WcxZygisk: inline hook target={target:#x} patch_len={} backup={:#x}",
+        hook.patch.len(),
+        hook.backup
+    );
     let backup = hook.backup;
     // Allocate the registry entry before publishing live code.
     backend
