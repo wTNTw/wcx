@@ -8,12 +8,8 @@ use std::io::{self, ErrorKind};
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 pub const COMPANION_REQUEST_ENABLED: u8 = 0x01;
-pub const COMPANION_REQUEST_TELEGRAM_SESSION: u8 = 0x02;
 pub const COMPANION_DISABLED: u8 = 0;
 pub const COMPANION_ENABLED: u8 = 1;
-
-pub const TELEGRAM_REQUEST_DISCOVER: u8 = 0x01;
-pub const TELEGRAM_REQUEST_COPY_DATABASE: u8 = 0x02;
 
 // ── Private IO helpers ────────────────────────────────────────────────────────
 
@@ -62,12 +58,6 @@ pub fn read_i32_from_fd(fd: c_int) -> io::Result<i32> {
     Ok(i32::from_ne_bytes(b))
 }
 
-pub fn read_u64_from_fd(fd: c_int) -> io::Result<u64> {
-    let mut b = [0u8; 8];
-    read_exact_fd(fd, &mut b)?;
-    Ok(u64::from_ne_bytes(b))
-}
-
 /// Reads exactly `n` bytes from `fd`.
 pub fn read_bytes_from_fd(fd: c_int, n: usize) -> io::Result<Vec<u8>> {
     let mut buf = vec![0u8; n];
@@ -87,10 +77,6 @@ pub fn write_u8_to_fd(fd: c_int, v: u8) -> io::Result<()> {
 }
 
 pub fn write_u16_to_fd(fd: c_int, v: u16) -> io::Result<()> {
-    write_exact_fd(fd, &v.to_ne_bytes())
-}
-
-pub fn write_u64_to_fd(fd: c_int, v: u64) -> io::Result<()> {
     write_exact_fd(fd, &v.to_ne_bytes())
 }
 
@@ -134,20 +120,6 @@ mod tests {
         let (r, w) = make_socketpair();
         write_u8_to_fd(w, 0x02).unwrap();
         assert_eq!(read_u8_from_fd(r).unwrap(), 0x02);
-        unsafe {
-            libc::close(r);
-            libc::close(w);
-        }
-    }
-
-    #[test]
-    fn error_frame_roundtrip() {
-        let (r, w) = make_socketpair();
-        write_u8_to_fd(w, 2).unwrap();
-        write_string_to_fd(w, "oops").unwrap();
-        assert_eq!(read_u8_from_fd(r).unwrap(), 2);
-        let msg = read_string_from_fd(r).unwrap();
-        assert_eq!(msg, "oops");
         unsafe {
             libc::close(r);
             libc::close(w);
