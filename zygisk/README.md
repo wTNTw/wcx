@@ -87,14 +87,16 @@ python3 zygisk/package_zip.py verify <zip> --profile magisk
 | 归档规则与打包原子性单元测试（17 项） | 通过 |
 | 普通 `standard` / `legacy` 回归 | 通过：standard 仍含 `assets/xposed_init` + 3 个 `META-INF/xposed/*`，legacy 仍含 `assets/xposed_init`；manifest 仍声明 Xposed 模块 |
 
-参考哈希（本轮构建，payload 由**测试密钥**签名，非发布签名）：
+参考哈希（本轮构建；payload 由**测试密钥**签名，非发布签名）：
 
 ```text
-8d73bcb4…6967536  app-legacy-arm64-v8a-release.apk
-1bc59684…b765b0b4  zygisk/arm64-v8a.so
-04f60edc…2dcbabf  wcx-zygisk-magisk.zip
-7d6e9d09…4a3e2ed  wcx-zygisk-kernelsu.zip
-8d53dfe9…1805a1f  wcx-zygisk-apatch.zip
+570a117a…9bbf08  payload.apk（legacy arm64-v8a，含 Zygisk 入口）
+1bc59684…65b0b4  zygisk/arm64-v8a.so
+24ad2527…959c82  wcx-zygisk-magisk.zip
+b2ba7374…b186402 wcx-zygisk-kernelsu.zip
+bc73a465…e30a680 wcx-zygisk-apatch.zip
 ```
+
+隔离性证据（同一轮构建）：payload APK 含 7 处 `ZygiskEntry` 引用；不带属性的普通 legacy / standard APK 均为 0 处；普通 legacy 仍有 `assets/xposed_init`，standard 仍有 3 个 `META-INF/xposed/*`。
 
 **未验证（不得视为可用）**：真机安装、Zygisk 生命周期回调、LSPlant 初始化与 DEX trust、hook 语义、`so_hider` 实际映射效果、目标启停、`:` 子进程注入、停用/卸载与重启回退。缺少这些证据时，本项目只报告构建与静态校验结果。
