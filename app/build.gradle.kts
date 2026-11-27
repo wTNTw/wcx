@@ -89,11 +89,6 @@ android {
         }
     }
 
-    sourceSets["standard"].assets.srcDir("src/xposed/assets")
-    sourceSets["legacy"].assets.srcDir("src/xposed/assets")
-
-    sourceSets["main"].jniLibs.directories += "src/main/jniLibs"
-
     // The Zygisk deployment adds its entry, bridge and payload support to the
     // `main` source set only when explicitly requested, so ordinary builds keep
     // exactly the same inputs and task graph. Build a payload with
@@ -103,6 +98,14 @@ android {
         .map(String::toBoolean)
         .orElse(false)
         .get()
+
+    if (!zygiskPayload) {
+        sourceSets["standard"].assets.srcDir("src/xposed/assets")
+        sourceSets["legacy"].assets.srcDir("src/xposed/assets")
+    }
+
+    sourceSets["main"].jniLibs.directories += "src/main/jniLibs"
+
     if (zygiskPayload) {
         sourceSets["main"].java.srcDir("src/zygisk/java")
         // The loader is packaged separately as zygisk/arm64-v8a.so; the packer
