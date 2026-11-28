@@ -36,15 +36,9 @@ object NativeLoader {
      */
     @JvmStatic
     fun bundledLibrary(name: String): java.io.File? = synchronized(loadLock) {
-        val hasPayload = payload != null
-        if (hasPayload) ensureLibrariesLoaded()
-        val file = payloadLibraries[name]?.takeIf { it.isFile }
-        com.Johnny.wcx.utils.WeLogger.i(
-            "NativeLoader",
-            "bundledLibrary($name) payload=$hasPayload loaded=$librariesLoaded " +
-                "keys=${payloadLibraries.keys} file=${file?.absolutePath}",
-        )
-        file
+        if (payload == null) return@synchronized null
+        ensureLibrariesLoaded()
+        payloadLibraries[name]?.takeIf { it.isFile }
     }
 
     /** Directory of the loaded payload libraries, or null on the Xposed path. */
