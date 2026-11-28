@@ -1,0 +1,27 @@
+// Zygisk payload variant, applied from app/build.gradle.kts only when
+// -PwcxZygisk=true is present.
+//
+// Kept in its own Groovy script so the upstream app/build.gradle.kts only
+// carries a short conditional. A script plugin has no typed accessors, which is
+// why this is Groovy rather than Kotlin DSL.
+android {
+    sourceSets {
+        main {
+            // AGP 9 keeps Kotlin and Java source directories separate; the
+            // Zygisk sources are Kotlin, so both are registered.
+            java.srcDir 'src/zygisk/java'
+            kotlin.srcDir 'src/zygisk/java'
+        }
+        legacy {
+            // Overlay removes the Xposed module metadata from the payload manifest.
+            manifest.srcFile 'src/zygisk/AndroidManifest.xml'
+        }
+    }
+    // The payload is only assembled by name; skip the vital lint pass, which
+    // would otherwise complain about the deliberately Xposed-free manifest.
+    lint {
+        checkReleaseBuilds = false
+    }
+}
+
+logger.lifecycle('WCX Zygisk payload build enabled (arm64-v8a only)')

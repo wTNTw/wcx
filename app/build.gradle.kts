@@ -98,7 +98,7 @@ android {
         .get()
 
     if (zygiskPayload) {
-        apply(from = rootProject.file("zygisk/payload.gradle.kts"))
+        apply(from = rootProject.file("zygisk/payload.gradle"))
     } else {
         // assets/xposed_init lives here so the Zygisk payload has no Xposed entry.
         sourceSets["standard"].assets.srcDir("src/xposed/assets")
