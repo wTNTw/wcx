@@ -270,16 +270,23 @@ mod tests {
         // Exercise ownership and actual memory publication on the host, without
         // executing the A64 bytes. Instruction execution is tested with Unicorn.
         let source = memory::CodeMemory::allocate(None, false).unwrap();
+        // A realistic prologue: paciasp + sub sp + stores. The entry patch is a
+        // fixed 24 bytes, so the test compares the whole footprint.
         source
-            .publish(&aarch64::words_bytes(&[aarch64::NOP; 8]))
+            .publish(&aarch64::words_bytes(&[
+                0xd503_233f, 0xd104_43ff, 0xa90b_7bfd, 0xa90c_6ffc, 0xa90d_67fa, 0xa90e_5ff8,
+            ]))
             .unwrap();
         let target = source.executable;
-        let original = memory::read(target, 20, true).unwrap();
+        let original = memory::read(target, aarch64::ENTRY_PATCH_LEN, true).unwrap();
         let backup = install(target, target + 128).unwrap();
         assert!(install(target, target + 256).is_err());
         assert_ne!(memory::read(target, 4, true).unwrap(), original[..4]);
         remove(target).unwrap();
-        assert_eq!(memory::read(target, 20, true).unwrap(), original);
+        assert_eq!(
+            memory::read(target, aarch64::ENTRY_PATCH_LEN, true).unwrap(),
+            original
+        );
         assert!(memory::read(backup, 4, true).is_ok());
         assert!(remove(target).is_err());
         let next = install(target, target + 256).unwrap();
