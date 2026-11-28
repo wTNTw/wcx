@@ -90,14 +90,24 @@ python3 zygisk/package_zip.py verify <zip> --profile magisk
 参考哈希（本轮构建；payload 由**测试密钥**签名，非发布签名）：
 
 ```text
-570a117a…9bbf08  payload.apk（legacy arm64-v8a，含 Zygisk 入口）
-1bc59684…65b0b4  zygisk/arm64-v8a.so
-24ad2527…959c82  wcx-zygisk-magisk.zip
-b2ba7374…b186402 wcx-zygisk-kernelsu.zip
-bc73a465…e30a680 wcx-zygisk-apatch.zip
+2cd65e19…eed672  payload-final.apk（legacy arm64-v8a，含 Zygisk 入口）
+0e96d38f…027ec  zygisk/arm64-v8a.so（含 (deleted) 匹配修复）
+29d36f40…a71136  wcx-zygisk-magisk.zip
+4d84370b…c6b7d   wcx-zygisk-kernelsu.zip
+294be13e…12221c  wcx-zygisk-apatch.zip
 ```
 
-隔离性证据（同一轮构建）：payload APK 含 7 处 `ZygiskEntry` 引用；不带属性的普通 legacy / standard APK 均为 0 处；普通 legacy 仍有 `assets/xposed_init`，standard 仍有 3 个 `META-INF/xposed/*`。
+### 真机结果（KernelSU / Android 16 / 微信 8.0.80）
+
+| 项 | 结果 |
+| --- | --- |
+| 安装 / 激活 / 默认不注入 | 通过 |
+| 目标扫描与启停（`config.sh`） | 通过（新装默认关闭） |
+| 注入范围 | 主进程 + `:push`、`:appbrand*`、`:sandbox`、`:br` 均命中 |
+| 功能 | `FeaturesLoader` 启用完成；`SkipRewardedAds` 等实际生效 |
+| so_hider | `remapped 9 segment(s)`，maps 中 payload 路径计数 0 |
+| 设置入口 | 微信「设置 → 插件 → WCX 设置」可打开 WCX 设置页 |
+| 停用 / 卸载 / 重装回退 | 通过（详见后端报告） |
 
 ### 真机结果（KernelSU / Android 16 / 微信 8.0.80）：失败
 
