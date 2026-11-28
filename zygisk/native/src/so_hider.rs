@@ -75,6 +75,15 @@ fn directory_spellings(dir: &str) -> Vec<String> {
     spellings
 }
 
+/// Removes the kernel's `" (deleted)"` marker from a maps path.
+///
+/// A mapped file that was unlinked afterwards keeps its mapping but the kernel
+/// appends " (deleted)" to the path, which would otherwise defeat the exact
+/// file-name match.
+pub fn strip_deleted_suffix(path: &str) -> &str {
+    path.strip_suffix(" (deleted)").unwrap_or(path)
+}
+
 /// Matches `<dir>/<allow-listed library>` for any accepted spelling of `dir`.
 pub fn is_wcx_library_in_any(path: &str, dirs: &[String]) -> bool {
     dirs.iter().any(|dir| is_wcx_library(path, dir))
@@ -207,7 +216,7 @@ pub fn hide_libraries_in_dir(dir: &str) -> i32 {
     let spellings = directory_spellings(dir);
     let entries: Vec<MapEntry> = read_maps()
         .into_iter()
-        .filter(|e| is_wcx_library_in_any(&e.path, &spellings))
+        .filter(|e| is_wcx_library_in_any(strip_deleted_suffix(&e.path), &spellings))
         .collect();
     if entries.is_empty() {
         logw!("WcxZygisk: so_hider: no payload library mapped in {dir}");
@@ -279,6 +288,15 @@ mod tests {
             &spellings
         ));
         assert!(!is_wcx_library_in_any(&format!("{alias}/libhchat_crash.so"), &spellings));
+    }
+
+    #[test]
+    fn strips_kernel_deleted_marker() {
+        let deleted = format!("{DIR}/libmmkv.so (deleted)");
+        assert_eq!(strip_deleted_suffix(&deleted), format!("{DIR}/libmmkv.so"));
+        assert!(is_wcx_library(strip_deleted_suffix(&deleted), DIR));
+        // A name that merely ends with the words is not a deleted marker alone.
+        assert_eq!(strip_deleted_suffix("a (deleted) b"), "a (deleted) b");
     }
 
     #[test]
