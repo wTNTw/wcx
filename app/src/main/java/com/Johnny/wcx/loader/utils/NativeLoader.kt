@@ -25,6 +25,22 @@ object NativeLoader {
         payload = source
     }
 
+    /**
+     * A native library shipped in the payload APK, by logical name (`dexkit`,
+     * `silk_codec`, ...), or null on the Xposed path where libraries come from
+     * the module APK's own native-library directory.
+     *
+     * Subsystems that resolve libraries from the module APK (Hchat) must ask
+     * here first: a Zygisk payload is loaded by an InMemoryDexClassLoader, which
+     * has no native-library directory at all.
+     */
+    @JvmStatic
+    fun bundledLibrary(name: String): java.io.File? = synchronized(loadLock) {
+        if (payload == null) return@synchronized null
+        ensureLibrariesLoaded()
+        payloadLibraries[name]?.takeIf { it.isFile }
+    }
+
     /** Directory of the loaded payload libraries, or null on the Xposed path. */
     fun payloadLibraryDirectory(): java.io.File? = synchronized(loadLock) {
         payload?.takeIf { librariesLoaded }?.libraryDirectory

@@ -180,6 +180,14 @@ public class NativeLibraryLoader {
 
     private boolean loadLibraryUncached(Context ctx, ClassLoader moduleClassLoader, String soName,
                                         String libName, boolean optional) {
+        // Zygisk payload: libraries live in the module APK copied into app data,
+        // not in the payload ClassLoader's native-library directory.
+        File bundled = com.Johnny.wcx.loader.utils.NativeLoader.bundledLibrary(libName);
+        if (bundled != null) {
+            System.load(bundled.getAbsolutePath());
+            return true;
+        }
+
         String moduleApk = getModuleApkPath(moduleClassLoader);
         String abi = "arm64-v8a";
         String entryPath = "lib/" + abi + "/" + soName;
