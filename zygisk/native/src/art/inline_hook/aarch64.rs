@@ -98,8 +98,9 @@ pub fn entry_patch(target: u64, replacement: u64, pad: bool) -> Result<Vec<u8>, 
     // word 0: a landing pad for guarded pages, otherwise a NOP, so the layout
     // and the literal offset stay identical in both cases.
     emit(&mut code, if pad { BTI_JC } else { NOP });
-    // word 1: ldr x17, [pc + 16] -> literal at offset 20.
-    emit(&mut code, 0x5800_0091);
+    // word 1: ldr x17, [pc + 12]. The instruction sits at offset 4 and the
+    // literal at offset 16, so the displacement is 12 (not 16).
+    emit(&mut code, 0x5800_0071);
     // word 2: br x17 (compatible with a BTI c destination).
     emit(&mut code, 0xd61f_0220);
     // word 3: padding.
@@ -392,10 +393,14 @@ mod tests {
                 .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
                 .collect();
             assert_eq!(words[0], if pad { BTI_JC } else { NOP });
-            // ldr x17 with the literal 16 bytes ahead (word 1 -> word 5).
-            assert_eq!(words[1], 0x5800_0091);
+            assert_eq!(words[1], 0x5800_0071);
             assert_eq!(words[2], 0xd61f_0220);
             assert_eq!(words[3], NOP);
+            // The literal load must resolve to the literal's actual offset (16),
+            // otherwise `br x17` jumps to a garbage address.
+            let ldr_at = 4u64;
+            let displacement = ((u64::from(words[1]) >> 5) & 0x7ffff) * 4;
+            assert_eq!(ldr_at + displacement, 16, "literal offset");
             assert_eq!(
                 u64::from(words[4]) | (u64::from(words[5]) << 32),
                 replacement
