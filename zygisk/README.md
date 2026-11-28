@@ -81,6 +81,12 @@ bash gradlew :app:assembleLegacyRelease -PwcxZygisk=true
 
 打包器会校验 payload 签名可解析，但不会判断签名者是否等于发布者；发布前请用 `apksigner verify --print-certs` 比对证书指纹。
 
+## 与上游同步
+
+改动分三类：`zygisk/` 与 `app/src/zygisk/` 下的全新文件（不冲突）、少数就地修改的上游文件（需手工合并）、以及 zygisk 分支既有的启动链改造。逐文件说明与合并要点见 [`UPSTREAM-SYNC.md`](UPSTREAM-SYNC.md)。
+
+为缩小冲突面，payload 的 Gradle 配置已从 `app/build.gradle.kts` 移到 `zygisk/payload.gradle`（Groovy，脚本插件没有类型安全访问器），上游文件里只留一个 `if` 分支。
+
 ## 与其他注入模块共存
 
 入口补丁固定 24 字节、重入点 `+24`，与常见外来跳板（`ldr x17,#16; br x17; nop; nop; .quad`）长度一致，因此对方在我们的补丁之上再挂一层时，两边的重入点不会错位。修复前 WCX 用 8 字节补丁、重入 `+8`，落在对方补丁区间内 → `SIGILL`。
@@ -110,11 +116,11 @@ bash gradlew :app:assembleLegacyRelease -PwcxZygisk=true
 参考哈希（本轮构建；payload 由**测试密钥**签名，非发布签名）：
 
 ```text
-2cd65e19…eed672  payload-final.apk（legacy arm64-v8a，含 Zygisk 入口）
+55947b22…f37afab  payload-shrunk.apk（legacy arm64-v8a，含 Zygisk 入口）
 70dd5aa5…c03d8e23  zygisk/arm64-v8a.so（24 字节入口补丁 + (deleted) 匹配）
-9fe1b70a…9282866   wcx-zygisk-magisk.zip
-e9793e04…8ac9728   wcx-zygisk-kernelsu.zip
-ac299019…60b4e0e   wcx-zygisk-apatch.zip
+cb744d7a…04b8c644  wcx-zygisk-magisk.zip
+85261127…8ed0ffbe65c  wcx-zygisk-kernelsu.zip
+5b5cdcea…f804147c64  wcx-zygisk-apatch.zip
 ```
 
 ### 真机结果（KernelSU / Android 16 / 微信 8.0.80）

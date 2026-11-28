@@ -282,3 +282,13 @@ Zygisk 部署在当前设备上**可以运行**，前提是同一微信实例只
 修复后实测（FunBox 标记保持开启、WCX 目标启用）：微信 4 进程正常、`Fatal signal` 0 条、`memfd:wcx` 映射 21 段、`so_hider remapped 9`、`FeaturesLoader` 完成（75.9 ms）。
 
 **未完成**：与 LSPosed 同时注入微信的对照实验。该实验需要临时把 LSPosed 某个模块的微信作用域加回去，属于改动用户 LSPosed 配置，需用户确认后再做；本轮只证明了「补丁长度已与外来跳板对齐、单方注入稳定」。
+
+## 附：缩小上游冲突面
+
+为便于跟随上游 `master`，把只与 Zygisk 有关的配置从上游文件里挪出：
+
+- `app/build.gradle.kts` 的 payload 配置（sourceSets / manifest 覆盖 / lint）移到 `zygisk/payload.gradle`，由三行 `if` 应用。首次尝试用 Kotlin DSL 脚本失败——脚本插件拿不到 AGP 的类型安全访问器（`Unresolved reference 'android'`），改用 Groovy 脚本后通过。
+- `XposedStartup.kt` 里的库隐藏逻辑移到 `loader/abc/ModuleLibraryHiding.kt`，上游文件只剩一行调用。
+- 新增 `zygisk/UPSTREAM-SYNC.md`：按「全新文件 / 就地修改 / 既有启动链改造」三类列出每个上游文件、我们的改动与合并要点。
+
+验证：`-PwcxZygisk=true` payload 构建通过（无 Xposed 元数据、7 处 Zygisk 入口引用）；普通 `legacy` 回归通过（`assets/xposed_init` 仍在、Zygisk 引用 0）；真机热替换 payload 后微信 4 进程正常、`Fatal signal` 0、`WcxZygisk` 54 条、payload 库路径在 maps 中为 0。
