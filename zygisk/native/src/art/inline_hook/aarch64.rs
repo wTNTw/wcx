@@ -81,22 +81,31 @@ pub fn words_bytes(words: &[u32]) -> Vec<u8> {
 }
 
 /// Native entry veneer; x17 is caller-saved at a function entry (AAPCS64 IP1).
+///
+/// The footprint is a fixed 24 bytes on purpose. Another framework may install
+/// its own trampoline over this entry later and will resume execution at *its*
+/// footprint length (24 bytes for the common `ldr/br/nop/nop/quad` form). Our
+/// relocated prologue must therefore also resume at +24: with an 8-byte patch
+/// the resume point would fall inside the other patch and execute its literal
+/// pool, which faults with SIGILL. Matching the length lets both hooks chain.
+pub const ENTRY_PATCH_LEN: usize = 24;
+
 pub fn entry_patch(target: u64, replacement: u64, pad: bool) -> Result<Vec<u8>, Error> {
     if target & 3 != 0 || replacement & 3 != 0 || target == 0 || replacement == 0 {
         return Err(Error::InvalidAddress);
     }
-    let mut code = Vec::new();
-    if pad {
-        emit(&mut code, BTI_JC);
-    }
-    let pc = target + code.len() as u64;
-    if let Ok(word) = direct_branch(pc, replacement, false) {
-        emit(&mut code, word);
-    } else {
-        emit(&mut code, 0x5800_0051); // ldr x17, .+8
-        emit(&mut code, 0xd61f_0220); // br x17 (compatible with a BTI c destination)
-        code.extend(replacement.to_le_bytes());
-    }
+    let mut code = Vec::with_capacity(ENTRY_PATCH_LEN);
+    // word 0: a landing pad for guarded pages, otherwise a NOP, so the layout
+    // and the literal offset stay identical in both cases.
+    emit(&mut code, if pad { BTI_JC } else { NOP });
+    // word 1: ldr x17, [pc + 16] -> literal at offset 20.
+    emit(&mut code, 0x5800_0091);
+    // word 2: br x17 (compatible with a BTI c destination).
+    emit(&mut code, 0xd61f_0220);
+    // word 3: padding.
+    emit(&mut code, NOP);
+    code.extend(replacement.to_le_bytes());
+    debug_assert_eq!(code.len(), ENTRY_PATCH_LEN);
     Ok(code)
 }
 
@@ -134,8 +143,8 @@ fn mov_address(code: &mut Vec<u8>, register: u32, address: u64) {
     }
 }
 
-fn reachable_instructions(original: &[u32], source: u64) -> [bool; 5] {
-    let mut reached = [false; 5];
+fn reachable_instructions(original: &[u32], source: u64) -> [bool; 6] {
+    let mut reached = [false; 6];
     let mut pending = vec![0];
     while let Some(index) = pending.pop() {
         if index >= original.len() || reached[index] {
@@ -203,7 +212,7 @@ pub fn relocate(
     let source_end = source
         .checked_add(original.len() as u64 * 4)
         .ok_or(Error::InvalidAddress)?;
-    if original.is_empty() || original.len() > 5 || source & 3 != 0 || destination & 3 != 0 {
+    if original.is_empty() || original.len() > 6 || source & 3 != 0 || destination & 3 != 0 {
         return Err(Error::InvalidAddress);
     }
     let branch_target = |address: u64| -> Result<u64, Error> {
@@ -371,6 +380,43 @@ mod tests {
         0xa90c_6ffc,
         0xa90d_67fa,
     ];
+
+    #[test]
+    fn entry_patch_has_a_fixed_24_byte_footprint() {
+        let replacement = 0x2ef0_74a6_0800u64 & 0xffff_ffff_ffff;
+        for pad in [true, false] {
+            let patch = entry_patch(0x7f00_1050, replacement, pad).expect("encodes");
+            assert_eq!(patch.len(), ENTRY_PATCH_LEN, "pad={pad}");
+            let words: Vec<u32> = patch
+                .chunks_exact(4)
+                .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+                .collect();
+            assert_eq!(words[0], if pad { BTI_JC } else { NOP });
+            // ldr x17 with the literal 16 bytes ahead (word 1 -> word 5).
+            assert_eq!(words[1], 0x5800_0091);
+            assert_eq!(words[2], 0xd61f_0220);
+            assert_eq!(words[3], NOP);
+            assert_eq!(
+                u64::from(words[4]) | (u64::from(words[5]) << 32),
+                replacement
+            );
+        }
+    }
+
+    #[test]
+    fn relocate_accepts_six_words() {
+        // The 24-byte footprint means six instructions must be relocatable.
+        let words = [NOP, NOP, NOP, NOP, NOP, NOP];
+        let code = relocate(
+            &words,
+            0x1000,
+            0x8000,
+            |_| Err(Error::OutOfRange),
+            |_, _| Err(Error::InvalidAddress),
+        )
+        .expect("six words are relocatable");
+        assert!(!code.is_empty());
+    }
 
     #[test]
     fn detects_absolute_jump_trampoline() {
