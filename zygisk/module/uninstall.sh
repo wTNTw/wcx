@@ -2,10 +2,17 @@
 # Remove only module-owned state. WeChat data, its preferences and the module
 # directory itself are handled by the root manager.
 
-rm -f /data/adb/wcx_zygisk/injection-targets.tsv
-rm -f /data/adb/wcx_zygisk/webui.log
-rm -f /data/adb/wcx_zygisk/.injection-targets.scan.*
-rm -f /data/adb/wcx_zygisk/.injection-targets.packages.*
-rm -f /data/adb/wcx_zygisk/.injection-targets.unsorted.*
-rm -f /data/adb/wcx_zygisk/.injection-targets.tmp.*
-rmdir /data/adb/wcx_zygisk 2>/dev/null || true
+STATE_DIR=/data/adb/wcx_zygisk
+
+rm -rf "$STATE_DIR/.lock"
+rm -f "$STATE_DIR/injection-targets.tsv"
+rm -f "$STATE_DIR/webui.log"
+# Temporary files left by an interrupted refresh/set: config.sh names them
+# .scan.$$ / .enabled.$$ / .merged.$$ and their targets-file variants.
+rm -f "$STATE_DIR"/.scan.*
+rm -f "$STATE_DIR"/.enabled.*
+rm -f "$STATE_DIR"/.merged.*
+rm -f "$STATE_DIR"/.injection-targets.*
+rm -f "$STATE_DIR"/.users.*
+rm -f "$STATE_DIR"/.packages.*
+rmdir "$STATE_DIR" 2>/dev/null || true
