@@ -292,3 +292,24 @@ Zygisk 部署在当前设备上**可以运行**，前提是同一微信实例只
 - 新增 `zygisk/UPSTREAM-SYNC.md`：按「全新文件 / 就地修改 / 既有启动链改造」三类列出每个上游文件、我们的改动与合并要点。
 
 验证：`-PwcxZygisk=true` payload 构建通过（无 Xposed 元数据、7 处 Zygisk 入口引用）；普通 `legacy` 回归通过（`assets/xposed_init` 仍在、Zygisk 引用 0）；真机热替换 payload 后微信 4 进程正常、`Fatal signal` 0、`WcxZygisk` 54 条、payload 库路径在 maps 中为 0。
+
+## 附：修复 Hchat 脚本子系统的 native 库加载（Zygisk 特有）
+
+DEX 适配完成后，唯一一条真正属于部署方式的问题是 Hchat 引导失败：
+
+```text
+E/WCX [WCX:HchatBootstrap]: 引导失败: 无法加载 libdexkit.so
+Caused by: UnsatisfiedLinkError: InMemoryDexClassLoader[DexPathList[[dex file "InMemoryDexFile[...]"],
+           nativeLibraryDirectories=[/system/lib64, /system_ext/lib64]]] couldn't find "libdexkit.so"
+```
+
+原因：`h.Hchat.loader.utils.NativeLibraryLoader` 通过解析 ClassLoader 的 `module=<apk>` 字段定位模块 APK，再从 `lib/arm64-v8a/` 里解压库；Zygisk payload 由 `InMemoryDexClassLoader` 加载，没有 `module=` 字段也没有 native 目录，于是回退到 `System.loadLibrary` 而失败。结果整个脚本子系统不启动。
+
+修复（两处小改动，都在既有接缝上）：
+
+1. `com.Johnny.wcx.loader.utils.NativeLoader` 新增 `bundledLibrary(name)`，把 payload APK 里已解压的库按逻辑名暴露出来（Xposed 路径返回 null）。
+2. `NativeLibraryLoader.loadLibraryUncached` 先问 `bundledLibrary(libName)`，命中就 `System.load(绝对路径)` 并返回，未命中再走原有 APK 解压/`loadLibrary` 逻辑。
+
+验证（干净构建，未带诊断日志）：连续 3 次重启微信，`Hchat 脚本子系统引导完成` 均出现，`feature 已安装: wechat_api` / `script_plugin` 都在，`引导失败` 0 次。
+
+副作用说明：子系统真正跑起来后，暴露出 Hchat 自身在 8.0.80 上的问题，例如 `[Hchat:FinderDetail] 视频号详情请求候选数量异常: count=0`（经我们的 Xposed 兼容层转发为 `XposedBridgeShim: module log`）。这类错误与部署方式无关，属微信版本漂移。

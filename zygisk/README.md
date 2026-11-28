@@ -116,11 +116,11 @@ bash gradlew :app:assembleLegacyRelease -PwcxZygisk=true
 参考哈希（本轮构建；payload 由**测试密钥**签名，非发布签名）：
 
 ```text
-55947b22…f37afab  payload-shrunk.apk（legacy arm64-v8a，含 Zygisk 入口）
-70dd5aa5…c03d8e23  zygisk/arm64-v8a.so（24 字节入口补丁 + (deleted) 匹配）
-cb744d7a…04b8c644  wcx-zygisk-magisk.zip
-85261127…8ed0ffbe65c  wcx-zygisk-kernelsu.zip
-5b5cdcea…f804147c64  wcx-zygisk-apatch.zip
+5d2c73b2…98b8d5989a      payload-clean.apk（legacy arm64-v8a）
+70dd5aa5…c03d8e23        zygisk/arm64-v8a.so（24 字节入口补丁 + (deleted) 匹配）
+a08dab47…f431af892d1a    wcx-zygisk-magisk.zip
+ea0dea60…1e835d41e8c3    wcx-zygisk-kernelsu.zip
+4a5c0b2b…5c6947138f9a    wcx-zygisk-apatch.zip
 ```
 
 ### 真机结果（KernelSU / Android 16 / 微信 8.0.80）
