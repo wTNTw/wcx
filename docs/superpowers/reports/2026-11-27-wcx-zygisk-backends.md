@@ -256,3 +256,29 @@ Zygisk 部署在当前设备上**可以运行**，前提是同一微信实例只
 本轮所有 payload 与三份管理器 ZIP 均使用**测试密钥**签名（`CN=WCX Test Build, OU=Not a release key`，SHA-256 `a2e07858e00376fb6454f08408b4bc699a751da2d3e31044fc2a1a5a37efee84`）。构建机上没有任何项目签名材料，因此未做正式签名。
 
 发布前必须用项目固定 keystore 重新构建 payload 并重打包，命令与环境变量见 `zygisk/README.md` 的「签名」一节；打包器的签名校验只验证可解析性，不验证签名者身份，需另行比对证书指纹。
+
+## 附：与其他注入模块共存（入口补丁长度对齐）
+
+此前把崩溃归因于 `FunBox For Zygisk`，**归因错误**，需要更正：
+
+- 该设备上 `funbox` 模块虽处于启用状态、`/data/adb/modules/funbox/zygisk/arm64-v8a.so` 存在、`/data/adb/funbox/enablewx` 也存在，但微信进程里既没有它的库映射也没有 `/data/adb/funbox/main.apk` 相关映射 —— 它实际没有注入微信。
+- 真正写入那个 24 字节入口跳板的是 **LSPosed**（当时 `cc.csxcl.fkcoloros`、`com.mockrun.app` 两个模块作用域含微信）。取消微信作用域后，`MarkVisiblyInitialized` 入口恢复干净，崩溃随之消失。
+
+因此共存问题的本质是**入口补丁footprint 不对齐**：
+
+| 注入器 | 入口补丁 | 重入点 |
+| --- | --- | --- |
+| 对方（LSPosed 等） | 24 字节 `ldr x17,#16; br x17; nop; nop; .quad` | `+24` |
+| WCX（修复前） | 8 字节 `BTI_JC; B` | `+8` |
+
+对方后装时会读走 24 字节；WCX 的备份执行完 `paciasp/sub sp` 后跳回 `+8`，正好落在对方补丁里，继续执行到 `+16` 就是对方的字面量 → `SIGILL`。WeKit/WeKite 不冲突正是因为它的跳板同样长 24 字节，双方重入点一致。
+
+修复：
+
+- `entry_patch` 固定输出 **24 字节**（`[BTI_JC|NOP][ldr x17,#12][br x17][NOP][quad]`），重入点 `+24`，与常见外来跳板一致。
+- 重定位窗口由 5 个字扩到 **6 个字**（24 字节），使这段补丁本身可被完整搬迁。
+- 过程中修掉一个自己引入的缺陷：字面量位移写成 16 导致 `br x17` 跳到垃圾地址（`SIGBUS BUS_ADRALN`），改为 12（ldr 在 +4、字面量在 +16），并在单元测试里加了位移校验。
+
+修复后实测（FunBox 标记保持开启、WCX 目标启用）：微信 4 进程正常、`Fatal signal` 0 条、`memfd:wcx` 映射 21 段、`so_hider remapped 9`、`FeaturesLoader` 完成（75.9 ms）。
+
+**未完成**：与 LSPosed 同时注入微信的对照实验。该实验需要临时把 LSPosed 某个模块的微信作用域加回去，属于改动用户 LSPosed 配置，需用户确认后再做；本轮只证明了「补丁长度已与外来跳板对齐、单方注入稳定」。
