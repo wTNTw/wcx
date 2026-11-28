@@ -4,7 +4,7 @@ import android.annotation.SuppressLint
 import android.app.Application
 import android.os.Build
 import com.Johnny.wcx.loader.abc.IHookBridge
-import com.Johnny.wcx.loader.abc.IModuleLibraryHider
+import com.Johnny.wcx.loader.abc.ModuleLibraryHiding
 import com.Johnny.wcx.loader.abc.ILoaderService
 import com.Johnny.wcx.utils.WeLogger
 import org.lsposed.hiddenapibypass.HiddenApiBypass
@@ -28,22 +28,12 @@ internal object XposedStartup {
 
         ensureHiddenApiAccess()
         StartupAgent.initializeHost(modulePath, application)
-        hideModuleLibraries(hookBridge)
+        ModuleLibraryHiding.hideIfSupported(hookBridge)
         WeLauncher.init(application)
 
         runCatching {
             application.dataDir.toPath().resolve("app_qqprotect").deleteRecursively()
         }.onFailure { WeLogger.e(TAG, "failed to delete app_qqprotect", it) }
-    }
-
-    private fun hideModuleLibraries(hookBridge: IHookBridge?) {
-        val hider = hookBridge as? IModuleLibraryHider ?: return
-        runCatching { hider.hideLoadedModuleLibraries() }
-            .onSuccess { hidden ->
-                if (hidden) WeLogger.i(TAG, "hid loaded module libraries")
-                else WeLogger.w(TAG, "module native-library hiding was incomplete")
-            }
-            .onFailure { WeLogger.e(TAG, "failed to hide module libraries", it) }
     }
 
     private fun ensureHiddenApiAccess() {

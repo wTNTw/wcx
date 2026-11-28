@@ -89,35 +89,23 @@ android {
         }
     }
 
-    // The Zygisk deployment adds its entry, bridge and payload support to the
-    // `main` source set only when explicitly requested, so ordinary builds keep
-    // exactly the same inputs and task graph. Build a payload with
+    // The Zygisk deployment lives in its own source set and Gradle script; only
+    // this conditional is upstream-facing. Build a payload with
     //   ./gradlew :app:assembleLegacyRelease -PwcxZygisk=true
-    // (the `legacy` flavor already excludes META-INF/xposed/*).
     val zygiskPayload = providers.gradleProperty("wcxZygisk")
         .map(String::toBoolean)
         .orElse(false)
         .get()
 
-    if (!zygiskPayload) {
+    if (zygiskPayload) {
+        apply(from = rootProject.file("zygisk/payload.gradle.kts"))
+    } else {
+        // assets/xposed_init lives here so the Zygisk payload has no Xposed entry.
         sourceSets["standard"].assets.srcDir("src/xposed/assets")
         sourceSets["legacy"].assets.srcDir("src/xposed/assets")
     }
 
     sourceSets["main"].jniLibs.directories += "src/main/jniLibs"
-
-    if (zygiskPayload) {
-        // AGP 9 keeps Kotlin and Java source directories separate; the Zygisk
-        // sources are Kotlin, so both are registered.
-        sourceSets["main"].java.srcDir("src/zygisk/java")
-        sourceSets["main"].kotlin.srcDir("src/zygisk/java")
-        // Overlay removes the Xposed module metadata from the payload manifest.
-        sourceSets["legacy"].manifest.srcFile("src/zygisk/AndroidManifest.xml")
-        // The loader is packaged separately as zygisk/arm64-v8a.so; the packer
-        // takes the arm64-v8a payload split by explicit path.
-        lint { checkReleaseBuilds = false }
-        logger.lifecycle("WCX Zygisk payload build enabled (arm64-v8a only)")
-    }
 
     var foundKeystore = false
 
