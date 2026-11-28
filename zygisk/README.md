@@ -81,6 +81,12 @@ bash gradlew :app:assembleLegacyRelease -PwcxZygisk=true
 
 打包器会校验 payload 签名可解析，但不会判断签名者是否等于发布者；发布前请用 `apksigner verify --print-certs` 比对证书指纹。
 
+## 与其他注入模块共存
+
+入口补丁固定 24 字节、重入点 `+24`，与常见外来跳板（`ldr x17,#16; br x17; nop; nop; .quad`）长度一致，因此对方在我们的补丁之上再挂一层时，两边的重入点不会错位。修复前 WCX 用 8 字节补丁、重入 `+8`，落在对方补丁区间内 → `SIGILL`。
+
+前提条件：**WCX 必须比对方更早安装入口补丁**（`postAppSpecialize` 早于应用内的框架初始化，通常满足）。若 WCX 启动时发现入口已有外来跳板，会拒绝 hook 并如实报错，而不是覆盖对方的链。
+
 ## 已知边界
 
 - 仅 ARM64、仅微信。
@@ -105,10 +111,10 @@ bash gradlew :app:assembleLegacyRelease -PwcxZygisk=true
 
 ```text
 2cd65e19…eed672  payload-final.apk（legacy arm64-v8a，含 Zygisk 入口）
-0e96d38f…027ec  zygisk/arm64-v8a.so（含 (deleted) 匹配修复）
-29d36f40…a71136  wcx-zygisk-magisk.zip
-4d84370b…c6b7d   wcx-zygisk-kernelsu.zip
-294be13e…12221c  wcx-zygisk-apatch.zip
+70dd5aa5…c03d8e23  zygisk/arm64-v8a.so（24 字节入口补丁 + (deleted) 匹配）
+9fe1b70a…9282866   wcx-zygisk-magisk.zip
+e9793e04…8ac9728   wcx-zygisk-kernelsu.zip
+ac299019…60b4e0e   wcx-zygisk-apatch.zip
 ```
 
 ### 真机结果（KernelSU / Android 16 / 微信 8.0.80）
