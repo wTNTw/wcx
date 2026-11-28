@@ -233,3 +233,20 @@ Zygisk 部署在当前设备上**可以运行**，前提是同一微信实例只
 | 三份管理器 ZIP（重新打包 + 校验） | magisk `92c1fcaf…`、kernelsu `1b49d990…`、apatch `cd3271bf…`；loader `1bc59684…` |
 
 结论：Zygisk 部署在真机上可用（注入、功能、so_hider、设置入口均已实测），入口行为与普通 APK 部署一致，不需要额外代码。仍待完成：hook 解绑/热重载与卸载回退的真机回归、正式签名出包。
+
+## 附：设备侧回归结论（停用 / 卸载 / 重装）
+
+在 OnePlus PJZ110（Android 16 / KernelSU / 微信 8.0.80）上逐项验证：
+
+| 场景 | 操作 | 结果 |
+| --- | --- | --- |
+| 停用 | `touch /data/adb/modules/wcx_zygisk/disable` + 重启 | 微信 5 个进程正常；`WcxZygisk` 日志 0 条、`WCX` 日志 0 条 → 完全不注入 |
+| 卸载 | `ksud module uninstall wcx_zygisk` + 重启 | 模块目录移除；微信 4 个进程正常；`WcxZygisk` 0 条；`memfd:wcx` 映射 0 → 回到未加载状态 |
+| 全新安装 | `ksud module install wcx-zygisk-kernelsu.zip` + 重启 | loader/payload 就位；`config.sh refresh` 扫出 `0 com.tencent.mm 0`（默认关闭）；`set … 1` 后 6 个进程全部注入 |
+
+回归中发现并修复的两个缺陷：
+
+1. **`uninstall.sh` 清理不干净**：临时文件实际叫 `.scan.$$` / `.enabled.$$` / `.merged.$$`，脚本里写的是 `.injection-targets.*`，导致中断残留的文件留在 `/data/adb/wcx_zygisk` 里、`rmdir` 失败。修正后再次卸载，状态目录被完整删除。
+2. **`so_hider` 遇到 `" (deleted)"` 标记失效**：被 unlink 后仍映射的文件，内核会在 maps 路径后追加 `" (deleted)"`，精确文件名匹配因而失效，该次启动 9 个段一个都没隐藏。修正为比对前剥离该后缀，复测 `remapped 9 segment(s)`、主进程 maps 中 `wcx-native` 路径数为 0。个别段仍可能重映射失败（本轮出现一次 `libdexkit.so`），此时只记录该段并返回不完整结果，不影响其余段。
+
+未覆盖：`hook` 解绑/热重载。Zygisk 部署没有 libxposed 的 API102 热重载通道，`ArtHookBridge` 的解绑语义由 `ArtHookBridgeRuntime` 保证（保留 LSPlant hook、移除回调后直接走备份），没有对应的外部触发入口可做黑盒验证。
