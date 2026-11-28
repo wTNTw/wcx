@@ -39,7 +39,7 @@ object NativeLoader {
         val hasPayload = payload != null
         if (hasPayload) ensureLibrariesLoaded()
         val file = payloadLibraries[name]?.takeIf { it.isFile }
-        WeLogger.i(
+        com.Johnny.wcx.utils.WeLogger.i(
             "NativeLoader",
             "bundledLibrary($name) payload=$hasPayload loaded=$librariesLoaded " +
                 "keys=${payloadLibraries.keys} file=${file?.absolutePath}",
