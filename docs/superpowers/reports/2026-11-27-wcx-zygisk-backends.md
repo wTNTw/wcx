@@ -203,3 +203,19 @@ Zygisk 部署在当前设备上**可以运行**，前提是同一微信实例只
 状态：代码完成、payload 构建通过（payload 内含新入口标记）。**端到端验证未完成** —— 需要一次 zygote 未崩溃的干净启动（见上节），当时设备进入异常状态，微信的 MAIN/LAUNCHER intent 无法解析（`am start` 返回 `Error type 3`），故未能确认「+」菜单里出现该项。
 
 设备侧排查记录：在 `touch /data/adb/modules/wcx_zygisk/disable` 停用本模块后重启，微信依旧 `No activity found`，说明该现象与本模块无关；同期 `logcat -b crash` 有 `init` 的 `SIGABRT` 记录，`screencap` 返回全黑帧（屏幕状态报告为 ON）。这些问题超出本模块范围，需要单独恢复设备。
+
+## 附：设置入口结论修正（实测通过）
+
+上节「设置入口未出现」的判断是**错误的**：当时截图时 `WeSettingsInjector` 的 DEX 委托尚未解析完成（该 feature 是 `ApiFeature` + `IResolveDex`，`FeaturesLoader` 允许它在缓存不完整时先启动）。缓存解析完成后入口正常注入。
+
+实测（WCX 注入状态、微信 8.0.80）：
+
+```text
+微信「我」→ 设置 → 顶部新增分组「插件」→「WCX 设置」
+点击后打开 WCX 自身设置页：模块已激活 v348 (348)、101 已启用 / 309 全部功能 / 22 分类、
+模块自检、脚本插件，底部 主页/功能/日志/设置 四个 Tab 均可渲染
+```
+
+入口来自 `features/api/ui/WeSettingsInjector`（`@Feature(name = "设置模块入口")`），它同时提供三条路径：hook `LauncherUI`、legacy `SettingsUI.initView`、modern `SettingGroup*`，另有在聊天输入框键入 `#wcx` 直接打开的快捷通道。
+
+因此**不需要额外入口**：先前为「payload 无应用图标」新增的 `ZygiskMenuEntry`（首页「+」菜单项）已删除，`WeHomeScreenPopupMenuApi` 里的临时诊断日志也已移除。Zygisk 部署与普通 APK 部署在入口行为上保持一致。
