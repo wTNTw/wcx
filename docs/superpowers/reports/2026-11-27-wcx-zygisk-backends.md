@@ -250,3 +250,9 @@ Zygisk 部署在当前设备上**可以运行**，前提是同一微信实例只
 2. **`so_hider` 遇到 `" (deleted)"` 标记失效**：被 unlink 后仍映射的文件，内核会在 maps 路径后追加 `" (deleted)"`，精确文件名匹配因而失效，该次启动 9 个段一个都没隐藏。修正为比对前剥离该后缀，复测 `remapped 9 segment(s)`、主进程 maps 中 `wcx-native` 路径数为 0。个别段仍可能重映射失败（本轮出现一次 `libdexkit.so`），此时只记录该段并返回不完整结果，不影响其余段。
 
 未覆盖：`hook` 解绑/热重载。Zygisk 部署没有 libxposed 的 API102 热重载通道，`ArtHookBridge` 的解绑语义由 `ArtHookBridgeRuntime` 保证（保留 LSPlant hook、移除回调后直接走备份），没有对应的外部触发入口可做黑盒验证。
+
+## 附录：产物签名状态
+
+本轮所有 payload 与三份管理器 ZIP 均使用**测试密钥**签名（`CN=WCX Test Build, OU=Not a release key`，SHA-256 `a2e07858e00376fb6454f08408b4bc699a751da2d3e31044fc2a1a5a37efee84`）。构建机上没有任何项目签名材料，因此未做正式签名。
+
+发布前必须用项目固定 keystore 重新构建 payload 并重打包，命令与环境变量见 `zygisk/README.md` 的「签名」一节；打包器的签名校验只验证可解析性，不验证签名者身份，需另行比对证书指纹。

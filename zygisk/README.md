@@ -67,6 +67,20 @@ python3 zygisk/package_zip.py verify <zip> --profile magisk
 
 三种管理器都只接受 `com.tencent.mm` / `com.tencent.mm.*`，其他包、系统进程和未启用实例一律不初始化。
 
+## 签名
+
+本轮产物用**测试密钥**签名（`CN=WCX Test Build`），只用于内部验证，不能作为发布件。正式出包必须使用项目固定 keystore，按 `app/build.gradle.kts` 的解析顺序提供：
+
+```bash
+export WEKIT_KEYSTORE_FILE=/path/to/wcx-keystore.jks
+export WEKIT_KEYSTORE_PASSWORD=...
+export WEKIT_KEY_ALIAS=wcx
+export WEKIT_KEY_PASSWORD=...
+bash gradlew :app:assembleLegacyRelease -PwcxZygisk=true
+```
+
+打包器会校验 payload 签名可解析，但不会判断签名者是否等于发布者；发布前请用 `apksigner verify --print-certs` 比对证书指纹。
+
 ## 已知边界
 
 - 仅 ARM64、仅微信。
