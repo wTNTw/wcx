@@ -219,3 +219,17 @@ Zygisk 部署在当前设备上**可以运行**，前提是同一微信实例只
 入口来自 `features/api/ui/WeSettingsInjector`（`@Feature(name = "设置模块入口")`），它同时提供三条路径：hook `LauncherUI`、legacy `SettingsUI.initView`、modern `SettingGroup*`，另有在聊天输入框键入 `#wcx` 直接打开的快捷通道。
 
 因此**不需要额外入口**：先前为「payload 无应用图标」新增的 `ZygiskMenuEntry`（首页「+」菜单项）已删除，`WeHomeScreenPopupMenuApi` 里的临时诊断日志也已移除。Zygisk 部署与普通 APK 部署在入口行为上保持一致。
+
+## 附：收尾构建与回归（清理后）
+
+删除多余的首页「+」菜单入口与诊断日志后重新构建验证：
+
+| 项目 | 结果 |
+| --- | --- |
+| payload（`-PwcxZygisk=true`，legacy，arm64-v8a） | 构建通过，SHA-256 `2cd65e19…eed672`，不含 `ZygiskMenuEntry` |
+| 真机设置入口 | 微信「设置 → 插件 → WCX 设置」正常显示并可打开 WCX 设置页（模块已激活 v348、101 已启用） |
+| 普通 `standard` 回归 | 含 `assets/xposed_init` + 3 个 `META-INF/xposed/*`，Zygisk 代码引用 0 |
+| 普通 `legacy` 回归 | 含 `assets/xposed_init`，Zygisk 代码引用 0 |
+| 三份管理器 ZIP（重新打包 + 校验） | magisk `92c1fcaf…`、kernelsu `1b49d990…`、apatch `cd3271bf…`；loader `1bc59684…` |
+
+结论：Zygisk 部署在真机上可用（注入、功能、so_hider、设置入口均已实测），入口行为与普通 APK 部署一致，不需要额外代码。仍待完成：hook 解绑/热重载与卸载回退的真机回归、正式签名出包。
